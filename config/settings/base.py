@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.goods",
     "apps.finance",
     "apps.purchases",
+    "apps.seller_finance",
 ]
 
 MIDDLEWARE = [
@@ -149,6 +150,7 @@ SPECTACULAR_SETTINGS = {
         "AttendanceEventTypeEnum": "apps.attendance.models.EventType",
         "SellerStatusEnum": "apps.sellers.models.SellerStatus",
         "AccountStatusEnum": "apps.finance.models.AccountStatus",
+        "PayoutStatusEnum": "apps.seller_finance.models.PayoutStatus",
     },
     # Serve Swagger UI assets locally: the server may run without internet access.
     "SWAGGER_UI_DIST": "SIDECAR",

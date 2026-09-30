@@ -12,6 +12,7 @@ from apps.goods import services as goods
 from apps.goods.exceptions import InsufficientStock
 from apps.goods.models import Good, MovementKind
 from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
+from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus, ServicePosition
 
 from .exceptions import (
@@ -142,9 +143,9 @@ def confirm_purchase(
 
     1. Resolve the card and verify the PIN (own transaction, so failures are counted).
     2. One atomic transaction, locking rows always in the same order to avoid deadlocks
-       (purchase → card → account → goods by id):
+       (purchase → card → account → goods by id → seller account):
        re-check card/developer/seller, check goods and stock, fix prices, deduct stock,
-       debit the account, mark the purchase CONFIRMED, write the audit log.
+       debit the developer, credit the seller, mark the purchase CONFIRMED, audit.
     Any failure rolls everything back. A retry with the same Idempotency-Key returns the
     already-confirmed purchase.
     """
@@ -220,6 +221,8 @@ def confirm_purchase(
             description=f"Purchase at {purchase.seller.name}",
             reference=reference,
         )
+        # 100% of the sale goes to the seller (no commission).
+        credit_sale(seller=position.seller, amount=total, reference=reference, actor=actor)
 
         purchase.status = PurchaseStatus.CONFIRMED
         purchase.developer = developer

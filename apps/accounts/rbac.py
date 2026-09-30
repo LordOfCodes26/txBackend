@@ -38,6 +38,10 @@ PERMISSIONS: dict[str, str] = {
     "finance.view": "View developer accounts and ledgers",
     "finance.deposit": "Deposit funds to developer accounts",
     "finance.adjust": "Make manual balance adjustments",
+    # Seller finance
+    "seller_finance.view": "View seller balances, ledgers and payouts",
+    "seller_finance.payout": "Request on behalf of sellers, approve, reject and pay payouts",
+    "seller_finance.adjust": "Make manual seller balance adjustments",
     # Purchases
     "purchase.view": "View purchases",
     "purchase.create": "Create purchases",
@@ -90,12 +94,12 @@ ROLES: dict[str, RoleSpec] = {
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
-        _prefixed("finance") | {"developer.view", "purchase.view", "audit.view"},
+        _prefixed("finance", "seller_finance") | {"developer.view", "purchase.view", "audit.view"},
     ),
     Roles.SELLER_MANAGER: RoleSpec(
         "Seller manager",
         "Manages sellers and goods",
-        _prefixed("seller", "good") | {"purchase.view"},
+        _prefixed("seller", "good") | {"purchase.view", "seller_finance.view"},
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.SELLER: RoleSpec("Seller", "Self-service access to own goods and sales"),

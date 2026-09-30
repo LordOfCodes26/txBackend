@@ -89,8 +89,11 @@ def stock(good):
 
 
 def assert_books_balanced():
+    from apps.seller_finance.services import seller_ledger_mismatches
+
     assert finance.ledger_mismatches() == []
     assert goods.stock_mismatches() == []
+    assert seller_ledger_mismatches() == []
 
 
 # --- Happy path -------------------------------------------------------------------
@@ -128,6 +131,9 @@ def test_full_till_flow(till, world):
     )
     assert not InventoryMovement.objects.filter(good=world.coffee).exists()
     assert AuditLog.objects.filter(action="purchase.confirmed", entity_id=str(pid)).exists()
+    seller_account = world.seller.account
+    assert seller_account.balance == Decimal("10.50")
+    assert seller_account.transactions.get().reference == f"purchase:{pid}"
     assert_books_balanced()
 
 

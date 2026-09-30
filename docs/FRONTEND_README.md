@@ -138,6 +138,9 @@ const can = (code: string) => me.permissions.includes(code);
 | `finance.view` | All developer accounts and transactions |
 | `finance.deposit` | Deposit money to developer accounts |
 | `finance.adjust` | Manual corrections; freeze, unfreeze, close, reopen accounts; reset PINs |
+| `seller_finance.view` | All seller balances, ledgers and payouts |
+| `seller_finance.payout` | Request payouts for any seller; approve, reject, mark processing, pay |
+| `seller_finance.adjust` | Manual seller balance corrections |
 | `purchase.view` | All purchases |
 | `purchase.create` / `.confirm` / `.cancel` | Run any seller's till (normally sellers use their own; see below) |
 
@@ -147,8 +150,8 @@ Default roles, which admins can change:
 |---|---|
 | BOSS | Everything |
 | MANAGER | Developers, RFID, attendance, user list, audit log, seller/goods view |
-| FINANCE_MANAGER | Finance, developer view, purchase view, audit log |
-| SELLER_MANAGER | Sellers, goods, purchase view |
+| FINANCE_MANAGER | Developer and seller finance, developer view, purchase view, audit log |
+| SELLER_MANAGER | Sellers, goods, purchase view, seller finance view |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
 | SELLER | Nothing global; see *Seller self-service* below |
 
@@ -159,7 +162,8 @@ If `permissions` is empty, the user only has self-service pages (section 7).
 A user linked to an **ACTIVE** seller manages that seller's own catalogue without any
 global permission: service positions, goods, images, stock and stock history. The
 same endpoints serve both cases, and the same goes for the **till** (purchases at their
-own service positions); the backend narrows lists to the seller's own
+own service positions) and **their own money** (balance, ledger, requesting and cancelling
+payouts); the backend narrows lists to the seller's own
 objects and returns `404` for other sellers' objects. To tell whether the user is a
 seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
 SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
@@ -211,7 +215,8 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
 `PIN_NOT_SET`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
-`details: {locked_until}`), `CONFLICT`.
+`details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
+`INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`, `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -244,7 +249,8 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
 
 ### Money-moving requests need an `Idempotency-Key`
 
-Deposits, adjustments and purchase confirmation require an `Idempotency-Key` header:
+Deposits, adjustments, purchase confirmation and payout requests require an
+`Idempotency-Key` header:
 
 ```ts
 // Create the key once per user action, e.g. when the confirm dialog opens,
@@ -450,6 +456,40 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
 - `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
 
+### Seller finance and payouts
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/seller-finance/accounts/` | `seller_finance.view` | Every seller's `balance`, `reserved`, `available_balance` |
+| GET | `/seller-finance/accounts/me/` | logged in | The seller's own account |
+| GET | `/seller-finance/transactions/` | `seller_finance.view`, or own seller | Ledger. Filters: `seller`, `kind`, `reference`, `created_after`, `created_before` |
+| GET | `/seller-finance/payouts/` | `seller_finance.view`, or own seller | Filters: `seller`, `status`, `created_after`, `created_before` |
+| POST | `/seller-finance/payouts/` | own seller, or `seller_finance.payout` | `{amount, note?}` (+ `seller` for finance staff) + `Idempotency-Key` |
+| POST | `/seller-finance/payouts/{id}/approve/` | `seller_finance.payout` | Not by the requester |
+| POST | `/seller-finance/payouts/{id}/processing/` | `seller_finance.payout` | Optional step |
+| POST | `/seller-finance/payouts/{id}/pay/` | `seller_finance.payout` | `{payment_reference}` (transfer or receipt no.) |
+| POST | `/seller-finance/payouts/{id}/reject/` | `seller_finance.payout` | `{reason}` |
+| POST | `/seller-finance/payouts/{id}/cancel/` | own seller, or `seller_finance.payout` | Only while REQUESTED |
+| POST | `/seller-finance/adjustments/` | `seller_finance.adjust` | `{seller, amount, reason}`, signed + `Idempotency-Key` |
+
+- Every confirmed purchase credits its seller with the full amount (no commission), in
+  the same transaction that charges the developer. Ledger `kind`: `SALE` (+),
+  `PAYOUT` (−), `ADJUSTMENT` (±); `reference` is `purchase:<id>` or `payout:<id>`.
+- Payout `status`: `REQUESTED` → `APPROVED` → (`PROCESSING` →) `PAID`, or `REJECTED` /
+  `CANCELLED`. Show the allowed buttons per status:
+
+  | Status | Seller | Finance |
+  |---|---|---|
+  | REQUESTED | Cancel | Approve (not own request), Reject |
+  | APPROVED | none | Processing, Pay, Reject |
+  | PROCESSING | none | Pay, Reject |
+  | PAID / REJECTED / CANCELLED | none | none |
+
+- **Open payouts reserve money:** `available_balance` = `balance` − `reserved`. A request
+  above `available_balance` fails with `INSUFFICIENT_SELLER_BALANCE`. The balance itself
+  drops only when a payout is PAID.
+- Hide Approve on payouts the logged-in user requested (`requested_by` = `me.id`).
+
 ### Audit log
 
 | Method | Path | Permission | Notes |
@@ -480,6 +520,8 @@ before → after table.
 | My balance, statement and PIN | `finance/accounts/me/`, `finance/transactions/me/`, `finance/accounts/me/pin/` | anyone with a developer profile |
 | **Till** (choose position, build bucket, card + PIN confirm) | `purchases/`, `goods/?service_position=&is_active=true&in_stock=true` | active seller |
 | Sales history | `purchases/?status=CONFIRMED` | active seller, or `purchase.view` |
+| My earnings and payouts (seller) | `seller-finance/accounts/me/`, `seller-finance/transactions/`, `seller-finance/payouts/` | active seller |
+| Seller balances and payout queue (finance) | `seller-finance/accounts/`, `seller-finance/payouts/?status=REQUESTED` | `seller_finance.view` |
 | My purchases | `purchases/me/` | anyone with a developer profile |
 | Audit log | `audit-logs/` | `audit.view` |
 
@@ -522,6 +564,6 @@ The frontend will run on the same offline server as the backend:
 These APIs are still to come; don't build screens against guesses. Permission codes for
 them already exist in `me.permissions`.
 
-- Seller accounts and payouts, approvals
+- Generic approvals (e.g. for large deposits or adjustments)
 
 Ask the backend team for the current state before starting on any of these.
