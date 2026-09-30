@@ -135,7 +135,10 @@ const can = (code: string) => me.permissions.includes(code);
 | `seller.view` / `.create` / `.update` | Sellers and all service positions / create sellers / edit sellers and positions |
 | `good.view` / `.create` / `.update` / `.delete` | All goods and stock history / create / edit and images / delete |
 | `good.stock` | Restock, write off and adjust stock |
-| `finance.*`, `purchase.*` | Reserved for modules not built yet |
+| `finance.view` | All developer accounts and transactions |
+| `finance.deposit` | Deposit money to developer accounts |
+| `finance.adjust` | Manual corrections; freeze, unfreeze, close, reopen accounts |
+| `purchase.*` | Reserved for the purchase module (not built yet) |
 
 Default roles, which admins can change:
 
@@ -200,7 +203,10 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `DEVELOPER_ALREADY_HAS_CARD`, `CARD_NOT_ASSIGNED`, `DEVELOPER_NOT_ASSIGNABLE`,
 `INVALID_CARD_TRANSITION`, `RECORD_ALREADY_VOID`, `POSITION_HAS_GOODS`, `INSUFFICIENT_STOCK`
 (`details: {available, requested}`), `STOCK_NOT_TRACKED`, `NO_STOCK_CHANGE`,
-`TOO_MANY_IMAGES`, `SELLER_PROFILE_NOT_FOUND`, `CONFLICT`.
+`TOO_MANY_IMAGES`, `SELLER_PROFILE_NOT_FOUND`, `INSUFFICIENT_BALANCE`
+(`details: {balance, required}`), `ACCOUNT_NOT_ACTIVE`, `DEPOSIT_LIMIT_EXCEEDED`
+(`details: {max}`), `SELF_TRANSACTION_FORBIDDEN`, `IDEMPOTENCY_KEY_REUSED`,
+`INVALID_ACCOUNT_TRANSITION`, `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -230,6 +236,22 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
   They return the updated object, so replace your cached copy with it.
 - Nothing important is hard-deleted. `DELETE /developers/{id}/` is a soft delete;
   users are deactivated with `PATCH {"is_active": false}`; cards are retired.
+
+### Money-moving requests need an `Idempotency-Key`
+
+Deposits and adjustments (and purchases later) require an `Idempotency-Key` header:
+
+```ts
+// Create the key once per user action, e.g. when the confirm dialog opens,
+// and reuse the same key if you retry that action.
+const idempotencyKey = crypto.randomUUID();
+await api.post("/finance/deposits/", body, { headers: { "Idempotency-Key": idempotencyKey } });
+```
+
+- Same key, same request again (retry after a timeout, double-click): the backend returns
+  the **original** result with `200` instead of `201`, and no money moves twice.
+- Same key, different request: `409 IDEMPOTENCY_KEY_REUSED`.
+- **Never** generate a new key for an automatic retry; only for a new user action.
 
 ### Request IDs
 
@@ -353,6 +375,31 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 - Images: JPEG, PNG or WebP, max 5 MB, max 10 per good. `image` in responses is a full
   URL. Lowest `position` is the main image.
 
+### Developer accounts and money
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/finance/accounts/` | `finance.view` | Filters: `status`, `developer`, `department`, `balance_min`, `balance_max`. Search: developer name, number, email. Ordering: `balance`, `developer__full_name`, `updated_at` |
+| GET | `/finance/accounts/{id}/` | `finance.view` | |
+| GET | `/finance/accounts/me/` | logged in | Own balance (needs a developer profile) |
+| POST | `/finance/accounts/{id}/freeze/`, `/unfreeze/`, `/close/`, `/reopen/` | `finance.adjust` | `{reason?}`. Close only with a zero balance |
+| GET | `/finance/transactions/` | `finance.view` | Ledger. Filters: `account`, `developer`, `kind`, `reference`, `created_after`, `created_before` |
+| GET | `/finance/transactions/me/` | logged in | Own ledger |
+| POST | `/finance/deposits/` | `finance.deposit` | `{developer, amount, description?}` + `Idempotency-Key` header |
+| POST | `/finance/adjustments/` | `finance.adjust` | `{developer, amount, reason}`; amount is signed (`"-5.00"` debits) + `Idempotency-Key` |
+
+- Every developer has exactly one account, created automatically.
+- Account `status`: `ACTIVE`; `FROZEN` (can receive money, cannot spend); `CLOSED`.
+- Transaction `kind`: `DEPOSIT` (+), `PURCHASE` (−), `REFUND` (+), `ADJUSTMENT` (±). `amount`
+  is signed, and `balance_after` is the balance right after that entry, which is handy
+  for a statement view.
+- **The ledger is never edited.** A mistaken deposit is corrected with a negative
+  adjustment, and both entries stay visible.
+- Deposits and adjustments return the new transaction (`balance_after` = new balance).
+- A single deposit is capped (`DEPOSIT_LIMIT_EXCEEDED` includes the `max`).
+- Users can't deposit to or adjust **their own** account (`SELF_TRANSACTION_FORBIDDEN`),
+  so hide that action when the target developer is the logged-in user.
+
 ### Audit log
 
 | Method | Path | Permission | Notes |
@@ -379,6 +426,8 @@ before → after table.
 | Sellers (list, detail with positions) | `sellers/`, `service-positions/?seller=` | `seller.view` |
 | Goods catalogue (list, edit, images, stock dialog, stock history) | `goods/`, `inventory/movements/?good=` | `good.view` |
 | My shop (seller self-service: positions, goods, stock) | `sellers/me/`, `service-positions/`, `goods/`, `inventory/movements/` | active seller |
+| Developer accounts (balances, statement, deposit dialog, corrections) | `finance/accounts/`, `finance/transactions/?developer=`, `finance/deposits/` | `finance.view` |
+| My balance and statement | `finance/accounts/me/`, `finance/transactions/me/` | anyone with a developer profile |
 | Audit log | `audit-logs/` | `audit.view` |
 
 Build the navigation from `me.permissions` so each user only sees their pages.
@@ -420,7 +469,6 @@ The frontend will run on the same offline server as the backend:
 These APIs are still to come; don't build screens against guesses. Permission codes for
 them already exist in `me.permissions`.
 
-- Developer accounts, balances, deposits, ledger
 - Purchases at the till (seller scans the developer's card), refunds
 - Seller accounts and payouts, approvals
 

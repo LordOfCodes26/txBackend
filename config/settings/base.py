@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "apps.attendance",
     "apps.sellers",
     "apps.goods",
+    "apps.finance",
 ]
 
 MIDDLEWARE = [
@@ -146,6 +147,7 @@ SPECTACULAR_SETTINGS = {
         "CardStatusEnum": "apps.rfid.models.CardStatus",
         "AttendanceEventTypeEnum": "apps.attendance.models.EventType",
         "SellerStatusEnum": "apps.sellers.models.SellerStatus",
+        "AccountStatusEnum": "apps.finance.models.AccountStatus",
     },
     # Serve Swagger UI assets locally: the server may run without internet access.
     "SWAGGER_UI_DIST": "SIDECAR",
@@ -193,6 +195,10 @@ ATTENDANCE_DAY_START_HOUR = env.int("ATTENDANCE_DAY_START_HOUR", default=0)
 CURRENCY = env("CURRENCY", default="USD")
 GOOD_IMAGE_MAX_BYTES = env.int("GOOD_IMAGE_MAX_BYTES", default=5 * 1024 * 1024)
 GOOD_MAX_IMAGES = env.int("GOOD_MAX_IMAGES", default=10)
+
+# --- Finance ------------------------------------------------------------------
+# Largest single deposit. Bigger amounts will go through approvals (later phase).
+FINANCE_MAX_DEPOSIT = env("FINANCE_MAX_DEPOSIT", default="1000.00")
 
 # --- Logging ----------------------------------------------------------------
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")

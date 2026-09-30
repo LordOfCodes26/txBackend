@@ -10,6 +10,8 @@ from django.utils import timezone
 from apps.accounts.models import Role, User, UserRole
 from apps.accounts.rbac import ROLES
 from apps.developers.models import Developer, DeveloperStatus
+from apps.finance import services as finance
+from apps.finance.models import AccountTransaction
 from apps.goods import services as goods
 from apps.rfid import services as rfid
 from apps.rfid.models import RFIDCard
@@ -36,6 +38,10 @@ class Command(BaseCommand):
             with transaction.atomic():
                 self._catalog()
             self.stdout.write(self.style.SUCCESS("Demo sellers and goods created."))
+            created = True
+        if not AccountTransaction.objects.filter(idempotency_key__startswith="demo-").exists():
+            self._deposits()
+            self.stdout.write(self.style.SUCCESS("Demo deposits created."))
             created = True
         if not created:
             raise CommandError("Demo data already exists.")
@@ -162,4 +168,15 @@ class Command(BaseCommand):
                 price=price,
                 track_stock=tracked,
                 initial_quantity=qty,
+            )
+
+    def _deposits(self):
+        developers = Developer.objects.filter(employee_number__startswith="DEMO-")
+        for dev in developers:
+            finance.deposit(
+                actor=None,
+                developer=dev,
+                amount=random.choice(["50.00", "100.00", "150.00", "200.00"]),
+                description="Monthly allowance",
+                idempotency_key=f"demo-deposit-{dev.pk}",
             )

@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import diff, record_audit, snapshot
+from apps.finance.services import open_account
 from apps.rfid.models import AssignmentEndReason
 from apps.rfid.services import end_developer_assignment
 
@@ -25,6 +26,7 @@ AUDITED_FIELDS = [
 @transaction.atomic
 def create_developer(*, actor, **data) -> Developer:
     developer = Developer.objects.create(**data)
+    open_account(developer)
     record_audit(
         "developer.created",
         actor=actor,
