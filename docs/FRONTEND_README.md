@@ -137,8 +137,9 @@ const can = (code: string) => me.permissions.includes(code);
 | `good.stock` | Restock, write off and adjust stock |
 | `finance.view` | All developer accounts and transactions |
 | `finance.deposit` | Deposit money to developer accounts |
-| `finance.adjust` | Manual corrections; freeze, unfreeze, close, reopen accounts |
-| `purchase.*` | Reserved for the purchase module (not built yet) |
+| `finance.adjust` | Manual corrections; freeze, unfreeze, close, reopen accounts; reset PINs |
+| `purchase.view` | All purchases |
+| `purchase.create` / `.confirm` / `.cancel` | Run any seller's till (normally sellers use their own; see below) |
 
 Default roles, which admins can change:
 
@@ -157,7 +158,8 @@ If `permissions` is empty, the user only has self-service pages (section 7).
 
 A user linked to an **ACTIVE** seller manages that seller's own catalogue without any
 global permission: service positions, goods, images, stock and stock history. The
-same endpoints serve both cases; the backend narrows lists to the seller's own
+same endpoints serve both cases, and the same goes for the **till** (purchases at their
+own service positions); the backend narrows lists to the seller's own
 objects and returns `404` for other sellers' objects. To tell whether the user is a
 seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
 SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
@@ -206,7 +208,10 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `TOO_MANY_IMAGES`, `SELLER_PROFILE_NOT_FOUND`, `INSUFFICIENT_BALANCE`
 (`details: {balance, required}`), `ACCOUNT_NOT_ACTIVE`, `DEPOSIT_LIMIT_EXCEEDED`
 (`details: {max}`), `SELF_TRANSACTION_FORBIDDEN`, `IDEMPOTENCY_KEY_REUSED`,
-`INVALID_ACCOUNT_TRANSITION`, `CONFLICT`.
+`INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
+`SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
+`PIN_NOT_SET`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
+`details: {locked_until}`), `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -239,7 +244,7 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
 
 ### Money-moving requests need an `Idempotency-Key`
 
-Deposits and adjustments (and purchases later) require an `Idempotency-Key` header:
+Deposits, adjustments and purchase confirmation require an `Idempotency-Key` header:
 
 ```ts
 // Create the key once per user action, e.g. when the confirm dialog opens,
@@ -400,6 +405,51 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 - Users can't deposit to or adjust **their own** account (`SELF_TRANSACTION_FORBIDDEN`),
   so hide that action when the target developer is the logged-in user.
 
+### Purchases (the till)
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position}`: opens a DRAFT bucket |
+| POST | `/purchases/{id}/items/` | same | `{good, quantity?}`; adding a good already in the bucket increases its quantity |
+| PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
+| POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{card_uid, pin}` + `Idempotency-Key`: charges the card holder |
+| POST | `/purchases/{id}/cancel/` | own seller, or `purchase.cancel` | Drafts only |
+| GET | `/purchases/`, `/purchases/{id}/` | own seller, or `purchase.view` | Filters: `status`, `seller`, `service_position`, `developer`, `confirmed_after`, `confirmed_before`, `total_min`, `total_max` |
+| GET | `/purchases/me/` | logged in | The developer's own purchases |
+| POST | `/finance/accounts/me/pin/` | logged in | Developer sets `{pin}` or changes it with `{pin, current_pin}` |
+| POST | `/finance/accounts/{id}/reset-pin/` | `finance.adjust` | Clears a forgotten PIN and any lockout |
+
+Every item/confirm/cancel call returns the **whole purchase**, so re-render the bucket from
+the response.
+
+**Till flow:**
+1. Seller picks their service position → `POST /purchases/` (keep the returned `id`).
+2. Seller adds goods → `POST /purchases/{id}/items/`. `total` and `unit_price` show current prices.
+3. The developer taps their card: read the UID from the till's card reader (usually a
+   USB reader that types the UID like a keyboard), and the developer types their PIN.
+   Mask the PIN field, never store or log it, and clear it after each attempt.
+4. `POST /purchases/{id}/confirm/` with a **new** `Idempotency-Key` generated when the
+   confirm step starts; reuse it only for automatic retries of that same attempt.
+5. On `201`: show success with `developer.full_name`, `total` and `balance_after`
+   (the developer's remaining balance), then start a new purchase.
+
+**Confirmation is all-or-nothing.** Stock, the developer's balance and the purchase change
+together, or nothing changes. On any error the purchase stays a DRAFT and can be retried:
+
+| `code` | Show |
+|---|---|
+| `INVALID_PIN` | "Wrong PIN, N attempts left" (`details.attempts_remaining`) |
+| `PIN_LOCKED` (423) | "PIN locked until …" (`details.locked_until`); another payment is needed |
+| `PIN_NOT_SET` | "Set your PIN first" (developer: My account → PIN) |
+| `INSUFFICIENT_BALANCE` | Balance and amount needed (`details.balance`, `details.required`) |
+| `INSUFFICIENT_STOCK` | Which good ran out (`details.good`, `available`) |
+| `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `ACCOUNT_NOT_ACTIVE` | The `message` |
+
+- Prices are fixed at confirmation: a confirmed purchase shows what was actually charged.
+- **Confirmed purchases are final**; there are no refunds. Only drafts can be cancelled.
+- Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
+- `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
+
 ### Audit log
 
 | Method | Path | Permission | Notes |
@@ -427,7 +477,10 @@ before → after table.
 | Goods catalogue (list, edit, images, stock dialog, stock history) | `goods/`, `inventory/movements/?good=` | `good.view` |
 | My shop (seller self-service: positions, goods, stock) | `sellers/me/`, `service-positions/`, `goods/`, `inventory/movements/` | active seller |
 | Developer accounts (balances, statement, deposit dialog, corrections) | `finance/accounts/`, `finance/transactions/?developer=`, `finance/deposits/` | `finance.view` |
-| My balance and statement | `finance/accounts/me/`, `finance/transactions/me/` | anyone with a developer profile |
+| My balance, statement and PIN | `finance/accounts/me/`, `finance/transactions/me/`, `finance/accounts/me/pin/` | anyone with a developer profile |
+| **Till** (choose position, build bucket, card + PIN confirm) | `purchases/`, `goods/?service_position=&is_active=true&in_stock=true` | active seller |
+| Sales history | `purchases/?status=CONFIRMED` | active seller, or `purchase.view` |
+| My purchases | `purchases/me/` | anyone with a developer profile |
 | Audit log | `audit-logs/` | `audit.view` |
 
 Build the navigation from `me.permissions` so each user only sees their pages.
@@ -469,7 +522,6 @@ The frontend will run on the same offline server as the backend:
 These APIs are still to come; don't build screens against guesses. Permission codes for
 them already exist in `me.permissions`.
 
-- Purchases at the till (seller scans the developer's card), refunds
 - Seller accounts and payouts, approvals
 
 Ask the backend team for the current state before starting on any of these.

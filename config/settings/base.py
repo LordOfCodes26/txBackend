@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "apps.sellers",
     "apps.goods",
     "apps.finance",
+    "apps.purchases",
 ]
 
 MIDDLEWARE = [
@@ -199,6 +200,9 @@ GOOD_MAX_IMAGES = env.int("GOOD_MAX_IMAGES", default=10)
 # --- Finance ------------------------------------------------------------------
 # Largest single deposit. Bigger amounts will go through approvals (later phase).
 FINANCE_MAX_DEPOSIT = env("FINANCE_MAX_DEPOSIT", default="1000.00")
+# Developer PIN entered at the till: lock after this many wrong attempts, for this long.
+PURCHASE_PIN_MAX_ATTEMPTS = env.int("PURCHASE_PIN_MAX_ATTEMPTS", default=5)
+PURCHASE_PIN_LOCKOUT_MINUTES = env.int("PURCHASE_PIN_LOCKOUT_MINUTES", default=15)
 
 # --- Logging ----------------------------------------------------------------
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")

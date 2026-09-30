@@ -17,6 +17,7 @@ from .serializers import (
     AdjustmentSerializer,
     DepositSerializer,
     DeveloperAccountSerializer,
+    SetPinSerializer,
     StatusChangeSerializer,
 )
 
@@ -43,6 +44,8 @@ class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
         "list": ["finance.view"],
         "retrieve": ["finance.view"],
         "me": [],
+        "set_my_pin": [],
+        "reset_pin": ["finance.adjust"],
         "freeze": ["finance.adjust"],
         "unfreeze": ["finance.adjust"],
         "close": ["finance.adjust"],
@@ -56,6 +59,30 @@ class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"])
     def me(self, request):
         account = services.open_account(_own_developer(request))
+        return Response(DeveloperAccountSerializer(account).data)
+
+    @extend_schema(request=SetPinSerializer, responses={204: None})
+    @action(detail=False, methods=["post"], url_path="me/pin")
+    def set_my_pin(self, request):
+        """Set your purchase PIN (4-6 digits), or change it by also sending `current_pin`."""
+        serializer = SetPinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        account = services.open_account(_own_developer(request))
+        services.set_pin(
+            actor=request.user,
+            account=account,
+            pin=serializer.validated_data["pin"],
+            current_pin=serializer.validated_data.get("current_pin"),
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=None, responses=DeveloperAccountSerializer)
+    @action(detail=True, methods=["post"], url_path="reset-pin")
+    def reset_pin(self, request, pk=None):
+        """Clear a forgotten PIN and any lockout; the developer sets a new one."""
+        account = self.get_object()
+        services.reset_pin(actor=request.user, account=account)
+        account.refresh_from_db()
         return Response(DeveloperAccountSerializer(account).data)
 
     def _transition(self, request, transition):

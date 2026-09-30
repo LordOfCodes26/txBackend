@@ -37,3 +37,21 @@ class InvalidAccountTransition(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "INVALID_ACCOUNT_TRANSITION"
     default_detail = "The account cannot move to this status from its current status."
+
+
+class PinNotSet(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "PIN_NOT_SET"
+    default_detail = "The developer has not set a purchase PIN yet."
+
+
+class InvalidPin(DomainError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "INVALID_PIN"
+    default_detail = "The PIN is incorrect."
+
+
+class PinLocked(DomainError):
+    status_code = status.HTTP_423_LOCKED
+    code = "PIN_LOCKED"
+    default_detail = "Too many wrong PIN attempts. Try again later."

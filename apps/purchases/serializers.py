@@ -1,0 +1,109 @@
+from decimal import Decimal
+
+from django.conf import settings
+from rest_framework import serializers
+
+from apps.developers.serializers import DeveloperSummarySerializer
+from apps.goods.models import Good
+from apps.rfid.serializers import UIDField
+from apps.sellers.models import ServicePosition
+from apps.sellers.serializers import SellerSummarySerializer
+
+from .models import Purchase, PurchaseItem
+
+
+class PurchaseItemSerializer(serializers.ModelSerializer):
+    good_name = serializers.CharField(source="good.name", read_only=True)
+    unit_price = serializers.SerializerMethodField()
+    line_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseItem
+        fields = ["id", "good", "good_name", "quantity", "unit_price", "line_total"]
+        read_only_fields = fields
+
+    # Drafts show the current price; confirmed purchases show what was charged.
+    def get_unit_price(self, item) -> str:
+        price = item.unit_price if item.unit_price is not None else item.good.price
+        return f"{price:.2f}"
+
+    def get_line_total(self, item) -> str:
+        if item.line_total is not None:
+            return f"{item.line_total:.2f}"
+        return f"{item.good.price * item.quantity:.2f}"
+
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    seller = SellerSummarySerializer(read_only=True)
+    service_position_name = serializers.CharField(source="service_position.name", read_only=True)
+    developer = DeveloperSummarySerializer(read_only=True)
+    card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
+    items = PurchaseItemSerializer(many=True, read_only=True)
+    total = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+    balance_after = serializers.DecimalField(
+        source="account_transaction.balance_after",
+        max_digits=14,
+        decimal_places=2,
+        read_only=True,
+        default=None,
+    )
+
+    class Meta:
+        model = Purchase
+        fields = [
+            "id",
+            "status",
+            "seller",
+            "service_position",
+            "service_position_name",
+            "items",
+            "total",
+            "currency",
+            "developer",
+            "card_uid",
+            "balance_after",
+            "created_by",
+            "created_at",
+            "confirmed_by",
+            "confirmed_at",
+            "cancelled_at",
+        ]
+        read_only_fields = fields
+
+    def get_total(self, purchase) -> str:
+        if purchase.total is not None:
+            return f"{purchase.total:.2f}"
+        total = sum((i.good.price * i.quantity for i in purchase.items.all()), Decimal("0.00"))
+        return f"{total:.2f}"
+
+    def get_currency(self, obj) -> str:
+        return settings.CURRENCY
+
+
+class PurchaseCreateSerializer(serializers.Serializer):
+    service_position = serializers.PrimaryKeyRelatedField(
+        queryset=ServicePosition.objects.select_related("seller")
+    )
+
+    def validate_service_position(self, position):
+        own = self.context.get("own_seller")
+        if own is not None and position.seller_id != own.pk:
+            raise serializers.ValidationError("You can only sell at your own service positions.")
+        return position
+
+
+class ItemAddSerializer(serializers.Serializer):
+    good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
+    quantity = serializers.IntegerField(min_value=1, max_value=999, default=1)
+
+
+class ItemUpdateSerializer(serializers.Serializer):
+    quantity = serializers.IntegerField(min_value=1, max_value=999)
+
+
+class ConfirmSerializer(serializers.Serializer):
+    card_uid = UIDField(help_text="UID read from the developer's card at the till.")
+    pin = serializers.CharField(
+        write_only=True, max_length=6, help_text="PIN typed by the developer."
+    )

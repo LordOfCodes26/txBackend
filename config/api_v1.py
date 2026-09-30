@@ -9,4 +9,5 @@ urlpatterns = [
     path("", include("apps.sellers.urls")),
     path("", include("apps.goods.urls")),
     path("", include("apps.finance.urls")),
+    path("", include("apps.purchases.urls")),
 ]

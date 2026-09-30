@@ -22,6 +22,8 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
             "currency",
             "status",
             "status_reason",
+            "has_pin",
+            "pin_locked_until",
             "created_at",
             "updated_at",
         ]
@@ -72,3 +74,13 @@ class AdjustmentSerializer(serializers.Serializer):
 
 class StatusChangeSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+
+class SetPinSerializer(serializers.Serializer):
+    pin = serializers.CharField(write_only=True, max_length=6)
+    current_pin = serializers.CharField(
+        write_only=True,
+        max_length=6,
+        required=False,
+        help_text="Required to change an existing PIN.",
+    )

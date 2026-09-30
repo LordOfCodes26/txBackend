@@ -29,6 +29,10 @@ class DeveloperAccount(TimeStampedModel):
         max_length=10, choices=AccountStatus.choices, default=AccountStatus.ACTIVE
     )
     status_reason = models.CharField(max_length=255, blank=True)
+    # Purchase PIN, entered by the developer at the till. Only a hash is stored.
+    pin_hash = models.CharField(max_length=128, blank=True)
+    pin_failed_attempts = models.PositiveSmallIntegerField(default=0)
+    pin_locked_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["developer__full_name", "id"]
@@ -40,6 +44,10 @@ class DeveloperAccount(TimeStampedModel):
 
     def __str__(self):
         return f"{self.developer} ({self.balance})"
+
+    @property
+    def has_pin(self) -> bool:
+        return bool(self.pin_hash)
 
 
 class TransactionKind(models.TextChoices):

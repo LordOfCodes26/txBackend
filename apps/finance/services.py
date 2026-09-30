@@ -1,8 +1,11 @@
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Subquery, Sum
+from django.utils import timezone
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
@@ -13,6 +16,9 @@ from .exceptions import (
     IdempotencyKeyReused,
     InsufficientBalance,
     InvalidAccountTransition,
+    InvalidPin,
+    PinLocked,
+    PinNotSet,
     SelfTransactionForbidden,
 )
 from .models import AccountStatus, AccountTransaction, DeveloperAccount, TransactionKind
@@ -217,3 +223,92 @@ def ledger_mismatches() -> list[dict]:
                 | {"ledger": str(ledger)}
             )
     return problems
+
+
+# --- Purchase PIN ---------------------------------------------------------------
+
+
+def _pin_is_trivial(pin: str) -> bool:
+    digits = [int(c) for c in pin]
+    steps = {b - a for a, b in zip(digits, digits[1:], strict=False)}
+    return len(set(digits)) == 1 or steps in ({1}, {-1})
+
+
+def validate_pin_format(pin: str) -> None:
+    from rest_framework.exceptions import ValidationError
+
+    if not (pin.isdigit() and 4 <= len(pin) <= 6):
+        raise ValidationError({"pin": ["The PIN must be 4 to 6 digits."]})
+    if _pin_is_trivial(pin):
+        raise ValidationError({"pin": ["Choose a less obvious PIN (not 1111 or 1234)."]})
+
+
+@transaction.atomic
+def set_pin(*, actor, account: DeveloperAccount, pin: str, current_pin: str | None) -> None:
+    """The developer sets or changes their own PIN (changing requires the current one)."""
+    account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
+    if account.pin_hash and not (current_pin and check_password(current_pin, account.pin_hash)):
+        from rest_framework.exceptions import ValidationError
+
+        raise ValidationError({"current_pin": ["The current PIN is incorrect."]})
+    validate_pin_format(pin)
+    changed = bool(account.pin_hash)
+    account.pin_hash = make_password(pin)
+    account.pin_failed_attempts = 0
+    account.pin_locked_until = None
+    account.save(
+        update_fields=["pin_hash", "pin_failed_attempts", "pin_locked_until", "updated_at"]
+    )
+    record_audit(
+        "finance.pin_changed" if changed else "finance.pin_set", actor=actor, entity=account
+    )
+
+
+@transaction.atomic
+def reset_pin(*, actor, account: DeveloperAccount) -> None:
+    """Clear a forgotten PIN (and any lockout); the developer then sets a new one."""
+    account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
+    account.pin_hash = ""
+    account.pin_failed_attempts = 0
+    account.pin_locked_until = None
+    account.save(
+        update_fields=["pin_hash", "pin_failed_attempts", "pin_locked_until", "updated_at"]
+    )
+    record_audit("finance.pin_reset", actor=actor, entity=account)
+
+
+def verify_pin(*, account: DeveloperAccount, pin: str) -> None:
+    """Check a PIN entered at the till.
+
+    Runs in its OWN transaction and commits even when the PIN is wrong, so failed
+    attempts are counted although the purchase that triggered them is rejected. After
+    PURCHASE_PIN_MAX_ATTEMPTS failures the PIN is locked for PURCHASE_PIN_LOCKOUT_MINUTES.
+    """
+    failure = None
+    with transaction.atomic():
+        account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
+        now = timezone.now()
+        if account.pin_locked_until and account.pin_locked_until > now:
+            raise PinLocked(details={"locked_until": account.pin_locked_until.isoformat()})
+        if not account.pin_hash:
+            raise PinNotSet()
+        if check_password(pin, account.pin_hash):
+            if account.pin_failed_attempts or account.pin_locked_until:
+                account.pin_failed_attempts = 0
+                account.pin_locked_until = None
+                account.save(update_fields=["pin_failed_attempts", "pin_locked_until"])
+            return
+
+        account.pin_failed_attempts += 1
+        remaining = settings.PURCHASE_PIN_MAX_ATTEMPTS - account.pin_failed_attempts
+        if remaining <= 0:
+            account.pin_failed_attempts = 0
+            account.pin_locked_until = now + timedelta(
+                minutes=settings.PURCHASE_PIN_LOCKOUT_MINUTES
+            )
+            record_audit("finance.pin_locked", entity=account)
+            failure = PinLocked(details={"locked_until": account.pin_locked_until.isoformat()})
+        else:
+            failure = InvalidPin(details={"attempts_remaining": remaining})
+        account.save(update_fields=["pin_failed_attempts", "pin_locked_until"])
+    raise failure
