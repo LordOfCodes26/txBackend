@@ -59,7 +59,7 @@ JWT (JSON Web Tokens) with a short-lived **access token** and a rotating **refre
 |---|---|---|---|
 | POST | `/api/v1/auth/token/` | `{email, password}` | `{access, refresh}` |
 | POST | `/api/v1/auth/token/refresh/` | `{refresh}` | `{access, refresh}`, a **new** refresh token |
-| POST | `/api/v1/auth/logout/` | `{refresh}` | 204 (refresh token revoked) |
+| POST | `/api/v1/auth/logout/` | `{refresh}` | 204 (refresh token revoked). No access token needed, so it works after expiry |
 | GET | `/api/v1/auth/me/` | none | Current user, roles and permissions |
 | POST | `/api/v1/auth/password/` | `{old_password, new_password}` | 204 (revokes all refresh tokens: log in again) |
 
@@ -77,6 +77,50 @@ Consequences:
   the refresh in a single shared promise so parallel 401s wait for one refresh.
 - On `401` from a normal API call: refresh once, retry the request once. If the refresh
   itself fails, send the user to the login page.
+
+**If users get logged out after ~15 minutes, the refresh isn't implemented.** A 401 must
+trigger a refresh, not a logout. Minimal pattern (adapt to your fetch wrapper):
+
+```ts
+let refreshing: Promise<string> | null = null; // one refresh at a time, shared by all callers
+
+async function refreshAccess(): Promise<string> {
+  refreshing ??= (async () => {
+    const res = await fetch(`${API}/api/v1/auth/token/refresh/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh: tokens.refresh }),
+    });
+    if (!res.ok) throw new Error("refresh failed");
+    const data = await res.json();
+    tokens.access = data.access;
+    tokens.refresh = data.refresh; // rotation: ALWAYS store the new refresh token
+    return data.access;
+  })().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+export async function api(path: string, init: RequestInit = {}): Promise<Response> {
+  const call = (access: string) =>
+    fetch(`${API}${path}`, {
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${access}` },
+    });
+  let res = await call(tokens.access);
+  if (res.status === 401) {
+    try {
+      res = await call(await refreshAccess()); // retry once with the new token
+    } catch {
+      logout(); // refresh token expired or revoked, so a real logout
+    }
+  }
+  return res;
+}
+```
+
+With the BFF setup (section 3), put the same logic in the Next.js server code that calls
+Django, and update the `httpOnly` cookies with the new tokens. The session then lasts
+as long as the user is active at least once every 7 days (the refresh lifetime).
 
 ### Where to keep tokens (recommended)
 

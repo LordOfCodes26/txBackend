@@ -103,3 +103,18 @@ def test_password_change_rejects_wrong_old_password(auth_client, make_user):
     )
     assert response.status_code == 400
     assert "old_password" in response.json()["error"]["details"]
+
+
+def test_logout_works_after_access_token_expired(api_client, make_user):
+    make_user(email="dev@example.com")
+    tokens = login(api_client, "dev@example.com").json()
+    api_client.credentials()  # no access token at all
+    response = api_client.post("/api/v1/auth/logout/", {"refresh": tokens["refresh"]})
+    assert response.status_code == 204
+    refresh = api_client.post("/api/v1/auth/token/refresh/", {"refresh": tokens["refresh"]})
+    assert refresh.status_code == 401
+
+
+def test_logout_rejects_invalid_refresh_token(api_client):
+    response = api_client.post("/api/v1/auth/logout/", {"refresh": "not-a-token"})
+    assert response.status_code == 400

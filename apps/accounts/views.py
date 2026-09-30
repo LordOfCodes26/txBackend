@@ -3,6 +3,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -38,6 +39,13 @@ class RefreshView(TokenRefreshView):
 
 
 class LogoutView(APIView):
+    """Revoke a refresh token. Works without a valid access token: logout usually happens
+    after the access token has expired, and holding the refresh token is proof enough."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
     @extend_schema(request=LogoutSerializer, responses={204: None})
     def post(self, request):
         serializer = LogoutSerializer(data=request.data)
@@ -46,7 +54,8 @@ class LogoutView(APIView):
             token = RefreshToken(serializer.validated_data["refresh"])
         except TokenError as exc:
             raise ValidationError({"refresh": [str(exc)]}) from exc
-        if str(token.get("user_id")) != str(request.user.pk):
+        user = request.user
+        if user.is_authenticated and str(token.get("user_id")) != str(user.pk):
             raise ValidationError({"refresh": ["Token does not belong to this user."]})
         token.blacklist()
         return Response(status=status.HTTP_204_NO_CONTENT)
