@@ -51,6 +51,7 @@ PERMISSIONS: dict[str, str] = {
     "good.create": "Create goods",
     "good.update": "Update goods",
     "good.delete": "Delete goods",
+    "good.stock": "Restock, write off and adjust stock",
 }
 
 ALL = frozenset(PERMISSIONS)

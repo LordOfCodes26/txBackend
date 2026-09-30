@@ -6,4 +6,6 @@ urlpatterns = [
     path("", include("apps.developers.urls")),
     path("", include("apps.rfid.urls")),
     path("", include("apps.attendance.urls")),
+    path("", include("apps.sellers.urls")),
+    path("", include("apps.goods.urls")),
 ]

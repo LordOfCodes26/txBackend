@@ -1,0 +1,99 @@
+from rest_framework import serializers
+
+from apps.accounts.models import User
+
+from .models import Seller, ServicePosition
+
+
+class SellerSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Seller
+        fields = ["id", "name", "status"]
+
+
+class SellerSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Seller
+        fields = [
+            "id",
+            "user",
+            "name",
+            "contact_name",
+            "email",
+            "phone",
+            "status",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+        validators = []
+
+    def _others(self):
+        qs = Seller.objects.all()
+        return qs.exclude(pk=self.instance.pk) if self.instance else qs
+
+    def validate_name(self, value):
+        value = value.strip()
+        if self._others().filter(name__iexact=value).exists():
+            raise serializers.ValidationError("A seller with this name already exists.")
+        return value
+
+    def validate_user(self, user):
+        if user is not None and self._others().filter(user=user).exists():
+            raise serializers.ValidationError("This user is already linked to another seller.")
+        return user
+
+
+class ServicePositionSerializer(serializers.ModelSerializer):
+    seller = serializers.PrimaryKeyRelatedField(queryset=Seller.objects.all(), required=False)
+    seller_detail = SellerSummarySerializer(source="seller", read_only=True)
+
+    class Meta:
+        model = ServicePosition
+        fields = [
+            "id",
+            "seller",
+            "seller_detail",
+            "name",
+            "location",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+        validators = []
+
+    def validate(self, attrs):
+        own = self.context.get("own_seller")
+        if self.instance is not None:
+            if "seller" in attrs and attrs["seller"] != self.instance.seller:
+                raise serializers.ValidationError(
+                    {"seller": ["A position cannot move to another seller."]}
+                )
+            seller = self.instance.seller
+        elif own is not None:
+            if attrs.get("seller") not in (None, own):
+                raise serializers.ValidationError(
+                    {"seller": ["You can only create positions for your own seller."]}
+                )
+            seller = attrs["seller"] = own
+        else:
+            seller = attrs.get("seller")
+            if seller is None:
+                raise serializers.ValidationError({"seller": ["This field is required."]})
+
+        name = attrs.get("name")
+        if name:
+            clash = ServicePosition.objects.filter(seller=seller, name__iexact=name.strip())
+            if self.instance is not None:
+                clash = clash.exclude(pk=self.instance.pk)
+            if clash.exists():
+                raise serializers.ValidationError(
+                    {"name": ["This seller already has a position with this name."]}
+                )
+        return attrs

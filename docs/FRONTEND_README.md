@@ -132,7 +132,10 @@ const can = (code: string) => me.permissions.includes(code);
 | `rfid.block` | Block / unblock cards |
 | `rfid.device.manage` | Register readers, rotate reader keys |
 | `attendance.view` / `attendance.correct` | Attendance pages / add or void records |
-| `finance.*`, `purchase.*`, `seller.*`, `good.*` | Reserved for modules not built yet |
+| `seller.view` / `.create` / `.update` | Sellers and all service positions / create sellers / edit sellers and positions |
+| `good.view` / `.create` / `.update` / `.delete` | All goods and stock history / create / edit and images / delete |
+| `good.stock` | Restock, write off and adjust stock |
+| `finance.*`, `purchase.*` | Reserved for modules not built yet |
 
 Default roles, which admins can change:
 
@@ -143,9 +146,18 @@ Default roles, which admins can change:
 | FINANCE_MANAGER | Finance, developer view, purchase view, audit log |
 | SELLER_MANAGER | Sellers, goods, purchase view |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
-| SELLER | Nothing global yet (own goods and sales come with the seller module) |
+| SELLER | Nothing global; see *Seller self-service* below |
 
 If `permissions` is empty, the user only has self-service pages (section 7).
+
+### Seller self-service
+
+A user linked to an **ACTIVE** seller manages that seller's own catalogue without any
+global permission: service positions, goods, images, stock and stock history. The
+same endpoints serve both cases; the backend narrows lists to the seller's own
+objects and returns `404` for other sellers' objects. To tell whether the user is a
+seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
+SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
 
 ---
 
@@ -186,7 +198,9 @@ If `permissions` is empty, the user only has self-service pages (section 7).
 Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSIGNED`,
 `DEVELOPER_HAS_REPORTS`, `CARD_NOT_ACTIVE`, `CARD_ALREADY_ASSIGNED`,
 `DEVELOPER_ALREADY_HAS_CARD`, `CARD_NOT_ASSIGNED`, `DEVELOPER_NOT_ASSIGNABLE`,
-`INVALID_CARD_TRANSITION`, `RECORD_ALREADY_VOID`, `CONFLICT`.
+`INVALID_CARD_TRANSITION`, `RECORD_ALREADY_VOID`, `POSITION_HAS_GOODS`, `INSUFFICIENT_STOCK`
+(`details: {available, requested}`), `STOCK_NOT_TRACKED`, `NO_STOCK_CHANGE`,
+`TOO_MANY_IMAGES`, `SELLER_PROFILE_NOT_FOUND`, `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -300,6 +314,45 @@ Users can't grant roles with more permissions than they have themselves
   change after the rule changes, so always display the value from the API; never derive it.
 - Show voided records struck through, with `void_reason`, rather than hiding them.
 
+### Sellers and service positions
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/sellers/` | `seller.view` | Filters: `status`, `has_user`. Search: name, contact, email |
+| POST | `/sellers/` | `seller.create` | `{name, user?, contact_name?, email?, phone?, notes?}`; `user` = the seller's login |
+| GET/PATCH | `/sellers/{id}/` | `seller.view` / `seller.update` | No DELETE: close with `status: "CLOSED"` |
+| GET | `/sellers/me/` | logged in | Own seller profile (any status) |
+| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `is_active`. Sellers omit `seller` on create; managers must send it |
+| GET/PATCH/DELETE | `/service-positions/{id}/` | same | DELETE is soft and fails with `POSITION_HAS_GOODS` while it has goods |
+
+Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
+
+### Goods and stock
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/goods/` | `good.view`, or own seller | Filters: `seller`, `service_position`, `is_active`, `track_stock`, `in_stock`, `price_min`, `price_max`. Search: name, description, SKU, seller. Ordering: `name`, `price`, `quantity`, `created_at` |
+| POST | `/goods/` | `good.create`, or own seller | `{service_position, name, price, description?, sku?, is_active?, track_stock?, initial_quantity?}` |
+| GET/PATCH/DELETE | `/goods/{id}/` | view / `good.update` / `good.delete`, or own seller | DELETE is soft. `quantity` can't be PATCHed |
+| POST | `/goods/{id}/stock/` | `good.stock`, or own seller | See below. Returns the stock movement |
+| POST | `/goods/{id}/images/` | `good.update`, or own seller | `multipart/form-data`: `image`, `alt_text?`, `position?`. Returns the whole good |
+| DELETE | `/goods/{id}/images/{image_id}/` | same | |
+| GET | `/inventory/movements/` | `good.view`, or own seller | Stock history. Filters: `good`, `seller`, `kind`, `created_after`, `created_before` |
+
+- **Money is a string**, e.g. `"price": "3.20"`, never a float. Send prices as strings
+  too. Display it with the `currency` field (ISO code, e.g. `"USD"`) via `Intl.NumberFormat`,
+  and never do price arithmetic with JavaScript floats.
+- **Stock changes** (`POST /goods/{id}/stock/`):
+  - `{"kind": "RESTOCK", "quantity": 20}`: add units
+  - `{"kind": "DAMAGE", "quantity": 2, "reason": "Dropped"}`: write off units (reason required)
+  - `{"kind": "ADJUSTMENT", "counted_quantity": 17, "reason": "Monthly count"}`: set stock to a
+    physical count (reason required)
+- `SALE` and `RETURN` movements are created by purchases later, never by the frontend.
+- `track_stock: false` goods (made-to-order food, services) have no quantity; stock
+  changes on them fail with `STOCK_NOT_TRACKED`. Treat them as always available.
+- Images: JPEG, PNG or WebP, max 5 MB, max 10 per good. `image` in responses is a full
+  URL. Lowest `position` is the main image.
+
 ### Audit log
 
 | Method | Path | Permission | Notes |
@@ -323,6 +376,9 @@ before → after table.
 | Live scan monitor | poll `rfid/events/?ordering=-event_time&page_size=20` every few seconds | `rfid.view` |
 | Attendance (daily table by date/department, corrections) | `attendance/daily/`, `attendance/records/` | `attendance.view` |
 | Users and roles | `users/`, `roles/` | `user.view` |
+| Sellers (list, detail with positions) | `sellers/`, `service-positions/?seller=` | `seller.view` |
+| Goods catalogue (list, edit, images, stock dialog, stock history) | `goods/`, `inventory/movements/?good=` | `good.view` |
+| My shop (seller self-service: positions, goods, stock) | `sellers/me/`, `service-positions/`, `goods/`, `inventory/movements/` | active seller |
 | Audit log | `audit-logs/` | `audit.view` |
 
 Build the navigation from `me.permissions` so each user only sees their pages.
@@ -364,7 +420,6 @@ The frontend will run on the same offline server as the backend:
 These APIs are still to come; don't build screens against guesses. Permission codes for
 them already exist in `me.permissions`.
 
-- Sellers, service positions, goods and goods images, stock movements
 - Developer accounts, balances, deposits, ledger
 - Purchases at the till (seller scans the developer's card), refunds
 - Seller accounts and payouts, approvals

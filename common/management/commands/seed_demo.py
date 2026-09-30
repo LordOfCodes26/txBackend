@@ -10,8 +10,10 @@ from django.utils import timezone
 from apps.accounts.models import Role, User, UserRole
 from apps.accounts.rbac import ROLES
 from apps.developers.models import Developer, DeveloperStatus
+from apps.goods import services as goods
 from apps.rfid import services as rfid
 from apps.rfid.models import RFIDCard
+from apps.sellers.models import Seller, ServicePosition
 
 DEPARTMENTS = ["Engineering", "Research", "Platform", "Design", "QA"]
 FIRST = ["Ada", "Alan", "Grace", "Linus", "Margaret", "Dennis", "Barbara", "Ken", "Radia", "Tim"]
@@ -22,14 +24,26 @@ class Command(BaseCommand):
     help = "Fill a development database with demo users, developers, cards, readers and scans."
 
     def handle(self, *args, **options):
+        """Each section is created once; re-running adds only sections added since."""
         if not settings.DEBUG:
             raise CommandError("seed_demo only runs with DEBUG=True.")
-        if Developer.all_objects.filter(employee_number__startswith="DEMO-").exists():
+        random.seed(42)
+        created = False
+        if not Developer.all_objects.filter(employee_number__startswith="DEMO-").exists():
+            self._people()
+            created = True
+        if not Seller.objects.filter(name__startswith="Demo ").exists():
+            with transaction.atomic():
+                self._catalog()
+            self.stdout.write(self.style.SUCCESS("Demo sellers and goods created."))
+            created = True
+        if not created:
             raise CommandError("Demo data already exists.")
+
+    def _people(self):
         # Random per run: the repository is public, so a fixed demo password would let
         # anyone log in to any server seeded with it.
         password = secrets.token_urlsafe(12)
-        random.seed(42)
         with transaction.atomic():
             self._users(password)
             developers = self._developers()
@@ -37,7 +51,7 @@ class Command(BaseCommand):
             keys = self._devices()
         self._scans(developers)
 
-        self.stdout.write(self.style.SUCCESS("Demo data created."))
+        self.stdout.write(self.style.SUCCESS("Demo people, cards and scans created."))
         self.stdout.write(f"Logins (password {password}; shown only now):")
         for code in ROLES:
             self.stdout.write(f"  {code.lower()}@demo.local  ({code})")
@@ -118,4 +132,34 @@ class Command(BaseCommand):
                 device=devices[0],
                 uid="04BADBAD01",
                 event_time=datetime.combine(day, time(9, 0), tz),
+            )
+
+    def _catalog(self):
+        cafe = Seller.objects.create(
+            name="Demo Cafe",
+            contact_name="Cafe Owner",
+            user=User.objects.filter(email="seller@demo.local").first(),
+        )
+        shop = Seller.objects.create(name="Demo Tech Shop", contact_name="Shop Owner")
+        counter = ServicePosition.objects.create(seller=cafe, name="Counter 1", location="Lobby")
+        kiosk = ServicePosition.objects.create(seller=cafe, name="Kiosk", location="3rd floor")
+        store = ServicePosition.objects.create(seller=shop, name="Store", location="Ground floor")
+        items = [
+            (counter, "Americano", "2.50", 0, False),
+            (counter, "Latte", "3.20", 0, False),
+            (counter, "Croissant", "2.80", 40, True),
+            (kiosk, "Sparkling water", "1.20", 120, True),
+            (kiosk, "Chocolate bar", "1.50", 0, True),
+            (store, "USB-C cable", "9.90", 25, True),
+            (store, "Mechanical keyboard", "89.00", 6, True),
+            (store, "Laptop stand", "34.50", 10, True),
+        ]
+        for position, name, price, qty, tracked in items:
+            goods.create_good(
+                actor=None,
+                service_position=position,
+                name=name,
+                price=price,
+                track_stock=tracked,
+                initial_quantity=qty,
             )

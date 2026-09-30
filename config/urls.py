@@ -16,5 +16,9 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
-    # Log in/out links for DRF's browsable API (dev only).
+    from django.conf.urls.static import static
+
+    # Log in/out links for DRF's browsable API, and uploaded files (dev only;
+    # nginx serves /media/ in staging and production).
     urlpatterns.append(path("api-auth/", include("rest_framework.urls")))
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

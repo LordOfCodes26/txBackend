@@ -34,6 +34,8 @@ INSTALLED_APPS = [
     "apps.developers",
     "apps.rfid",
     "apps.attendance",
+    "apps.sellers",
+    "apps.goods",
 ]
 
 MIDDLEWARE = [
@@ -143,6 +145,7 @@ SPECTACULAR_SETTINGS = {
         "DeveloperStatusEnum": "apps.developers.models.DeveloperStatus",
         "CardStatusEnum": "apps.rfid.models.CardStatus",
         "AttendanceEventTypeEnum": "apps.attendance.models.EventType",
+        "SellerStatusEnum": "apps.sellers.models.SellerStatus",
     },
     # Serve Swagger UI assets locally: the server may run without internet access.
     "SWAGGER_UI_DIST": "SIDECAR",
@@ -184,6 +187,12 @@ RFID_MAX_FUTURE_SKEW_SECONDS = env.int("RFID_MAX_FUTURE_SKEW_SECONDS", default=3
 ATTENDANCE_DIRECTION_RULE = env("ATTENDANCE_DIRECTION_RULE", default="none")
 # Scans before this local hour count for the previous working day (night shifts).
 ATTENDANCE_DAY_START_HOUR = env.int("ATTENDANCE_DAY_START_HOUR", default=0)
+
+# --- Sellers & goods ----------------------------------------------------------
+# Single currency for all prices and balances (ISO 4217 code shown to clients).
+CURRENCY = env("CURRENCY", default="USD")
+GOOD_IMAGE_MAX_BYTES = env.int("GOOD_IMAGE_MAX_BYTES", default=5 * 1024 * 1024)
+GOOD_MAX_IMAGES = env.int("GOOD_MAX_IMAGES", default=10)
 
 # --- Logging ----------------------------------------------------------------
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
