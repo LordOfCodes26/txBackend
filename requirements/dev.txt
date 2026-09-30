@@ -1,0 +1,6 @@
+-r base.txt
+-c constraints.txt
+pytest>=8.3
+pytest-django>=4.10
+factory-boy>=3.3
+ruff>=0.11

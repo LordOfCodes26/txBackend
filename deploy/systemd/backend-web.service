@@ -1,0 +1,25 @@
+[Unit]
+Description=Backend API (gunicorn)
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=notify
+User=backend
+Group=backend
+WorkingDirectory=/opt/backend/current
+EnvironmentFile=/etc/backend/backend.env
+RuntimeDirectory=backend
+ExecStart=/opt/backend/current/.venv/bin/gunicorn config.wsgi:application \
+    --bind unix:/run/backend/gunicorn.sock \
+    --workers 4 \
+    --timeout 30 \
+    --access-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

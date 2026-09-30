@@ -1,0 +1,20 @@
+[Unit]
+Description=Backend Celery worker
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+User=backend
+Group=backend
+WorkingDirectory=/opt/backend/current
+EnvironmentFile=/etc/backend/backend.env
+ExecStart=/opt/backend/current/.venv/bin/celery -A config worker --loglevel=info
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
