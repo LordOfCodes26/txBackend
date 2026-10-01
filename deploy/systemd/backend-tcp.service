@@ -1,0 +1,18 @@
+[Unit]
+Description=Backend RFID door listener (raw TCP, $-framed JSON)
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+User=backend
+Group=backend
+WorkingDirectory=/opt/backend/current
+EnvironmentFile=/etc/backend/backend.env
+ExecStart=/opt/backend/current/.venv/bin/python manage.py run_rfid_tcp
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

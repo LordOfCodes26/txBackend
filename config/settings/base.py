@@ -211,6 +211,13 @@ RFID_HEARTBEAT_SECONDS = env.int("RFID_HEARTBEAT_SECONDS", default=30)
 RFID_DEVICE_OFFLINE_AFTER_SECONDS = env.int("RFID_DEVICE_OFFLINE_AFTER_SECONDS", default=120)
 # Maximum scans in one buffered batch upload.
 RFID_BATCH_MAX_EVENTS = env.int("RFID_BATCH_MAX_EVENTS", default=500)
+# Raw TCP listener for doors that can't speak HTTP ($-framed JSON; manage.py run_rfid_tcp).
+RFID_TCP_HOST = env("RFID_TCP_HOST", default="0.0.0.0")
+RFID_TCP_PORT = env.int("RFID_TCP_PORT", default=9100)
+RFID_TCP_MAX_FRAME_BYTES = env.int("RFID_TCP_MAX_FRAME_BYTES", default=2048)
+RFID_TCP_IDLE_TIMEOUT_SECONDS = env.int("RFID_TCP_IDLE_TIMEOUT_SECONDS", default=300)
+RFID_TCP_MAX_CONNECTIONS = env.int("RFID_TCP_MAX_CONNECTIONS", default=200)
+RFID_TCP_MAX_CONNECTIONS_PER_IP = env.int("RFID_TCP_MAX_CONNECTIONS_PER_IP", default=10)
 
 # --- Attendance -------------------------------------------------------------
 # How scans become IN/OUT: "none" (first/last scan only), "toggle" (alternate IN/OUT),

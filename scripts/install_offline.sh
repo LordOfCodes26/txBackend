@@ -87,14 +87,15 @@ mv -T "${BASE}/current.new" "${BASE}/current"
 install -m 644 "${RELEASE}/deploy/systemd/backend-web.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-worker.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-ws.service" /etc/systemd/system/
+install -m 644 "${RELEASE}/deploy/systemd/backend-tcp.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/nginx/backend.conf" /etc/nginx/sites-available/backend.conf
 ln -sfn /etc/nginx/sites-available/backend.conf /etc/nginx/sites-enabled/backend.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 
 systemctl daemon-reload
-systemctl enable backend-web backend-worker backend-ws nginx redis-server postgresql
-systemctl restart backend-web backend-worker backend-ws
+systemctl enable backend-web backend-worker backend-ws backend-tcp nginx redis-server postgresql
+systemctl restart backend-web backend-worker backend-ws backend-tcp
 systemctl reload nginx || systemctl restart nginx
 
 echo "Installed ${VERSION}. Check: curl -k https://localhost/health/db/"

@@ -1,0 +1,14 @@
+[Unit]
+Description=Backend staging RFID door listener (raw TCP :9100)
+After=network.target postgresql.service redis-server.service
+Requires=postgresql.service redis-server.service
+
+[Service]
+WorkingDirectory=/root/backend
+EnvironmentFile=/root/backend/.env.staging
+ExecStart=/root/backend/.venv/bin/python manage.py run_rfid_tcp
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -56,6 +56,41 @@ their **fixed IP address** instead:
 Refused requests get `401 AUTHENTICATION_FAILED` ("No door device with this ID is
 registered for this IP").
 
+### Doors over raw TCP (`$`-framed JSON)
+
+The building doors don't speak HTTP. They open a **TCP connection to port 9100** of the
+server and send JSON packets framed by `$` at the start and the end:
+
+```
+${"ID":"Door1","Type":"in","UID":"04A2B3C4"}$
+```
+
+- One connection can carry one packet or many (it may stay open). Bytes between packets
+  (line breaks, spaces) are ignored. A packet may arrive split across several TCP reads.
+- The server **answers every packet** in the same framing:
+
+  ```
+  ${"result":"ACCEPTED","accepted":true,"direction":"IN","message":"Welcome, Ada Lovelace","event_id":311}$
+  ${"result":"ERROR","accepted":false,"error":"No door device with this ID is registered for this IP."}$
+  ```
+
+  `result` is one of the scan results in section 4 (`ACCEPTED`, `DUPLICATE`, `UNKNOWN_CARD`,
+  …), or `ERROR` when the packet itself was rejected. Use `accepted` for the green/red
+  light and `message` for a display. A door that ignores replies still works.
+- **Authentication is the fixed IP** (same rule as above): the connection must come from
+  the `allowed_ip` registered for the device named in `ID`. Only ATTENDANCE devices may
+  use TCP; till readers use HTTPS with their key.
+- **Finding a door's IP:** point the door at the server and tap a card. The rejection is
+  logged with the address the server saw (`journalctl -u backend-tcp`: `rejected
+  ID='Door1' from 203.0.113.5`). Register that address as the door's `allowed_ip`. If the
+  doors reach the server through a router/NAT, they all appear with the router's address,
+  which is fine because `ID` tells them apart.
+- Limits: packets up to 2 KB; a connection idle for 5 minutes is closed (just reconnect);
+  at most 10 connections per IP. Optional fields `event_time` and `client_event_id`
+  (section 4) work here too.
+- The scans then follow the same path as HTTP scans: attendance, occupancy and the live
+  dashboard feed.
+
 ---
 
 ## 2. Connection basics

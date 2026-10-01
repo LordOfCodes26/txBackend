@@ -26,11 +26,13 @@ app on `http://<ip>:8088` and `https://<ip>:8443` (self-signed certificate in
 `/etc/backend/tls/staging-*.pem`). Behind it, `backend-staging`
 ([deploy/systemd/backend-staging.service](deploy/systemd/backend-staging.service)) runs
 gunicorn on `127.0.0.1:8089` with `config.settings.staging` from `.env.staging`, and
-`backend-staging-ws` runs uvicorn on `127.0.0.1:8092` for WebSockets (`/ws/`).
+`backend-staging-ws` runs uvicorn on `127.0.0.1:8092` for WebSockets (`/ws/`), and
+`backend-staging-tcp` listens on **TCP 9100** for the door devices (`$`-framed JSON, see
+`docs/DEVICE_INTEGRATION.md`).
 Testing only: the HTTP port sends logins unencrypted.
 
 ```bash
-systemctl restart backend-staging backend-staging-ws   # after code changes
+systemctl restart backend-staging backend-staging-ws backend-staging-tcp   # after code changes
 journalctl -u backend-staging -f           # logs
 set -a; . ./.env.staging; set +a; .venv/bin/python manage.py collectstatic --noinput  # after static changes
 ```
@@ -56,7 +58,8 @@ time — the app runs natively under systemd behind nginx, not in Docker.
    (replace `/etc/backend/tls/*.pem` with your internal CA's certificate). Every run
    installs the release to `/opt/backend/releases/<version>`, migrates, collects static
    files, switches `/opt/backend/current` and restarts `backend-web` (REST API, gunicorn),
-   `backend-ws` (WebSockets, uvicorn) and `backend-worker` (Celery).
+   `backend-ws` (WebSockets, uvicorn), `backend-tcp` (door listener, TCP 9100) and
+   `backend-worker` (Celery). The doors must be able to reach TCP 9100 on the server.
 4. Roll back: `ln -sfn /opt/backend/releases/<old> /opt/backend/current && systemctl
    restart backend-web backend-worker` (only safe if the newer release added no
    irreversible migrations).
