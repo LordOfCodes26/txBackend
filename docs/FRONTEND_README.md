@@ -300,7 +300,7 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
 
 ### Money-moving requests need an `Idempotency-Key`
 
-Deposits, adjustments, purchase confirmation, bookings and payout requests require an
+Deposits, adjustments, purchase confirmation (also for bookings) and payout requests require an
 `Idempotency-Key` header:
 
 ```ts
@@ -496,7 +496,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
   - `PRODUCT`: tangible; optional stock (`track_stock`, `initial_quantity`, `/stock/`)
   - `SERVICE`: intangible and sold at the till (made-to-order coffee, haircut); no stock
   - `RENTAL`: booked by time slot (playground, pool); `price` is **per slot**. Requires a
-    `rental` object; rentals can't be added to a till purchase (`GOOD_NOT_AVAILABLE`).
+    `rental` object; rentals are added to a purchase as a booking (`/purchases/{id}/bookings/`), not with `/items/`.
     ```json
     "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00",
                "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3,
@@ -648,59 +648,75 @@ So your screen reacts as it will in production. Then confirm with the PIN as usu
 - To add a "Simulate tap" button to the till screen (development/staging only), follow
   `FRONTEND_TAP_SIMULATOR.md`: ready-to-paste server actions and component for this app.
 
-### Rentals and bookings
+### Rentals and bookings (playground desk)
+
+Developers **don't sign in**. They book a court at the **playground desk** the same way they
+buy at a till: the desk staff (the playground's seller account) prepare the booking, the
+developer **taps their card** on the desk's reader and **types their PIN**. The card holder
+gets the booking and pays for it.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | GET | `/rentals/` | logged in | Bookable rentals with price per slot, `rental` rules, seller, location and images |
 | GET | `/rentals/{id}/availability/?date=YYYY-MM-DD` | logged in | Every slot of that day: `{start, end, available}` |
-| POST | `/bookings/` | logged in, with a developer profile | `{good, start, slots, pin}` + `Idempotency-Key`. Pays from the balance |
-| GET | `/bookings/me/` | logged in | Own bookings |
+| POST | `/purchases/` | own seller, or `purchase.create` | Draft, same as the till (`service_position` of the playground, optional `reader`) |
+| POST | `/purchases/{id}/bookings/` | same | `{good, start, slots}`: add a court booking. Adding the same court again replaces its time. Returns the purchase |
+| PATCH / DELETE | `/purchases/{id}/items/{item}/` | same | PATCH `{quantity}` changes the **number of slots** (rules re-checked); DELETE removes it |
+| POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the tapped card's holder and **creates the booking(s)** |
 | GET | `/bookings/` | own seller, or `purchase.view` | Bookings of the seller's rentals. Filters: `good`, `seller`, `developer`, `date`, `start_after`, `start_before` |
 
-**Booking flow (developer app):**
-1. List `/rentals/`, then pick a rental and a date → `/availability/`.
-2. Show the slots; only those with `available: true` are selectable. Consecutive slots can be
-   combined, up to `rental.max_slots_per_booking`.
-3. Show the total (`price × slots`), ask for the PIN, and `POST /bookings/` with the first
-   slot's `start` exactly as returned by availability, plus the number of `slots`.
-4. On `201`, show the booking with `total` and `balance_after`.
+**Booking flow (desk screen):**
+1. List `/rentals/`, pick a court and a date → `/availability/`. Only slots with
+   `available: true` are selectable; consecutive slots can be combined, up to
+   `rental.max_slots_per_booking`.
+2. `POST /purchases/` (as at the till) and then `POST /purchases/{id}/bookings/` with the
+   first slot's `start` **exactly as returned by availability** and the number of `slots`.
+   The purchase's `items[]` now has a line with `kind: "RENTAL"`, `start`, `end`,
+   `quantity` (= slots) and `line_total` (= price × slots).
+3. From here it's **the till checkout screen, unchanged**: "Tap your card" → the
+   `card_tapped` WebSocket event / `presented_card` shows who tapped → the developer types
+   the PIN → `POST /purchases/{id}/confirm/`. *Simulate tap* in the test console works too.
+4. On `201`, show the booking: court, `start`–`end`, `total`, `balance_after`.
 
+- A purchase may hold several courts, or courts plus goods sold at the same desk. Rentals
+  can't be added with `/items/` (`GOOD_NOT_AVAILABLE`: "add them as a booking"), and only
+  rentals can be added with `/bookings/`.
+- The slot is **not held** while the draft is open: if another desk confirms the same time
+  first, this confirmation fails with `SLOT_UNAVAILABLE` and nothing is charged.
 - Only the **outdoor playground** is bookable; each court (football, basketball, volleyball,
   tennis, …) is its own rental, and different courts can be booked for the same time.
 - **Bookings are exclusive and final.** Nobody else can book an overlapping time on the same
   court, **one developer can't hold two courts at the same time**, and a booking can't be
   cancelled or refunded.
-**Errors when booking** (`POST /bookings/`); nothing is charged on any error:
+
+**Errors.** When adding (`/bookings/`, nothing is charged yet): `INVALID_SLOT`,
+`SLOT_UNAVAILABLE`, `RENTAL_NOT_AVAILABLE`, `GOOD_NOT_AVAILABLE`. When confirming, the till
+errors (`CARD_NOT_PRESENTED`, `CARD_NOT_USABLE`, PIN errors, `INSUFFICIENT_BALANCE`, …) plus
+these; nothing is charged on any error:
 
 | `code` | Meaning | Show / do |
 |---|---|---|
-| `SLOT_UNAVAILABLE` (409) | Someone booked an overlapping time on this court first | "Just taken", reload availability |
-| `ALREADY_BOOKED_THEN` (409) | The developer already holds another court at that time; `details`: `booking`, `good` (court), `start`, `end` | "You already have *Football field* 10:00–12:00" |
-| `DAILY_LIMIT_REACHED` (409) | Too many slots on this court that day; `details`: `max_slots_per_day`, `already_booked`, `remaining` | "1 slot left today" |
-| `INVALID_SLOT` (400) | Off the slot grid, outside opening hours, a closed day, in the past, too far ahead, or too many slots; `details` says which limit | Reload availability; use `start` exactly as returned |
+| `SLOT_UNAVAILABLE` (409) | Someone booked an overlapping time on this court first | "Just taken", reload availability, change the booking line |
+| `ALREADY_BOOKED_THEN` (409) | The card holder already holds another court at that time; `details`: `booking`, `good` (court), `start`, `end` | "Ada already has *Football field* 10:00–12:00" |
+| `DAILY_LIMIT_REACHED` (409) | The card holder has too many slots on this court that day; `details`: `max_slots_per_day`, `already_booked`, `remaining` | "1 slot left today for Ada" |
+| `INVALID_SLOT` (400) | Off the slot grid, outside opening hours, a closed day, in the past (also: the slot started while waiting), too far ahead, or too many slots; `details` says which limit | Reload availability; use `start` exactly as returned |
 | `RENTAL_NOT_AVAILABLE` (409) | The court was deactivated, has no rules, or its seller is closed | Remove it from the list |
 | `INSUFFICIENT_BALANCE` (409) | Not enough balance; `details`: `balance`, `required` | Show both amounts |
-| `INVALID_PIN` (400) / `PIN_LOCKED` (423) / `PIN_NOT_SET` (409) | PIN problems, same as at the till; `details.attempts_remaining` / `details.locked_until` | Same messages as the till |
-| `DEVELOPER_NOT_ACTIVE`, `ACCOUNT_NOT_ACTIVE` (409) | Suspended/terminated developer, or frozen/closed account | Show `message` |
+| `INVALID_PIN` (400) / `PIN_LOCKED` (423) / `PIN_NOT_SET` (409) | PIN problems, same as at the till | Same messages as the till |
 
-**Prevent errors in the UI before submitting:**
+**UI hints:**
 
-- Load the developer's bookings for the chosen day (`GET /bookings/me/?date=YYYY-MM-DD`) and
-  **grey out slots that overlap a court they already hold**, so `ALREADY_BOOKED_THEN` can't happen.
-- From the same list, compute the slots already used on this court that day and show
-  **"N of `max_slots_per_day` left"**; limit the selectable slots accordingly.
-- Show the price as `price × slots` (money strings, no float maths) next to the current
-  balance (`/finance/accounts/me/`); disable "Book" when the balance is too low.
+- The per-developer checks (two courts at once, daily limit) can only run after the tap,
+  because only then is it known who is booking. Once `presented_card` shows the developer,
+  you may load `GET /bookings/?developer={id}&date=YYYY-MM-DD` to warn before the PIN.
+- Show the price as `price × slots` (money strings, no float maths).
 - Times: availability returns full timestamps; display them in the browser's local time.
   Slot rules (opening hours, which day a slot belongs to) are in the **company timezone**
   set on the server (`TIME_ZONE`, currently UTC on staging).
-- Generate a new `Idempotency-Key` when the confirm dialog opens; reuse it for retries of
-  that same attempt only.
-
-- A booking appears in the developer's statement and purchases (`/purchases/me/`) like a
-  till purchase, and in the seller's earnings.
-- Sellers see who booked what at `/bookings/?date=…`, e.g. for a daily schedule screen.
+- Generate a new `Idempotency-Key` when the PIN dialog opens; reuse it for retries of that
+  same attempt only.
+- A booking appears in the developer's statement like a till purchase, and in the seller's
+  earnings. Sellers see the day's schedule at `/bookings/?date=…`.
 
 ### Realtime (WebSocket) for the till screen
 
@@ -833,7 +849,7 @@ before → after table.
 | My earnings and payouts (seller) | `seller-finance/accounts/me/`, `seller-finance/transactions/`, `seller-finance/payouts/` | active seller |
 | Seller balances and payout queue (finance) | `seller-finance/accounts/`, `seller-finance/payouts/?status=REQUESTED` | `seller_finance.view` |
 | My purchases | `purchases/me/` | anyone with a developer profile |
-| Book a rental (list, day view of slots, PIN confirm) and my bookings | `rentals/`, `rentals/{id}/availability/`, `bookings/`, `bookings/me/` | anyone with a developer profile |
+| Playground desk: book a court (day view of slots → card tap + PIN, the till checkout) | `rentals/`, `rentals/{id}/availability/`, `purchases/`, `purchases/{id}/bookings/`, `purchases/{id}/confirm/` | the playground's seller, or `purchase.create` + `purchase.confirm` |
 | Rental schedule (seller) | `bookings/?date=` | active seller, or `purchase.view` |
 | Audit log | `audit-logs/` | `audit.view` |
 

@@ -2,7 +2,7 @@ from django.conf import settings
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
-from apps.goods.models import Good, GoodKind
+from apps.goods.models import Good
 from apps.goods.serializers import GoodImageSerializer, RentalSettingsSerializer
 from apps.sellers.serializers import SellerSummarySerializer
 
@@ -45,15 +45,6 @@ class SlotSerializer(serializers.Serializer):
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
     available = serializers.BooleanField()
-
-
-class BookingCreateSerializer(serializers.Serializer):
-    good = serializers.PrimaryKeyRelatedField(
-        queryset=Good.objects.filter(kind=GoodKind.RENTAL), help_text="The rental to book."
-    )
-    start = serializers.DateTimeField(help_text="Start of the first slot (from availability).")
-    slots = serializers.IntegerField(min_value=1, default=1)
-    pin = serializers.CharField(write_only=True, max_length=6)
 
 
 class BookingSerializer(serializers.ModelSerializer):

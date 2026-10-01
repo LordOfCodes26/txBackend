@@ -17,8 +17,10 @@ class TsTzRange(Func):
 class Booking(TimeStampedModel):
     """An exclusive, prepaid time slot on a RENTAL good (playground, pool, ...).
 
-    Paid through a CONFIRMED `Purchase`, so the developer's ledger, the seller's earnings
-    and the reconciliation checks treat it like any other sale. Bookings are final.
+    Prepared at the playground desk as a line of a draft `Purchase` (rental good, start,
+    number of slots); the developer taps their card and enters their PIN, and confirming
+    the purchase creates the booking. So the ledger, the seller's earnings and the
+    reconciliation checks treat it like any other sale. Bookings are final.
 
     Exclusion constraints make overlapping bookings impossible at the database level, even
     under concurrent requests: of the same court, and by the same developer (one court at a
@@ -28,7 +30,7 @@ class Booking(TimeStampedModel):
 
     good = models.ForeignKey(Good, on_delete=models.PROTECT, related_name="bookings")
     developer = models.ForeignKey(Developer, on_delete=models.PROTECT, related_name="bookings")
-    purchase = models.OneToOneField(Purchase, on_delete=models.PROTECT, related_name="booking")
+    purchase = models.ForeignKey(Purchase, on_delete=models.PROTECT, related_name="bookings")
     start = models.DateTimeField()
     end = models.DateTimeField()
     slots = models.PositiveSmallIntegerField()

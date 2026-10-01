@@ -7,14 +7,8 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
-from apps.finance import services as finance
-from apps.finance.exceptions import IdempotencyKeyReused
-from apps.finance.models import DeveloperAccount, TransactionKind
 from apps.goods.models import Good, GoodKind, RentalSettings
-from apps.purchases.exceptions import DeveloperNotActive
-from apps.purchases.models import Purchase, PurchaseItem, PurchaseStatus
-from apps.purchases.services import INACTIVE_DEVELOPER
-from apps.seller_finance.services import credit_sale
+from apps.purchases.models import Purchase
 from apps.sellers.models import SellerStatus
 
 from .exceptions import (
@@ -133,140 +127,76 @@ def _ensure_daily_limit(rules: RentalSettings, good: Good, developer, start, slo
         )
 
 
-def book(
-    *,
-    actor,
-    developer: Developer,
-    good: Good,
-    start: datetime,
-    slots: int,
-    pin: str,
-    idempotency_key: str,
-) -> tuple[Booking, bool]:
-    """Book and pay for a rental slot range. Returns (booking, created).
+def check_line(*, good: Good, start: datetime, slots: int) -> datetime:
+    """Early feedback while the desk prepares a booking: the rental is bookable, the range
+    fits its rules and is free right now. Confirmation re-checks everything under locks.
+    Returns the end of the range."""
+    rules = _ensure_bookable(good)
+    end = _validate_slot(rules, start, slots)
+    if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
+        raise SlotUnavailable()
+    return end
 
-    1. Replay: the same Idempotency-Key returns the original booking.
-    2. Verify the developer's PIN (own transaction, failures are counted).
-    3. One atomic transaction, locking account then good (same order as checkout):
-       re-check the rental and the slot, reject overlaps, charge the developer, credit
-       the seller, record a confirmed purchase and the booking. The exclusion
-       constraint is the final guard against double-booking.
+
+def book_lines(
+    *, actor, purchase: Purchase, developer: Developer, items, goods: dict
+) -> list[Booking]:
+    """Create the bookings of a purchase being confirmed (the card holder pays).
+
+    Called by `confirm_purchase` inside its transaction, with the developer's account and
+    the rental goods already locked: bookings of one court, and of one developer, are
+    processed one at a time. The exclusion constraints are the final guard.
     """
-    previous = Purchase.objects.filter(confirm_idempotency_key=idempotency_key).first()
-    if previous is not None:
-        booking = Booking.objects.filter(purchase=previous).first()
-        if booking is None or (
-            booking.developer_id,
-            booking.good_id,
-            booking.start,
-            booking.slots,
-        ) != (developer.pk, good.pk, start, slots):
-            raise IdempotencyKeyReused()
-        return booking, False
-
-    if developer.deleted_at or developer.status in INACTIVE_DEVELOPER:
-        raise DeveloperNotActive()
-    account = finance.open_account(developer)
-    finance.verify_pin(account=account, pin=pin)
-
-    try:
-        with transaction.atomic():
-            account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
-            good = (
-                # Lock only the good's row: Postgres can't lock the nullable side of the
-                # LEFT JOIN that select_related("rental") produces.
-                Good.all_objects.select_for_update(of=("self",))
-                .select_related("service_position__seller", "rental")
-                .get(pk=good.pk)
+    bookings = []
+    for item in items:
+        good = goods[item.good_id]
+        rules = _ensure_bookable(good)
+        end = _validate_slot(rules, item.start, item.quantity)
+        if Booking.objects.filter(good=good, start__lt=end, end__gt=item.start).exists():
+            raise SlotUnavailable(details={"good": good.pk, "start": item.start.isoformat()})
+        _ensure_daily_limit(rules, good, developer, item.start, item.quantity)
+        clash = (
+            Booking.objects.filter(developer=developer, start__lt=end, end__gt=item.start)
+            .select_related("good")
+            .first()
+        )
+        if clash is not None:
+            raise AlreadyBookedThen(
+                details={
+                    "booking": clash.pk,
+                    "good": clash.good.name,
+                    "start": clash.start.isoformat(),
+                    "end": clash.end.isoformat(),
+                }
             )
-            rules = _ensure_bookable(good)
-            end = _validate_slot(rules, start, slots)
-            if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
-                raise SlotUnavailable()
-            _ensure_daily_limit(rules, good, developer, start, slots)
-            clash = (
-                Booking.objects.filter(developer=developer, start__lt=end, end__gt=start)
-                .select_related("good")
-                .first()
-            )
-            if clash is not None:
-                raise AlreadyBookedThen(
-                    details={
-                        "booking": clash.pk,
-                        "good": clash.good.name,
-                        "start": clash.start.isoformat(),
-                        "end": clash.end.isoformat(),
-                    }
+        try:
+            with transaction.atomic():
+                booking = Booking.objects.create(
+                    good=good,
+                    developer=developer,
+                    purchase=purchase,
+                    start=item.start,
+                    end=end,
+                    slots=item.quantity,
                 )
-
-            total = finance.money(good.price * slots)
-            if total <= 0:
-                raise RentalNotAvailable(_("Rentals must have a positive price."))
-            position = good.service_position
-            purchase = Purchase.objects.create(
-                seller=position.seller, service_position=position, created_by=actor
-            )
-            reference = f"purchase:{purchase.pk}"
-            PurchaseItem.objects.create(
-                purchase=purchase,
-                good=good,
-                quantity=slots,
-                unit_price=good.price,
-                line_total=total,
-            )
-            txn = finance.post_transaction(
-                account=account,
-                kind=TransactionKind.PURCHASE,
-                amount=-total,
-                actor=actor,
-                description=f"Booking: {good.name}",
-                reference=reference,
-            )
-            credit_sale(seller=position.seller, amount=total, reference=reference, actor=actor)
-
-            purchase.status = PurchaseStatus.CONFIRMED
-            purchase.developer = developer
-            purchase.total = total
-            purchase.account_transaction = txn
-            purchase.confirm_idempotency_key = idempotency_key
-            purchase.confirmed_by = actor
-            purchase.confirmed_at = timezone.now()
-            purchase.save()
-
-            try:
-                with transaction.atomic():
-                    booking = Booking.objects.create(
-                        good=good,
-                        developer=developer,
-                        purchase=purchase,
-                        start=start,
-                        end=end,
-                        slots=slots,
-                    )
-            except IntegrityError as exc:
-                # A concurrent request won: either the court or the developer's time is taken.
-                cause = getattr(exc.__cause__, "diag", None)
-                if cause is not None and cause.constraint_name == "booking_one_court_per_developer":
-                    raise AlreadyBookedThen() from exc
-                raise SlotUnavailable() from exc
-
-            record_audit(
-                "booking.created",
-                actor=actor,
-                entity=booking,
-                new_values={
-                    "good": good.pk,
-                    "developer": developer.pk,
-                    "start": start,
-                    "end": end,
-                    "total": total,
-                    "purchase": purchase.pk,
-                },
-            )
-    except IntegrityError:
-        # A concurrent request with the same Idempotency-Key won.
-        previous = Purchase.objects.filter(confirm_idempotency_key=idempotency_key).first()
-        if previous is None:
-            raise
-        return Booking.objects.get(purchase=previous), False
-    return booking, True
+        except IntegrityError as exc:
+            # A concurrent confirmation won: either the court or the developer's time is taken.
+            cause = getattr(exc.__cause__, "diag", None)
+            if cause is not None and cause.constraint_name == "booking_one_court_per_developer":
+                raise AlreadyBookedThen() from exc
+            raise SlotUnavailable() from exc
+        record_audit(
+            "booking.created",
+            actor=actor,
+            entity=booking,
+            new_values={
+                "good": good.pk,
+                "developer": developer.pk,
+                "start": booking.start.isoformat(),
+                "end": booking.end.isoformat(),
+                "slots": booking.slots,
+                "purchase": purchase.pk,
+            },
+        )
+        bookings.append(booking)
+    return bookings

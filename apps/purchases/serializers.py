@@ -19,13 +19,36 @@ from .models import Purchase, PurchaseItem
 
 class PurchaseItemSerializer(serializers.ModelSerializer):
     good_name = serializers.CharField(source="good.name", read_only=True)
+    kind = serializers.CharField(source="good.kind", read_only=True)
+    start = serializers.DateTimeField(
+        read_only=True, help_text="Bookings: start of the first slot; null for goods."
+    )
+    end = serializers.SerializerMethodField(help_text="Bookings: end of the last slot.")
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseItem
-        fields = ["id", "good", "good_name", "quantity", "unit_price", "line_total"]
+        fields = [
+            "id",
+            "good",
+            "good_name",
+            "kind",
+            "quantity",
+            "start",
+            "end",
+            "unit_price",
+            "line_total",
+        ]
         read_only_fields = fields
+
+    def get_end(self, item) -> str | None:
+        if item.start is None:
+            return None
+        rental = getattr(item.good, "rental", None)
+        if rental is None:
+            return None
+        return (item.start + timedelta(minutes=rental.slot_minutes * item.quantity)).isoformat()
 
     # Drafts show the current price; confirmed purchases show what was charged.
     def get_unit_price(self, item) -> str:
@@ -166,6 +189,14 @@ class DetectedReaderSerializer(serializers.Serializer):
 class ItemAddSerializer(serializers.Serializer):
     good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
     quantity = serializers.IntegerField(min_value=1, max_value=999, default=1)
+
+
+class BookingLineSerializer(serializers.Serializer):
+    good = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.all(), help_text="The rental (court) to book."
+    )
+    start = serializers.DateTimeField(help_text="Start of the first slot (from availability).")
+    slots = serializers.IntegerField(min_value=1, max_value=48, default=1)
 
 
 class ItemUpdateSerializer(serializers.Serializer):

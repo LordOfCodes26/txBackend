@@ -42,10 +42,14 @@ def _lock_draft(purchase: Purchase) -> Purchase:
     return purchase
 
 
-def _ensure_sellable(good: Good, purchase: Purchase) -> None:
-    if good.kind == GoodKind.RENTAL:
+def _ensure_sellable(good: Good, purchase: Purchase, *, booking: bool = False) -> None:
+    """`booking`: the line is a booking (has a start time); only rentals are booked."""
+    if (good.kind == GoodKind.RENTAL) != booking:
         raise GoodNotAvailable(
-            _("Rentals are booked by developers, not sold at the till."), details={"good": good.pk}
+            _("Rentals need a start time: add them as a booking.")
+            if good.kind == GoodKind.RENTAL
+            else _("Only rentals can be booked."),
+            details={"good": good.pk},
         )
     if (
         good.deleted_at is not None
@@ -132,8 +136,32 @@ def add_item(*, purchase: Purchase, good: Good, quantity: int) -> PurchaseItem:
 
 
 @transaction.atomic
-def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
+def add_booking(*, purchase: Purchase, good: Good, start, slots: int) -> PurchaseItem:
+    """Add a court booking (rental good, first slot, number of slots) to a draft. The
+    developer who taps their card and enters the PIN gets the booking and pays for it.
+    Adding the same rental again replaces its time."""
+    from apps.bookings import services as bookings
+
     purchase = _lock_draft(purchase)
+    good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
+    if good.kind == GoodKind.RENTAL:
+        bookings.check_line(good=good, start=start, slots=slots)
+    _ensure_sellable(good, purchase, booking=True)
+    item, _created = PurchaseItem.objects.update_or_create(
+        purchase=purchase, good=good, defaults={"quantity": slots, "start": start}
+    )
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
+    return item
+
+
+@transaction.atomic
+def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
+    """Change the quantity of a good, or the number of slots of a booking."""
+    from apps.bookings import services as bookings
+
+    purchase = _lock_draft(purchase)
+    if item.start is not None:
+        bookings.check_line(good=item.good, start=item.start, slots=quantity)
     _check_stock_hint(item.good, quantity)
     item.quantity = quantity
     item.save(update_fields=["quantity"])
@@ -313,7 +341,7 @@ def confirm_purchase(
         total = Decimal("0.00")
         for item in items:
             good = locked_goods[item.good_id]
-            _ensure_sellable(good, purchase)
+            _ensure_sellable(good, purchase, booking=item.start is not None)
             item.unit_price = good.price
             item.line_total = finance.money(good.price * item.quantity)
             total += item.line_total
@@ -354,6 +382,18 @@ def confirm_purchase(
         purchase.confirmed_at = timezone.now()
         purchase.save()
 
+        booked = [i for i in items if i.start is not None]
+        if booked:
+            from apps.bookings import services as bookings
+
+            bookings.book_lines(
+                actor=actor,
+                purchase=purchase,
+                developer=developer,
+                items=booked,
+                goods=locked_goods,
+            )
+
         record_audit(
             "purchase.confirmed",
             actor=actor,
@@ -363,6 +403,7 @@ def confirm_purchase(
                 "card": card.uid,
                 "total": total,
                 "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
+                "bookings": [[i.good_id, i.start.isoformat(), i.quantity] for i in booked],
                 "balance_after": txn.balance_after,
             },
         )

@@ -14,6 +14,7 @@ from . import services
 from .filters import PurchaseFilter
 from .models import Purchase
 from .serializers import (
+    BookingLineSerializer,
     ConfirmSerializer,
     DetectedReaderSerializer,
     ItemAddSerializer,
@@ -29,6 +30,7 @@ SELLER_ACTIONS = (
     "retrieve",
     "create",
     "add_item",
+    "add_booking",
     "item",
     "set_reader",
     "readers",
@@ -59,7 +61,7 @@ class PurchaseViewSet(
         "account_transaction",
         "presented_event__developer",
         "reader",
-    ).prefetch_related("items__good")
+    ).prefetch_related("items__good__rental")
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {
@@ -67,6 +69,7 @@ class PurchaseViewSet(
         "retrieve": ["purchase.view"],
         "create": ["purchase.create"],
         "add_item": ["purchase.create"],
+        "add_booking": ["purchase.create"],
         "item": ["purchase.create"],
         "set_reader": ["purchase.create"],
         "readers": ["purchase.create"],
@@ -154,11 +157,24 @@ class PurchaseViewSet(
         services.add_item(purchase=purchase, **serializer.validated_data)
         return self._respond(purchase)
 
+    @extend_schema(request=BookingLineSerializer, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="bookings")
+    def add_booking(self, request, pk=None):
+        """Add a court booking (rental, first slot, number of slots). The developer who taps
+        their card and enters the PIN at confirmation gets the booking and pays for it.
+        Adding the same rental again replaces its time. Returns the whole purchase."""
+        purchase = self.get_object()
+        serializer = BookingLineSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.add_booking(purchase=purchase, **serializer.validated_data)
+        return self._respond(purchase)
+
     @extend_schema(methods=["PATCH"], request=ItemUpdateSerializer, responses=PurchaseSerializer)
     @extend_schema(methods=["DELETE"], request=None, responses=PurchaseSerializer)
     @action(detail=True, methods=["patch", "delete"], url_path=r"items/(?P<item_id>\d+)")
     def item(self, request, pk=None, item_id=None):
-        """PATCH changes the quantity; DELETE removes the item. Returns the whole purchase."""
+        """PATCH changes the quantity (for a booking: the number of slots); DELETE removes
+        the item. Returns the whole purchase."""
         purchase = self.get_object()
         item = get_object_or_404(purchase.items, pk=item_id)
         if request.method == "DELETE":

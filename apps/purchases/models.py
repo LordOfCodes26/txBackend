@@ -110,6 +110,8 @@ class PurchaseItem(models.Model):
     quantity = models.PositiveIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
+    # RENTAL lines: start of the first booked slot; `quantity` is the number of slots.
+    start = models.DateTimeField(null=True, blank=True)
     # Price actually charged, fixed at confirmation (drafts show the current price).
     unit_price = models.DecimalField(**MONEY, null=True, blank=True)
     line_total = models.DecimalField(**MONEY, null=True, blank=True)

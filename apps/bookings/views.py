@@ -1,6 +1,6 @@
 from django.db.models import Q
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import mixins, status, viewsets
+from drf_spectacular.utils import extend_schema
+from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,14 +10,12 @@ from apps.developers.models import Developer
 from apps.goods.models import Good, GoodKind
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from apps.sellers.models import SellerStatus
-from common.idempotency import HEADER, require_idempotency_key
 
 from . import services
 from .filters import BookingFilter
 from .models import Booking
 from .serializers import (
     AvailabilityQuerySerializer,
-    BookingCreateSerializer,
     BookingSerializer,
     RentalSerializer,
     SlotSerializer,
@@ -66,13 +64,13 @@ class BookingViewSet(
     SellerScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
-    mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Developers book and pay for rental slots; bookings are final.
+    """Court bookings (read-only). Bookings are made at the playground desk: add them to a
+    draft purchase (`POST /purchases/{id}/bookings/`); the developer taps their card and
+    enters the PIN, and confirming the purchase creates the booking. Bookings are final.
 
-    Developers see their own bookings at `/bookings/me/`; sellers see bookings of their
-    rentals; `purchase.view` sees all.
+    Sellers see bookings of their rentals; `purchase.view` sees all.
     """
 
     queryset = Booking.objects.select_related(
@@ -80,12 +78,7 @@ class BookingViewSet(
     )
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
-    required_permissions = {
-        "list": ["purchase.view"],
-        "retrieve": ["purchase.view"],
-        "create": [],
-        "me": [],
-    }
+    required_permissions = {"list": ["purchase.view"], "retrieve": ["purchase.view"]}
     seller_actions = ("list", "retrieve")
     scope_permission = "purchase.view"
     seller_lookup = "good__service_position__seller"
@@ -95,43 +88,3 @@ class BookingViewSet(
     @staticmethod
     def owner_seller_id(obj):
         return obj.good.service_position.seller_id
-
-    def get_queryset(self):
-        if self.action == "me":
-            return self.queryset.filter(developer=_own_developer(self.request))
-        return super().get_queryset()
-
-    @extend_schema(
-        request=BookingCreateSerializer,
-        responses={201: BookingSerializer, 200: BookingSerializer},
-        parameters=[
-            OpenApiParameter(
-                HEADER,
-                location=OpenApiParameter.HEADER,
-                required=True,
-                description="Unique per booking attempt; a retry with the same key is safe.",
-            )
-        ],
-        description="Book and pay for consecutive slots of a rental with your PIN. "
-        "201 when booked now; 200 when this Idempotency-Key already booked it.",
-    )
-    def create(self, request, *args, **kwargs):
-        key = require_idempotency_key(request)
-        serializer = BookingCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        booking, created = services.book(
-            actor=request.user,
-            developer=_own_developer(request),
-            idempotency_key=key,
-            **serializer.validated_data,
-        )
-        booking = self.queryset.get(pk=booking.pk)
-        return Response(
-            BookingSerializer(booking).data,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
-
-    @action(detail=False, methods=["get"])
-    def me(self, request):
-        """Your own bookings."""
-        return self.list(request)

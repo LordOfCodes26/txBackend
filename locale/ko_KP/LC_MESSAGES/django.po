@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 15:04+0000\n"
+"POT-Creation-Date: 2026-10-01 15:16+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -76,9 +76,6 @@ msgstr "이날에는 운영하지 않습니다."
 
 msgid "Pick a start time on the slot grid within opening hours."
 msgstr "운영시간안의 시간대 시작시간을 선택하십시오."
-
-msgid "Rentals must have a positive price."
-msgstr "임대료금은 0보다 커야 합니다."
 
 msgid "Reassign this developer's direct reports before deleting them."
 msgstr "삭제하기전에 이 개발자의 직속 하급자들을 다른 사람에게 옮기십시오."
@@ -240,8 +237,11 @@ msgstr "카드번호를 입력하는것은 허용되지 않습니다. 카드를 
 msgid "You can only sell at your own service positions."
 msgstr "자기의 봉사매대에서만 판매할수 있습니다."
 
-msgid "Rentals are booked by developers, not sold at the till."
-msgstr "임대는 개발자가 예약하는것이며 판매대에서 팔지 않습니다."
+msgid "Rentals need a start time: add them as a booking."
+msgstr "임대대상은 시작시간이 있어야 합니다. 예약으로 추가하십시오."
+
+msgid "Only rentals can be booked."
+msgstr "임대대상만 예약할수 있습니다."
 
 msgid "Unknown card."
 msgstr "등록되지 않은 카드입니다."

@@ -9,21 +9,32 @@ from django.utils import timezone
 
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
-from apps.bookings import services
 from apps.bookings.exceptions import SlotUnavailable
 from apps.bookings.models import Booking
 from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.finance.models import DeveloperAccount
 from apps.goods.models import Good, GoodKind, RentalSettings
+from apps.purchases import services as purchases
 from apps.purchases.models import Purchase
+from apps.rfid import services as rfid
+from apps.rfid.models import RFIDCard, RFIDCardAssignment
 from apps.seller_finance.services import seller_ledger_mismatches
 from apps.sellers.models import Seller, ServicePosition
 
 GOODS = "/api/v1/goods/"
 RENTALS = "/api/v1/rentals/"
 BOOKINGS = "/api/v1/bookings/"
+PURCHASES = "/api/v1/purchases/"
 PIN = "4826"
+UID = "04AABBCCDD"
+
+
+@pytest.fixture(autouse=True)
+def manual_card_entry(settings):
+    """Most tests confirm with a typed card UID; test_booking_with_a_tapped_card covers the
+    reader flow used in production."""
+    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = True
 
 
 def key():
@@ -55,8 +66,8 @@ def world(db, make_user):
         max_slots_per_booking=3,
         max_days_ahead=14,
     )
-    dev_user = make_user(Roles.DEVELOPER, email="ada@x.com")
-    developer = Developer.objects.create(employee_number="E1", full_name="Ada", user=dev_user)
+    developer = Developer.objects.create(employee_number="E1", full_name="Ada")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid=UID), developer=developer)
     account = finance.open_account(developer)
     finance.deposit(actor=None, developer=developer, amount="100.00", idempotency_key="seed-0001")
     finance.set_pin(actor=None, account=account, pin=PIN, current_pin=None)
@@ -70,21 +81,44 @@ def world(db, make_user):
 
 
 @pytest.fixture
-def dev_client(auth_client, world):
-    return auth_client(world.dev_user)
+def desk(auth_client, world):
+    """The playground desk: the seller's staff, signed in. Developers never sign in."""
+    return auth_client(world.seller_user)
 
 
-def book(client, world, start, slots=1, pin=PIN, idem=None, good=None):
+def add_booking(client, world, start, slots=1, good=None, purchase=None):
+    """Add a booking line to a (new) draft; returns (purchase id, response)."""
+    if purchase is None:
+        purchase = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
+    response = client.post(
+        f"{PURCHASES}{purchase}/bookings/",
+        {"good": (good or world.playground).pk, "start": start.isoformat(), "slots": slots},
+    )
+    return purchase, response
+
+
+def confirm(client, purchase, pin=PIN, uid=UID, idem=None):
     return client.post(
-        BOOKINGS,
-        {
-            "good": (good or world.playground).pk,
-            "start": start.isoformat(),
-            "slots": slots,
-            "pin": pin,
-        },
+        f"{PURCHASES}{purchase}/confirm/",
+        {"card_uid": uid, "pin": pin},
         HTTP_IDEMPOTENCY_KEY=idem or key(),
     )
+
+
+def book(client, world, start, slots=1, pin=PIN, idem=None, good=None, uid=UID):
+    """The whole desk flow: draft, booking line, card + PIN. Returns the first error
+    response, or the confirmation response."""
+    purchase, response = add_booking(client, world, start, slots, good)
+    if response.status_code != 200:
+        return response
+    return confirm(client, purchase, pin=pin, uid=uid, idem=idem)
+
+
+def draft(world, good, start, slots=1):
+    """A draft purchase with one booking line, prepared at the desk (service level)."""
+    purchase = purchases.create_purchase(actor=world.seller_user, service_position=world.position)
+    purchases.add_booking(purchase=purchase, good=good, start=start, slots=slots)
+    return purchase
 
 
 def balance(world):
@@ -188,18 +222,18 @@ def test_rentals_cannot_be_sold_at_the_till(auth_client, world):
 
 
 @pytest.mark.django_db
-def test_developer_browses_rentals_and_availability(dev_client, world):
-    rentals = dev_client.get(RENTALS).json()["results"]
+def test_developer_browses_rentals_and_availability(desk, world):
+    rentals = desk.get(RENTALS).json()["results"]
     assert [r["name"] for r in rentals] == ["Playground"]
     assert rentals[0]["rental"]["slot_minutes"] == 60
 
     day = tomorrow_at(0).date()
-    slots = dev_client.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
+    slots = desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
     assert len(slots) == 12  # 08:00-20:00 in 1h slots
     assert all(s["available"] for s in slots)
 
-    book(dev_client, world, tomorrow_at(10), slots=2)
-    slots = dev_client.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
+    book(desk, world, tomorrow_at(10), slots=2)
+    slots = desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
     taken = [
         timezone.localtime(datetime.fromisoformat(s["start"])).hour
         for s in slots
@@ -209,37 +243,45 @@ def test_developer_browses_rentals_and_availability(dev_client, world):
 
 
 @pytest.mark.django_db
-def test_inactive_rental_is_hidden(dev_client, world):
+def test_inactive_rental_is_hidden(desk, world):
     Good.objects.filter(pk=world.playground.pk).update(is_active=False)
-    assert dev_client.get(RENTALS).json()["count"] == 0
-    assert (
-        book(dev_client, world, tomorrow_at(10)).json()["error"]["code"] == "RENTAL_NOT_AVAILABLE"
-    )
+    assert desk.get(RENTALS).json()["count"] == 0
+    assert book(desk, world, tomorrow_at(10)).json()["error"]["code"] == "RENTAL_NOT_AVAILABLE"
 
 
 @pytest.mark.django_db
-def test_closed_weekday_has_no_slots(dev_client, world):
+def test_closed_weekday_has_no_slots(desk, world):
     day = tomorrow_at(0).date()
     RentalSettings.objects.filter(good=world.playground).update(
         weekdays=[d for d in range(7) if d != day.weekday()]
     )
-    assert dev_client.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json() == []
-    assert book(dev_client, world, tomorrow_at(10)).json()["error"]["code"] == "INVALID_SLOT"
+    assert desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json() == []
+    assert book(desk, world, tomorrow_at(10)).json()["error"]["code"] == "INVALID_SLOT"
 
 
 # --- Booking --------------------------------------------------------------------------
 
 
 @pytest.mark.django_db
-def test_booking_charges_developer_and_credits_seller(dev_client, world):
-    response = book(dev_client, world, tomorrow_at(14), slots=2)
+def test_booking_charges_developer_and_credits_seller(desk, world):
+    pid, draft = add_booking(desk, world, tomorrow_at(14), slots=2)
+    assert draft.status_code == 200, draft.json()
+    line = draft.json()["items"][0]
+    assert (line["kind"], line["quantity"], line["line_total"]) == ("RENTAL", 2, "40.00")
+    assert timezone.localtime(datetime.fromisoformat(line["end"])).hour == 16
+    assert draft.json()["total"] == "40.00"
+
+    response = confirm(desk, pid)
     assert response.status_code == 201, response.json()
-    body = response.json()
+    assert (response.json()["total"], response.json()["balance_after"]) == ("40.00", "60.00")
+    booking = Booking.objects.get()
+    assert (booking.developer, booking.slots, booking.purchase_id) == (world.developer, 2, pid)
+    assert timezone.localtime(booking.end).hour == 16
+    body = desk.get(f"{BOOKINGS}{booking.pk}/").json()
     assert (body["total"], body["balance_after"], body["slots"]) == ("40.00", "60.00", 2)
-    assert timezone.localtime(datetime.fromisoformat(body["end"])).hour == 16
 
     assert balance(world) == Decimal("60.00")
-    purchase = Purchase.objects.get(pk=body["purchase"])
+    purchase = Purchase.objects.get(pk=pid)
     assert (purchase.status, purchase.total, purchase.developer_id) == (
         "CONFIRMED",
         Decimal("40.00"),
@@ -251,12 +293,91 @@ def test_booking_charges_developer_and_credits_seller(dev_client, world):
 
 
 @pytest.mark.django_db
-def test_overlapping_booking_is_rejected(dev_client, world):
-    assert book(dev_client, world, tomorrow_at(10), slots=2).status_code == 201  # 10-12
-    r = book(dev_client, world, tomorrow_at(11))
+def test_overlapping_booking_is_rejected(desk, world):
+    assert book(desk, world, tomorrow_at(10), slots=2).status_code == 201  # 10-12
+    r = book(desk, world, tomorrow_at(11))
     assert (r.status_code, r.json()["error"]["code"]) == (409, "SLOT_UNAVAILABLE")
-    assert book(dev_client, world, tomorrow_at(12)).status_code == 201  # back-to-back is fine
+    assert book(desk, world, tomorrow_at(12)).status_code == 201  # back-to-back is fine
     assert balance(world) == Decimal("40.00")
+
+
+@pytest.mark.django_db
+def test_slot_taken_while_the_developer_enters_the_pin(desk, world):
+    """Two desks prepare the same slot: the first to confirm gets it, nothing is charged
+    for the second."""
+    first, _ = add_booking(desk, world, tomorrow_at(10))
+    second, _ = add_booking(desk, world, tomorrow_at(10))
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=bob)
+    finance.deposit(actor=None, developer=bob, amount="50.00", idempotency_key="seed-0002")
+    finance.set_pin(actor=None, account=finance.open_account(bob), pin="5082", current_pin=None)
+
+    assert confirm(desk, first).status_code == 201
+    r = confirm(desk, second, pin="5082", uid="04BB")
+    assert (r.status_code, r.json()["error"]["code"]) == (409, "SLOT_UNAVAILABLE")
+    assert Purchase.objects.get(pk=second).status == "DRAFT"
+    assert finance.open_account(bob).balance == Decimal("50.00")
+
+
+@pytest.mark.django_db
+def test_changing_slots_rechecks_the_rules(desk, world):
+    pid, draft = add_booking(desk, world, tomorrow_at(10))
+    item = draft.json()["items"][0]["id"]
+    r = desk.patch(f"{PURCHASES}{pid}/items/{item}/", {"quantity": 4})
+    assert r.json()["error"]["details"] == {"max_slots_per_booking": 3}
+    r = desk.patch(f"{PURCHASES}{pid}/items/{item}/", {"quantity": 3})
+    assert r.json()["items"][0]["line_total"] == "60.00"
+    # Adding the same court again replaces its time.
+    _, again = add_booking(desk, world, tomorrow_at(15), purchase=pid)
+    assert [(i["quantity"], i["start"]) for i in again.json()["items"]] == [
+        (1, tomorrow_at(15).isoformat().replace("+00:00", "Z"))
+    ]
+
+
+@pytest.mark.django_db
+def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
+    ball = Good.objects.create(
+        service_position=world.position, name="Ball", price="5.00", track_stock=False
+    )
+    _, r = add_booking(desk, world, tomorrow_at(10), good=ball)
+    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
+
+    other = Seller.objects.create(name="Other", user=make_user(Roles.SELLER))
+    position = ServicePosition.objects.create(seller=other, name="Pool")
+    pool = Good.objects.create(
+        service_position=position,
+        name="Pool",
+        price="5.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=pool, slot_minutes=60, opening_time=time(8), closing_time=time(20)
+    )
+    _, r = add_booking(desk, world, tomorrow_at(10), good=pool)
+    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
+
+
+@pytest.mark.django_db
+def test_booking_with_a_tapped_card(desk, world, settings):
+    """Production flow: no typed UID; the developer taps the card on the desk's reader."""
+    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = False
+    reader, _key = rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    pid = desk.post(PURCHASES, {"service_position": world.position.pk, "reader": "Reader1"}).json()[
+        "id"
+    ]
+    add_booking(desk, world, tomorrow_at(10), purchase=pid)
+
+    r = desk.post(f"{PURCHASES}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
+    assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"
+
+    rfid.record_scan(device=reader, uid=UID)
+    assert (
+        desk.get(f"{PURCHASES}{pid}/").json()["presented_card"]["developer"]["full_name"] == "Ada"
+    )
+    r = desk.post(f"{PURCHASES}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
+    assert r.status_code == 201, r.json()
+    assert Booking.objects.get().developer == world.developer
 
 
 @pytest.mark.django_db
@@ -270,44 +391,45 @@ def test_overlapping_booking_is_rejected(dev_client, world):
         lambda: tomorrow_at(10) + timedelta(days=20),  # beyond max_days_ahead
     ],
 )
-def test_invalid_slots(dev_client, world, start_fn):
-    response = book(dev_client, world, start_fn(), slots=2)
+def test_invalid_slots(desk, world, start_fn):
+    response = book(desk, world, start_fn(), slots=2)
     assert response.json()["error"]["code"] == "INVALID_SLOT", response.json()
     assert balance(world) == Decimal("100.00")
 
 
 @pytest.mark.django_db
-def test_too_many_slots(dev_client, world):
-    r = book(dev_client, world, tomorrow_at(9), slots=4)
+def test_too_many_slots(desk, world):
+    r = book(desk, world, tomorrow_at(9), slots=4)
     assert r.json()["error"]["details"] == {"max_slots_per_booking": 3}
 
 
 @pytest.mark.django_db
-def test_booking_needs_pin_and_balance(dev_client, world):
-    assert (
-        book(dev_client, world, tomorrow_at(9), pin="0000").json()["error"]["code"] == "INVALID_PIN"
-    )
+def test_booking_needs_pin_and_balance(desk, world):
+    assert book(desk, world, tomorrow_at(9), pin="0000").json()["error"]["code"] == "INVALID_PIN"
     Good.objects.filter(pk=world.playground.pk).update(price="60.00")
-    r = book(dev_client, world, tomorrow_at(9), slots=2)
+    r = book(desk, world, tomorrow_at(9), slots=2)
     assert r.json()["error"]["code"] == "INSUFFICIENT_BALANCE"
-    assert not Booking.objects.exists() and not Purchase.objects.exists()
+    assert not Booking.objects.exists()
+    assert not Purchase.objects.filter(status="CONFIRMED").exists()
 
 
 @pytest.mark.django_db
-def test_booking_retry_is_idempotent(dev_client, world):
+def test_booking_retry_is_idempotent(desk, world):
     idem = key()
-    first = book(dev_client, world, tomorrow_at(9), idem=idem)
-    again = book(dev_client, world, tomorrow_at(9), idem=idem)
+    pid, _ = add_booking(desk, world, tomorrow_at(9))
+    first = confirm(desk, pid, idem=idem)
+    again = confirm(desk, pid, idem=idem)
     assert (first.status_code, again.status_code) == (201, 200)
     assert first.json()["id"] == again.json()["id"]
+    assert Booking.objects.count() == 1
     assert balance(world) == Decimal("80.00")
-    other = book(dev_client, world, tomorrow_at(15), idem=idem)
+    other = book(desk, world, tomorrow_at(15), idem=idem)
     assert other.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
 
 
 @pytest.mark.django_db
-def test_database_rejects_overlap_directly(world, dev_client):
-    book(dev_client, world, tomorrow_at(10))
+def test_database_rejects_overlap_directly(world, desk):
+    book(desk, world, tomorrow_at(10))
     existing = Booking.objects.get()
     with pytest.raises(IntegrityError), transaction.atomic():
         Booking.objects.create(
@@ -324,11 +446,9 @@ def test_database_rejects_overlap_directly(world, dev_client):
 
 
 @pytest.mark.django_db
-def test_who_sees_bookings(auth_client, make_user, world, dev_client):
-    book(dev_client, world, tomorrow_at(9))
-    mine = dev_client.get(f"{BOOKINGS}me/").json()["results"]
-    assert [b["good_name"] for b in mine] == ["Playground"]
-    assert dev_client.get(BOOKINGS).status_code == 403
+def test_who_sees_bookings(auth_client, make_user, world, desk):
+    book(desk, world, tomorrow_at(9))
+    assert auth_client(make_user(Roles.DEVELOPER)).get(BOOKINGS).status_code == 403
 
     seller_view = auth_client(world.seller_user).get(BOOKINGS).json()["results"]
     assert [b["developer"]["full_name"] for b in seller_view] == ["Ada"]
@@ -345,6 +465,7 @@ def test_who_sees_bookings(auth_client, make_user, world, dev_client):
 @pytest.mark.django_db(transaction=True)
 def test_two_developers_race_for_the_same_slot(world, make_user):
     dev2 = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=dev2)
     acc2 = finance.open_account(dev2)
     finance.deposit(actor=None, developer=dev2, amount="100.00", idempotency_key="seed-0002")
     finance.set_pin(actor=None, account=acc2, pin="5082", current_pin=None)
@@ -353,18 +474,14 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
     barrier = threading.Barrier(2)
     outcomes = []
 
-    def attempt(developer, pin):
+    drafts = [draft(world, world.playground, start) for _ in range(2)]
+
+    def attempt(purchase, uid, pin):
         try:
             barrier.wait()
             outcomes.append(
-                services.book(
-                    actor=None,
-                    developer=developer,
-                    good=world.playground,
-                    start=start,
-                    slots=1,
-                    pin=pin,
-                    idempotency_key=key(),
+                purchases.confirm_purchase(
+                    actor=None, purchase=purchase, pin=pin, idempotency_key=key(), card_uid=uid
                 )
             )
         except SlotUnavailable as exc:
@@ -373,7 +490,8 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
             connection.close()
 
     threads = [
-        threading.Thread(target=attempt, args=a) for a in ((world.developer, PIN), (dev2, "5082"))
+        threading.Thread(target=attempt, args=a)
+        for a in ((drafts[0], UID, PIN), (drafts[1], "04BB", "5082"))
     ]
     for t in threads:
         t.start()
@@ -394,46 +512,36 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
 
 
 @pytest.mark.django_db
-def test_daily_limit_cannot_be_bypassed_with_several_bookings(dev_client, world):
+def test_daily_limit_cannot_be_bypassed_with_several_bookings(desk, world):
     RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=4)
-    assert book(dev_client, world, tomorrow_at(8), slots=3).status_code == 201
-    r = book(dev_client, world, tomorrow_at(11), slots=2)
+    assert book(desk, world, tomorrow_at(8), slots=3).status_code == 201
+    r = book(desk, world, tomorrow_at(11), slots=2)
     assert r.status_code == 409
     assert r.json()["error"] == {
         "code": "DAILY_LIMIT_REACHED",
         "message": "You have reached today's booking limit for this rental.",
         "details": {"max_slots_per_day": 4, "already_booked": 3, "remaining": 1},
     }
-    assert book(dev_client, world, tomorrow_at(11), slots=1).status_code == 201
-    assert book(dev_client, world, tomorrow_at(15), slots=1).status_code == 409
+    assert book(desk, world, tomorrow_at(11), slots=1).status_code == 201
+    assert book(desk, world, tomorrow_at(15), slots=1).status_code == 409
     # The limit is per day: the day after is fine.
-    assert book(dev_client, world, tomorrow_at(8) + timedelta(days=1)).status_code == 201
+    assert book(desk, world, tomorrow_at(8) + timedelta(days=1)).status_code == 201
 
 
 @pytest.mark.django_db
-def test_daily_limit_is_per_developer(dev_client, auth_client, make_user, world):
+def test_daily_limit_is_per_developer(desk, auth_client, make_user, world):
     RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=1)
-    assert book(dev_client, world, tomorrow_at(8)).status_code == 201
-    other_user = make_user(Roles.DEVELOPER)
-    other = Developer.objects.create(employee_number="E2", full_name="Bob", user=other_user)
+    assert book(desk, world, tomorrow_at(8)).status_code == 201
+    other = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=other)
     acc = finance.open_account(other)
     finance.deposit(actor=None, developer=other, amount="50.00", idempotency_key="seed-0002")
     finance.set_pin(actor=None, account=acc, pin="5082", current_pin=None)
-    r = auth_client(other_user).post(
-        BOOKINGS,
-        {
-            "good": world.playground.pk,
-            "start": tomorrow_at(9).isoformat(),
-            "slots": 1,
-            "pin": "5082",
-        },
-        HTTP_IDEMPOTENCY_KEY=key(),
-    )
-    assert r.status_code == 201
+    assert book(desk, world, tomorrow_at(9), pin="5082", uid="04BB").status_code == 201
 
 
 @pytest.mark.django_db
-def test_rental_without_rules_is_hidden_and_not_bookable(dev_client, world):
+def test_rental_without_rules_is_hidden_and_not_bookable(desk, world):
     bare = Good.objects.create(
         service_position=world.position,
         name="Room",
@@ -441,9 +549,9 @@ def test_rental_without_rules_is_hidden_and_not_bookable(dev_client, world):
         kind=GoodKind.RENTAL,
         track_stock=False,
     )
-    assert [r["name"] for r in dev_client.get(RENTALS).json()["results"]] == ["Playground"]
-    assert dev_client.get(f"{RENTALS}{bare.pk}/availability/?date=2026-10-02").status_code == 404
-    r = book(dev_client, world, tomorrow_at(9), good=bare)
+    assert [r["name"] for r in desk.get(RENTALS).json()["results"]] == ["Playground"]
+    assert desk.get(f"{RENTALS}{bare.pk}/availability/?date=2026-10-02").status_code == 404
+    r = book(desk, world, tomorrow_at(9), good=bare)
     assert r.json()["error"]["code"] == "RENTAL_NOT_AVAILABLE"
 
 
@@ -468,7 +576,7 @@ def test_rentals_need_a_positive_price(auth_client, world):
 
 
 @pytest.mark.django_db
-def test_one_developer_cannot_hold_two_courts_at_once(dev_client, world):
+def test_one_developer_cannot_hold_two_courts_at_once(desk, world):
     other_court = Good.objects.create(
         service_position=world.position,
         name="Tennis court",
@@ -483,21 +591,24 @@ def test_one_developer_cannot_hold_two_courts_at_once(dev_client, world):
         closing_time=time(20),
         max_slots_per_booking=3,
     )
-    first = book(dev_client, world, tomorrow_at(10), slots=2)  # Playground 10-12
+    first = book(desk, world, tomorrow_at(10), slots=2)  # Playground 10-12
     assert first.status_code == 201
 
-    r = book(dev_client, world, tomorrow_at(11), good=other_court)  # overlaps 11-12
+    r = book(desk, world, tomorrow_at(11), good=other_court)  # overlaps 11-12
     assert r.status_code == 409
     err = r.json()["error"]
     assert err["code"] == "ALREADY_BOOKED_THEN"
-    assert (err["details"]["booking"], err["details"]["good"]) == (first.json()["id"], "Playground")
+    assert (err["details"]["booking"], err["details"]["good"]) == (
+        Booking.objects.get().pk,
+        "Playground",
+    )
     # Right after is fine.
-    assert book(dev_client, world, tomorrow_at(12), good=other_court).status_code == 201
+    assert book(desk, world, tomorrow_at(12), good=other_court).status_code == 201
 
 
 @pytest.mark.django_db
-def test_database_blocks_overlapping_bookings_of_one_developer(dev_client, world):
-    book(dev_client, world, tomorrow_at(10))
+def test_database_blocks_overlapping_bookings_of_one_developer(desk, world):
+    book(desk, world, tomorrow_at(10))
     existing = Booking.objects.get()
     court = Good.objects.create(
         service_position=world.position,
@@ -537,18 +648,14 @@ def test_same_developer_racing_for_two_courts_gets_one(world):
     barrier = threading.Barrier(2)
     outcomes = []
 
-    def attempt(good):
+    drafts = [draft(world, g, start) for g in (world.playground, court)]
+
+    def attempt(purchase):
         try:
             barrier.wait()
             outcomes.append(
-                services.book(
-                    actor=None,
-                    developer=world.developer,
-                    good=good,
-                    start=start,
-                    slots=1,
-                    pin=PIN,
-                    idempotency_key=key(),
+                purchases.confirm_purchase(
+                    actor=None, purchase=purchase, pin=PIN, idempotency_key=key(), card_uid=UID
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -556,7 +663,7 @@ def test_same_developer_racing_for_two_courts_gets_one(world):
         finally:
             connection.close()
 
-    threads = [threading.Thread(target=attempt, args=(g,)) for g in (world.playground, court)]
+    threads = [threading.Thread(target=attempt, args=(d,)) for d in drafts]
     for t in threads:
         t.start()
     for t in threads:
