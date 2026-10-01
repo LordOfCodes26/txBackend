@@ -4,6 +4,7 @@ from rest_framework import serializers
 from apps.accounts.models import User
 from apps.rfid.models import Building
 
+from .access import has_seller_role
 from .models import Seller, ServicePosition
 
 
@@ -13,16 +14,28 @@ class SellerSummarySerializer(serializers.ModelSerializer):
         fields = ["id", "name", "status"]
 
 
+def _ensure_seller_login(user):
+    """Only active users with the SELLER role can run a store or a position."""
+    if user is not None and (not user.is_active or not has_seller_role(user)):
+        raise serializers.ValidationError(_("This user doesn't have the SELLER role."))
+    return user
+
+
 class SellerSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), required=False, allow_null=True
+        queryset=User.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="The store's login: a user with the SELLER role. They manage only this store.",
     )
+    user_email = serializers.EmailField(source="user.email", read_only=True, default=None)
 
     class Meta:
         model = Seller
         fields = [
             "id",
             "user",
+            "user_email",
             "name",
             "contact_name",
             "email",
@@ -46,8 +59,13 @@ class SellerSerializer(serializers.ModelSerializer):
         return value
 
     def validate_user(self, user):
+        _ensure_seller_login(user)
         if user is not None and self._others().filter(user=user).exists():
             raise serializers.ValidationError(_("This user is already linked to another seller."))
+        if user is not None and ServicePosition.objects.filter(manager=user).exists():
+            raise serializers.ValidationError(
+                _("This user manages a sell position and can't also own a seller.")
+            )
         return user
 
 
@@ -89,6 +107,7 @@ class ServicePositionSerializer(serializers.ModelSerializer):
         validators = []
 
     def validate_manager(self, user):
+        _ensure_seller_login(user)
         if user is not None and Seller.objects.filter(user=user).exists():
             raise serializers.ValidationError(
                 _("This user is a seller's owner and can't also manage a position.")

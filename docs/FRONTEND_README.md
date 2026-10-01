@@ -204,6 +204,20 @@ Default roles, which admins can change:
 
 If `permissions` is empty, the user only has self-service pages (section 7).
 
+### Assigning a seller login to a store
+
+A store (seller) is run by **one login with the SELLER role**: set it with
+`PATCH /sellers/{id}/ {"user": <user id>}` (BOSS or `seller.update`; `null` unlinks).
+Find candidates with `GET /users/?role=SELLER`. The store then shows `user_email`.
+
+- Only active users **with the SELLER role** can be linked (`VALIDATION_ERROR` on `user`:
+  "This user doesn't have the SELLER role."); the same holds for a position's `manager`.
+- A login runs one store, either as its owner or as a position manager, not both.
+- Store access needs **both** the SELLER role and the link: removing either removes access.
+- The SELLER role itself must have **no permissions** (Accounts → Roles in the admin).
+  Any permission there applies to every store, e.g. `good.view` shows all stores' goods.
+  Show the seller menus when `GET /sellers/me/` returns a seller, not from `permissions`.
+
 ### Seller self-service
 
 A user linked to an **ACTIVE** seller manages that seller's own catalogue without any

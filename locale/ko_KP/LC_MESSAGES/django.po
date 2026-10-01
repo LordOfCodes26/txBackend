@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 16:42+0000\n"
+"POT-Creation-Date: 2026-10-01 17:34+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -437,11 +437,17 @@ msgstr "당신의 계정은 판매자와 련결되여있지 않습니다."
 msgid "Move or delete this position's goods before deleting it."
 msgstr "삭제하기전에 이 매대의 상품들을 옮기거나 삭제하십시오."
 
+msgid "This user doesn't have the SELLER role."
+msgstr "이 리용자에게는 SELLER 역할이 없습니다."
+
 msgid "A seller with this name already exists."
 msgstr "이 이름을 가진 판매자가 이미 있습니다."
 
 msgid "This user is already linked to another seller."
 msgstr "이 리용자는 이미 다른 판매자와 련결되여있습니다."
+
+msgid "This user manages a sell position and can't also own a seller."
+msgstr "이 리용자는 판매매대를 책임지고있으므로 판매자의 소유자로 될수 없습니다."
 
 msgid "This user is a seller's owner and can't also manage a position."
 msgstr "이 리용자는 판매자의 소유자이므로 매대책임자로 될수 없습니다."

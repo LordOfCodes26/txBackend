@@ -24,7 +24,7 @@ def seller_user(make_user):
 
 
 def test_create_and_update_seller_is_audited(seller_manager, make_user):
-    user = make_user()
+    user = make_user(Roles.SELLER)
     response = seller_manager.post(SELLERS, {"name": "Cafe", "user": user.pk})
     assert response.status_code == 201, response.json()
     seller_id = response.json()["id"]
@@ -120,3 +120,42 @@ def test_position_with_goods_cannot_be_deleted(seller_manager):
     good.soft_delete()
     assert seller_manager.delete(f"{POSITIONS}{position.pk}/").status_code == 204
     assert ServicePosition.all_objects.get().deleted_at is not None
+
+
+# --- Store logins: users with the SELLER role ------------------------------------------
+
+
+def test_only_seller_role_users_can_be_linked(seller_manager, make_user):
+    plain = make_user()
+    response = seller_manager.post(SELLERS, {"name": "Shop", "user": plain.pk})
+    assert response.json()["error"]["details"] == {
+        "user": ["This user doesn't have the SELLER role."]
+    }
+    seller_login = make_user(Roles.SELLER, email="shop@x.com")
+    response = seller_manager.post(SELLERS, {"name": "Shop", "user": seller_login.pk})
+    assert (response.status_code, response.json()["user_email"]) == (201, "shop@x.com")
+
+    position = ServicePosition.objects.create(seller_id=response.json()["id"], name="Till")
+    r = seller_manager.patch(
+        f"/api/v1/service-positions/{position.pk}/", {"manager": plain.pk}, format="json"
+    )
+    assert "manager" in r.json()["error"]["details"]
+
+
+def test_store_access_needs_the_role_and_the_link(auth_client, make_user):
+    from apps.accounts.models import UserRole
+    from apps.goods.models import Good
+
+    owner = make_user(Roles.SELLER)
+    shop = Seller.objects.create(name="Shop", user=owner)
+    other = Seller.objects.create(name="Other")
+    for seller, name in [(shop, "Mine"), (other, "Theirs")]:
+        position = ServicePosition.objects.create(seller=seller, name="Till")
+        Good.objects.create(service_position=position, name=name, price="1.00")
+
+    goods = auth_client(owner).get("/api/v1/goods/").json()["results"]
+    assert [g["name"] for g in goods] == ["Mine"]
+
+    UserRole.objects.filter(user=owner).delete()  # role taken away: no store access
+    fresh = type(owner).objects.get(pk=owner.pk)  # as on the next request
+    assert auth_client(fresh).get("/api/v1/goods/").status_code == 403

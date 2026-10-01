@@ -1,6 +1,7 @@
 """Who is acting as a seller.
 
-A user acts as a seller when linked to an ACTIVE `Seller`, either as its owner
+A user acts as a seller when they have the SELLER role AND are linked to an ACTIVE
+`Seller`, either as its owner
 (`Seller.user`: all its positions, its money) or as the manager of one of its positions
 (`ServicePosition.manager`: only that position's goods, sales, stock and bookings). These
 links, not a role, grant access.
@@ -19,9 +20,10 @@ def _acting(user) -> tuple[Seller | None, frozenset[int] | None]:
     if not getattr(user, "is_authenticated", False) or not getattr(user, "pk", None):
         return None, None
     if not hasattr(user, _CACHE_ATTR):
-        seller = Seller.objects.filter(user=user, status=SellerStatus.ACTIVE).first()
-        positions = None
-        if seller is None:
+        seller, positions = None, None
+        if has_seller_role(user):
+            seller = Seller.objects.filter(user=user, status=SellerStatus.ACTIVE).first()
+        if seller is None and has_seller_role(user):
             managed = list(
                 ServicePosition.objects.filter(
                     manager=user, seller__status=SellerStatus.ACTIVE
@@ -32,6 +34,13 @@ def _acting(user) -> tuple[Seller | None, frozenset[int] | None]:
                 positions = frozenset(p.pk for p in managed if p.seller_id == seller.pk)
         setattr(user, _CACHE_ATTR, (seller, positions))
     return getattr(user, _CACHE_ATTR)
+
+
+def has_seller_role(user) -> bool:
+    from apps.accounts.models import UserRole
+    from apps.accounts.rbac import Roles
+
+    return UserRole.objects.filter(user=user, role__code=Roles.SELLER).exists()
 
 
 def acting_seller(user) -> Seller | None:

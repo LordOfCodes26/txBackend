@@ -22,7 +22,7 @@ PAYOUTS = "/api/v1/seller-finance/payouts/"
 def cafe(make_user):
     owner = make_user(Roles.SELLER, email="owner@cafe.x")
     seller = Seller.objects.create(name="Cafe", user=owner)
-    manager = make_user(email="kiosk@cafe.x")
+    manager = make_user(Roles.SELLER, email="kiosk@cafe.x")
     counter = ServicePosition.objects.create(seller=seller, name="Counter")
     kiosk = ServicePosition.objects.create(seller=seller, name="Kiosk", manager=manager)
     tea = Good.objects.create(service_position=counter, name="Tea", price="2.00")
@@ -94,7 +94,7 @@ def test_staff_assign_manager_and_building(auth_client, make_user, cafe):
     b1 = Building.objects.create(code="B1", name="Building 1")
     staff_user = make_user(Roles.BOSS)
     staff = auth_client(staff_user)
-    newbie = make_user(email="counter@cafe.x")
+    newbie = make_user(Roles.SELLER, email="counter@cafe.x")
     r = staff.patch(
         f"{POSITIONS}{cafe.counter.pk}/",
         {"manager": newbie.pk, "building": b1.pk},
@@ -116,7 +116,7 @@ def test_staff_assign_manager_and_building(auth_client, make_user, cafe):
 
 
 def test_owner_assigns_managers_to_own_positions(auth_client, make_user, cafe):
-    newbie = make_user(email="counter@cafe.x")
+    newbie = make_user(Roles.SELLER, email="counter@cafe.x")
     r = auth_client(cafe.owner).patch(
         f"{POSITIONS}{cafe.counter.pk}/", {"manager": newbie.pk}, format="json"
     )
