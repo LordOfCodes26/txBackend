@@ -47,9 +47,9 @@ def _ensure_sellable(good: Good, purchase: Purchase, *, booking: bool = False) -
     """`booking`: the line is a booking (has a start time); only rentals are booked."""
     if (good.kind == GoodKind.RENTAL) != booking:
         raise GoodNotAvailable(
-            _("Rentals need the start of the first slot.")
+            _("Rentals need a date, a start time and an end time.")
             if good.kind == GoodKind.RENTAL
-            else _("Only rentals have a start time."),
+            else _("Only rentals have a date and time."),
             details={"good": good.pk},
         )
     if (
@@ -119,30 +119,60 @@ def set_reader(*, purchase: Purchase, reader) -> Purchase:
     return purchase
 
 
+TIME_FIELDS = ("date", "start_time", "end_time")
+
+
+def _booking_time(good: Good, times: dict, current: PurchaseItem | None = None):
+    """(start, slots) of a rental line from `date`, `start_time`, `end_time` (company-local).
+    When changing a line, missing fields keep their current values."""
+    from apps.bookings import services as bookings
+
+    if current is not None and current.start is not None:
+        local = timezone.localtime(current.start)
+        length = timedelta(minutes=good.rental.slot_minutes * current.quantity)
+        end = timezone.localtime(current.start + length)
+        times = {"date": local.date(), "start_time": local.time(), "end_time": end.time()} | {
+            k: v for k, v in times.items() if v is not None
+        }
+    missing = [f for f in TIME_FIELDS if times.get(f) is None]
+    if missing:
+        raise ValidationError(
+            {f: [_("Rentals need a date, a start time and an end time.")] for f in missing}
+        )
+    return bookings.time_range(
+        good=good, day=times["date"], start_time=times["start_time"], end_time=times["end_time"]
+    )
+
+
+def _refuse_times(times: dict) -> None:
+    given = [f for f in TIME_FIELDS if times.get(f) is not None]
+    if given:
+        raise ValidationError({f: [_("Only rentals have a date and time.")] for f in given})
+
+
 @transaction.atomic
-def add_item(*, purchase: Purchase, good: Good, quantity: int, start=None) -> PurchaseItem:
+def add_item(*, purchase: Purchase, good: Good, quantity: int = 1, **times) -> PurchaseItem:
     """Add a good, or increase its quantity if it is already in the bucket.
 
-    Rentals (courts) are added the same way with `start` (the first slot); `quantity` is
-    the number of slots. The developer who taps their card and enters the PIN gets the
-    booking and pays for it. Adding the same rental again replaces its time.
+    Rentals (courts) are added the same way with `date`, `start_time` and `end_time`
+    (company-local, on the rental's slot grid) instead of a quantity. The developer who
+    taps their card and enters the PIN gets the booking and pays for it. Adding the same
+    rental again replaces its time.
     """
     from apps.bookings import services as bookings
 
     purchase = _lock_draft(purchase)
     good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
     if good.kind == GoodKind.RENTAL:
-        if start is None:
-            raise ValidationError({"start": [_("Rentals need the start of the first slot.")]})
-        bookings.check_line(good=good, start=start, slots=quantity)
-    elif start is not None:
-        raise ValidationError({"start": [_("Only rentals have a start time.")]})
-    _ensure_sellable(good, purchase, booking=start is not None)
-    if start is not None:
+        start, slots = _booking_time(good, times)
+        bookings.check_line(good=good, start=start, slots=slots)
+        _ensure_sellable(good, purchase, booking=True)
         item, _created = PurchaseItem.objects.update_or_create(
-            purchase=purchase, good=good, defaults={"quantity": quantity, "start": start}
+            purchase=purchase, good=good, defaults={"quantity": slots, "start": start}
         )
     else:
+        _refuse_times(times)
+        _ensure_sellable(good, purchase)
         item, created = PurchaseItem.objects.get_or_create(
             purchase=purchase, good=good, defaults={"quantity": quantity}
         )
@@ -155,16 +185,27 @@ def add_item(*, purchase: Purchase, good: Good, quantity: int, start=None) -> Pu
 
 
 @transaction.atomic
-def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
-    """Change the quantity of a good, or the number of slots of a booking."""
+def update_item(
+    *, purchase: Purchase, item: PurchaseItem, quantity: int | None = None, **times
+) -> PurchaseItem:
+    """Change the quantity of a good, or the date / start / end time of a booking."""
     from apps.bookings import services as bookings
 
     purchase = _lock_draft(purchase)
     if item.start is not None:
-        bookings.check_line(good=item.good, start=item.start, slots=quantity)
-    _check_stock_hint(item.good, quantity)
-    item.quantity = quantity
-    item.save(update_fields=["quantity"])
+        if quantity is not None:
+            raise ValidationError({"quantity": [_("Change a booking's date and times instead.")]})
+        start, slots = _booking_time(item.good, times, current=item)
+        bookings.check_line(good=item.good, start=start, slots=slots)
+        item.start, item.quantity = start, slots
+        item.save(update_fields=["start", "quantity"])
+    else:
+        _refuse_times(times)
+        if quantity is None:
+            raise ValidationError({"quantity": [_("This field is required.")]})
+        _check_stock_hint(item.good, quantity)
+        item.quantity = quantity
+        item.save(update_fields=["quantity"])
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 

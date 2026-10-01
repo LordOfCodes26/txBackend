@@ -127,6 +127,21 @@ def _ensure_daily_limit(rules: RentalSettings, good: Good, developer, start, slo
         )
 
 
+def time_range(*, good: Good, day: date, start_time, end_time) -> tuple[datetime, int]:
+    """(start, number of slots) for a company-local date and start/end time. The times
+    must be on the rental's slot grid, e.g. 10:00-12:00 with 60-minute slots = 2 slots."""
+    rules = _ensure_bookable(good)
+    start, end = _local(day, start_time), _local(day, end_time)
+    minutes = (end - start).total_seconds() / 60
+    if minutes <= 0 or minutes % rules.slot_minutes:
+        raise InvalidSlot(
+            _("The end time must be after the start time, in steps of %(minutes)s minutes.")
+            % {"minutes": rules.slot_minutes},
+            details={"slot_minutes": rules.slot_minutes},
+        )
+    return start, int(minutes // rules.slot_minutes)
+
+
 def check_line(*, good: Good, start: datetime, slots: int) -> datetime:
     """Early feedback while the desk prepares a booking: the rental is bookable, the range
     fits its rules and is free right now. Confirmation re-checks everything under locks.

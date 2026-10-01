@@ -24,6 +24,9 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         read_only=True, help_text="Bookings: start of the first slot; null for goods."
     )
     end = serializers.SerializerMethodField(help_text="Bookings: end of the last slot.")
+    date = serializers.SerializerMethodField(help_text="Bookings: company-local day.")
+    start_time = serializers.SerializerMethodField(help_text="Bookings: local start, HH:MM.")
+    end_time = serializers.SerializerMethodField(help_text="Bookings: local end, HH:MM.")
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
 
@@ -35,6 +38,9 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
             "good_name",
             "kind",
             "quantity",
+            "date",
+            "start_time",
+            "end_time",
             "start",
             "end",
             "unit_price",
@@ -42,13 +48,26 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_end(self, item) -> str | None:
-        if item.start is None:
-            return None
+    @staticmethod
+    def _end(item):
         rental = getattr(item.good, "rental", None)
-        if rental is None:
+        if item.start is None or rental is None:
             return None
-        return (item.start + timedelta(minutes=rental.slot_minutes * item.quantity)).isoformat()
+        return item.start + timedelta(minutes=rental.slot_minutes * item.quantity)
+
+    def get_end(self, item) -> str | None:
+        end = self._end(item)
+        return end.isoformat() if end else None
+
+    def get_date(self, item) -> str | None:
+        return timezone.localtime(item.start).date().isoformat() if item.start else None
+
+    def get_start_time(self, item) -> str | None:
+        return f"{timezone.localtime(item.start):%H:%M}" if item.start else None
+
+    def get_end_time(self, item) -> str | None:
+        end = self._end(item)
+        return f"{timezone.localtime(end):%H:%M}" if end else None
 
     # Drafts show the current price; confirmed purchases show what was charged.
     def get_unit_price(self, item) -> str:
@@ -186,19 +205,33 @@ class DetectedReaderSerializer(serializers.Serializer):
     candidates = TillReaderSerializer(many=True)
 
 
-class ItemAddSerializer(serializers.Serializer):
+class BookingTimeMixin(serializers.Serializer):
+    """Rentals (courts): company-local date and start / end time on the slot grid."""
+
+    date = serializers.DateField(required=False, help_text="Rentals: the day, YYYY-MM-DD.")
+    start_time = serializers.TimeField(required=False, help_text="Rentals: e.g. 10:00.")
+    end_time = serializers.TimeField(required=False, help_text="Rentals: e.g. 12:00.")
+
+    def validate(self, attrs):
+        start, end = attrs.get("start_time"), attrs.get("end_time")
+        if start and end and end <= start:
+            raise serializers.ValidationError(
+                {"end_time": [_("The end time must be after the start time.")]}
+            )
+        return attrs
+
+
+class ItemAddSerializer(BookingTimeMixin):
     good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
     quantity = serializers.IntegerField(
-        min_value=1, max_value=999, default=1, help_text="Rentals: the number of slots."
-    )
-    start = serializers.DateTimeField(
-        required=False,
-        help_text="Rentals only (required): start of the first slot, as returned by availability.",
+        min_value=1, max_value=999, default=1, help_text="Goods only; ignored for rentals."
     )
 
 
-class ItemUpdateSerializer(serializers.Serializer):
-    quantity = serializers.IntegerField(min_value=1, max_value=999)
+class ItemUpdateSerializer(BookingTimeMixin):
+    quantity = serializers.IntegerField(
+        min_value=1, max_value=999, required=False, help_text="Goods: the new quantity."
+    )
 
 
 class ConfirmSerializer(serializers.Serializer):

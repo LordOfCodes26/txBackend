@@ -86,13 +86,20 @@ def desk(auth_client, world):
     return auth_client(world.seller_user)
 
 
+def times(start, slots=1, slot_minutes=60):
+    """The desk's input: company-local date, start time and end time."""
+    local = timezone.localtime(start)
+    end = local + timedelta(minutes=slot_minutes * slots)
+    return {"date": local.date(), "start_time": f"{local:%H:%M}", "end_time": f"{end:%H:%M}"}
+
+
 def add_booking(client, world, start, slots=1, good=None, purchase=None):
     """Add a booking line to a (new) draft; returns (purchase id, response)."""
     if purchase is None:
         purchase = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
     response = client.post(
         f"{PURCHASES}{purchase}/items/",
-        {"good": (good or world.playground).pk, "start": start.isoformat(), "quantity": slots},
+        {"good": (good or world.playground).pk, **times(start, slots)},
     )
     return purchase, response
 
@@ -117,7 +124,11 @@ def book(client, world, start, slots=1, pin=PIN, idem=None, good=None, uid=UID):
 def draft(world, good, start, slots=1):
     """A draft purchase with one booking line, prepared at the desk (service level)."""
     purchase = purchases.create_purchase(actor=world.seller_user, service_position=world.position)
-    purchases.add_item(purchase=purchase, good=good, quantity=slots, start=start)
+    local = timezone.localtime(start)
+    end = (local + timedelta(hours=slots)).time()
+    purchases.add_item(
+        purchase=purchase, good=good, date=local.date(), start_time=local.time(), end_time=end
+    )
     return purchase
 
 
@@ -211,29 +222,47 @@ def test_database_forbids_stock_on_non_products(world):
 
 
 @pytest.mark.django_db
-def test_rentals_are_added_like_goods_with_a_start(auth_client, world):
+def test_rentals_are_added_like_goods_with_date_and_times(auth_client, world):
     client = auth_client(world.seller_user)
     pid = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
     response = client.post(f"{PURCHASES}{pid}/items/", {"good": world.playground.pk})
     assert response.status_code == 400
-    assert "start" in response.json()["error"]["details"]
+    assert set(response.json()["error"]["details"]) == {"date", "start_time", "end_time"}
     ball = Good.objects.create(
         service_position=world.position, name="Ball", price="5.00", track_stock=False
     )
+    response = client.post(f"{PURCHASES}{pid}/items/", {"good": ball.pk, "start_time": "10:00"})
+    assert "start_time" in response.json()["error"]["details"]
+    day = tomorrow_at(0).date().isoformat()
     response = client.post(
-        f"{PURCHASES}{pid}/items/", {"good": ball.pk, "start": tomorrow_at(10).isoformat()}
+        f"{PURCHASES}{pid}/items/",
+        {"good": world.playground.pk, "date": day, "start_time": "12:00", "end_time": "10:00"},
     )
-    assert "start" in response.json()["error"]["details"]
-    # Goods and a court in one purchase.
+    assert "end_time" in response.json()["error"]["details"]
+    response = client.post(
+        f"{PURCHASES}{pid}/items/",
+        {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "11:30"},
+    )
+    assert response.json()["error"]["code"] == "INVALID_SLOT"
+    assert response.json()["error"]["details"] == {"slot_minutes": 60}
+
+    # Goods and a court in one purchase: 10:00-12:00 = 2 slots of 60 minutes.
     client.post(f"{PURCHASES}{pid}/items/", {"good": ball.pk, "quantity": 2})
     response = client.post(
         f"{PURCHASES}{pid}/items/",
-        {"good": world.playground.pk, "start": tomorrow_at(10).isoformat(), "quantity": 2},
+        {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "12:00"},
     )
-    assert [(i["good_name"], i["quantity"], i["line_total"]) for i in response.json()["items"]] == [
+    items = response.json()["items"]
+    assert [(i["good_name"], i["quantity"], i["line_total"]) for i in items] == [
         ("Ball", 2, "10.00"),
         ("Playground", 2, "40.00"),
     ]
+    assert (items[1]["date"], items[1]["start_time"], items[1]["end_time"]) == (
+        day,
+        "10:00",
+        "12:00",
+    )
+    assert items[0]["date"] is None
     assert response.json()["total"] == "50.00"
 
 
@@ -298,6 +327,7 @@ def test_booking_charges_developer_and_credits_seller(desk, world):
     assert timezone.localtime(booking.end).hour == 16
     body = desk.get(f"{BOOKINGS}{booking.pk}/").json()
     assert (body["total"], body["balance_after"], body["slots"]) == ("40.00", "60.00", 2)
+    assert (body["start_time"], body["end_time"]) == ("14:00", "16:00")
 
     assert balance(world) == Decimal("60.00")
     purchase = Purchase.objects.get(pk=pid)
@@ -339,18 +369,20 @@ def test_slot_taken_while_the_developer_enters_the_pin(desk, world):
 
 
 @pytest.mark.django_db
-def test_changing_slots_rechecks_the_rules(desk, world):
+def test_changing_the_time_rechecks_the_rules(desk, world):
     pid, draft = add_booking(desk, world, tomorrow_at(10))
-    item = draft.json()["items"][0]["id"]
-    r = desk.patch(f"{PURCHASES}{pid}/items/{item}/", {"quantity": 4})
+    item = f"{PURCHASES}{pid}/items/{draft.json()['items'][0]['id']}/"
+    r = desk.patch(item, {"end_time": "14:00"})  # 4 slots
     assert r.json()["error"]["details"] == {"max_slots_per_booking": 3}
-    r = desk.patch(f"{PURCHASES}{pid}/items/{item}/", {"quantity": 3})
-    assert r.json()["items"][0]["line_total"] == "60.00"
+    r = desk.patch(item, {"end_time": "13:00"})
+    line = r.json()["items"][0]
+    assert (line["start_time"], line["end_time"], line["line_total"]) == ("10:00", "13:00", "60.00")
+    r = desk.patch(item, {"start_time": "15:00", "end_time": "16:00"})
+    assert (r.json()["items"][0]["start_time"], r.json()["items"][0]["quantity"]) == ("15:00", 1)
+    assert desk.patch(item, {"quantity": 2}).status_code == 400
     # Adding the same court again replaces its time.
-    _, again = add_booking(desk, world, tomorrow_at(15), purchase=pid)
-    assert [(i["quantity"], i["start"]) for i in again.json()["items"]] == [
-        (1, tomorrow_at(15).isoformat().replace("+00:00", "Z"))
-    ]
+    _, again = add_booking(desk, world, tomorrow_at(8), purchase=pid)
+    assert [(i["start_time"], i["end_time"]) for i in again.json()["items"]] == [("08:00", "09:00")]
 
 
 @pytest.mark.django_db

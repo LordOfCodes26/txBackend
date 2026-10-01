@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
@@ -62,6 +63,9 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     currency = serializers.SerializerMethodField()
+    date = serializers.SerializerMethodField(help_text="Company-local day.")
+    start_time = serializers.SerializerMethodField(help_text="Local start, HH:MM.")
+    end_time = serializers.SerializerMethodField(help_text="Local end, HH:MM.")
 
     class Meta:
         model = Booking
@@ -72,6 +76,9 @@ class BookingSerializer(serializers.ModelSerializer):
             "seller",
             "location",
             "developer",
+            "date",
+            "start_time",
+            "end_time",
             "start",
             "end",
             "slots",
@@ -85,3 +92,12 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    def get_date(self, obj) -> str:
+        return timezone.localtime(obj.start).date().isoformat()
+
+    def get_start_time(self, obj) -> str:
+        return f"{timezone.localtime(obj.start):%H:%M}"
+
+    def get_end_time(self, obj) -> str:
+        return f"{timezone.localtime(obj.end):%H:%M}"

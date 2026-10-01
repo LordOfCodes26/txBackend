@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 15:42+0000\n"
+"POT-Creation-Date: 2026-10-01 15:48+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -76,6 +76,10 @@ msgstr "이날에는 운영하지 않습니다."
 
 msgid "Pick a start time on the slot grid within opening hours."
 msgstr "운영시간안의 시간대 시작시간을 선택하십시오."
+
+#, python-format
+msgid "The end time must be after the start time, in steps of %(minutes)s minutes."
+msgstr "끝시간은 시작시간보다 뒤여야 하며 %(minutes)s분 단위여야 합니다."
 
 msgid "Reassign this developer's direct reports before deleting them."
 msgstr "삭제하기전에 이 개발자의 직속 하급자들을 다른 사람에게 옮기십시오."
@@ -237,11 +241,20 @@ msgstr "카드번호를 입력하는것은 허용되지 않습니다. 카드를 
 msgid "You can only sell at your own service positions."
 msgstr "자기의 봉사매대에서만 판매할수 있습니다."
 
-msgid "Rentals need the start of the first slot."
-msgstr "임대대상에는 첫 시간대의 시작시간이 있어야 합니다."
+msgid "The end time must be after the start time."
+msgstr "끝시간은 시작시간보다 뒤여야 합니다."
 
-msgid "Only rentals have a start time."
-msgstr "임대대상만 시작시간을 가질수 있습니다."
+msgid "Rentals need a date, a start time and an end time."
+msgstr "임대대상에는 날자, 시작시간, 끝시간이 있어야 합니다."
+
+msgid "Only rentals have a date and time."
+msgstr "임대대상만 날자와 시간을 가질수 있습니다."
+
+msgid "Change a booking's date and times instead."
+msgstr "예약은 날자와 시간을 변경하십시오."
+
+msgid "This field is required."
+msgstr "이 항목은 반드시 입력하여야 합니다."
 
 msgid "Unknown card."
 msgstr "등록되지 않은 카드입니다."
@@ -390,9 +403,6 @@ msgstr "자기 판매자의 돈은 승인, 지불, 조정할수 없습니다."
 
 msgid "You can only request payouts for your own seller."
 msgstr "자기 판매자에 대해서만 지불을 요청할수 있습니다."
-
-msgid "This field is required."
-msgstr "이 항목은 반드시 입력하여야 합니다."
 
 msgid "Your account is not linked to a seller."
 msgstr "당신의 계정은 판매자와 련결되여있지 않습니다."
