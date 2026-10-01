@@ -367,7 +367,7 @@ def on_card(uid):  # called by the reader driver for every tap
 ```
 
 Run `heartbeat()` at startup and then every `heartbeat_seconds` on a background thread.
-Show its `seller_name` / `service_position_name` in the program's window.
+Show its `code` in the program's window, so staff can see which reader it is.
 
 ---
 
