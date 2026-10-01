@@ -388,3 +388,80 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
     )
     assert total == Decimal("180.00")  # exactly one 20.00 charge
     assert finance.ledger_mismatches() == [] and seller_ledger_mismatches() == []
+
+
+# --- Gaps found in review ------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_daily_limit_cannot_be_bypassed_with_several_bookings(dev_client, world):
+    RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=4)
+    assert book(dev_client, world, tomorrow_at(8), slots=3).status_code == 201
+    r = book(dev_client, world, tomorrow_at(11), slots=2)
+    assert r.status_code == 409
+    assert r.json()["error"] == {
+        "code": "DAILY_LIMIT_REACHED",
+        "message": "You have reached today's booking limit for this rental.",
+        "details": {"max_slots_per_day": 4, "already_booked": 3, "remaining": 1},
+    }
+    assert book(dev_client, world, tomorrow_at(11), slots=1).status_code == 201
+    assert book(dev_client, world, tomorrow_at(15), slots=1).status_code == 409
+    # The limit is per day: the day after is fine.
+    assert book(dev_client, world, tomorrow_at(8) + timedelta(days=1)).status_code == 201
+
+
+@pytest.mark.django_db
+def test_daily_limit_is_per_developer(dev_client, auth_client, make_user, world):
+    RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=1)
+    assert book(dev_client, world, tomorrow_at(8)).status_code == 201
+    other_user = make_user(Roles.DEVELOPER)
+    other = Developer.objects.create(employee_number="E2", full_name="Bob", user=other_user)
+    acc = finance.open_account(other)
+    finance.deposit(actor=None, developer=other, amount="50.00", idempotency_key="seed-0002")
+    finance.set_pin(actor=None, account=acc, pin="5082", current_pin=None)
+    r = auth_client(other_user).post(
+        BOOKINGS,
+        {
+            "good": world.playground.pk,
+            "start": tomorrow_at(9).isoformat(),
+            "slots": 1,
+            "pin": "5082",
+        },
+        HTTP_IDEMPOTENCY_KEY=key(),
+    )
+    assert r.status_code == 201
+
+
+@pytest.mark.django_db
+def test_rental_without_rules_is_hidden_and_not_bookable(dev_client, world):
+    bare = Good.objects.create(
+        service_position=world.position,
+        name="Room",
+        price="5.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    assert [r["name"] for r in dev_client.get(RENTALS).json()["results"]] == ["Playground"]
+    assert dev_client.get(f"{RENTALS}{bare.pk}/availability/?date=2026-10-02").status_code == 404
+    r = book(dev_client, world, tomorrow_at(9), good=bare)
+    assert r.json()["error"]["code"] == "RENTAL_NOT_AVAILABLE"
+
+
+@pytest.mark.django_db
+def test_rentals_need_a_positive_price(auth_client, world):
+    client = auth_client(world.seller_user)
+    rules = {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00"}
+    r = client.post(
+        GOODS,
+        {
+            "service_position": world.position.pk,
+            "name": "Free",
+            "price": "0.00",
+            "kind": "RENTAL",
+            "rental": rules,
+        },
+        format="json",
+    )
+    assert "price" in r.json()["error"]["details"]
+    r = client.patch(f"{GOODS}{world.playground.pk}/", {"price": "0"}, format="json")
+    assert "price" in r.json()["error"]["details"]

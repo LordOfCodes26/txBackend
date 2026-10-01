@@ -68,8 +68,25 @@ def occupancy() -> dict:
         row["building"]: row["n"]
         for row in inside().order_by().values("building").annotate(n=Count("pk"))
     }
+    # Active developers whose latest scan was at this building, still inside or already left.
+    rosters = {
+        row["record__device__building"]: row["n"]
+        for row in (
+            DeveloperPresence.objects.filter(developer__deleted_at__isnull=True)
+            .exclude(developer__status=DeveloperStatus.TERMINATED)
+            .order_by()
+            .values("record__device__building")
+            .annotate(n=Count("pk"))
+        )
+    }
     buildings = [
-        {"id": b.pk, "code": b.code, "name": b.name, "count": counts.get(b.pk, 0)}
+        {
+            "id": b.pk,
+            "code": b.code,
+            "name": b.name,
+            "count": counts.get(b.pk, 0),
+            "developers": rosters.get(b.pk, 0),
+        }
         for b in Building.objects.all()
     ]
     return {

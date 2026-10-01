@@ -85,6 +85,9 @@ class OccupancyBuildingSerializer(serializers.Serializer):
     code = serializers.CharField()
     name = serializers.CharField()
     count = serializers.IntegerField()
+    developers = serializers.IntegerField(
+        help_text="Active developers whose latest scan was at this building, present or left."
+    )
 
 
 class OccupancySerializer(serializers.Serializer):

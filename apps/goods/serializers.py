@@ -36,6 +36,7 @@ class RentalSettingsSerializer(serializers.ModelSerializer):
             "closing_time",
             "weekdays",
             "max_slots_per_booking",
+            "max_slots_per_day",
             "max_days_ahead",
         ]
 
@@ -139,6 +140,9 @@ class GoodSerializer(serializers.ModelSerializer):
                 errors["rental"] = ["Only RENTAL goods have rental settings."]
             if kind == GoodKind.RENTAL and self.instance is None and not attrs.get("rental"):
                 errors["rental"] = ["Rental settings are required for RENTAL goods."]
+        price = attrs.get("price", getattr(self.instance, "price", None))
+        if kind == GoodKind.RENTAL and price is not None and price <= 0:
+            errors["price"] = ["Rentals need a price above 0 (charged per slot)."]
         if errors:
             raise serializers.ValidationError(errors)
 

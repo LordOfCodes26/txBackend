@@ -265,6 +265,7 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
 `INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
+`DAILY_LIMIT_REACHED` (`details: {max_slots_per_day, already_booked, remaining}`),
 `IN_USE` (deleting something still referenced, e.g. a building that has doors), `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
@@ -479,9 +480,12 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
     `rental` object; rentals can't be added to a till purchase (`GOOD_NOT_AVAILABLE`).
     ```json
     "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00",
-               "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3, "max_days_ahead": 14}
+               "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3,
+               "max_slots_per_day": 3, "max_days_ahead": 14}
     ```
-    `weekdays`: 0 = Monday … 6 = Sunday. Times are company-local. Rental goods are created
+    `weekdays`: 0 = Monday … 6 = Sunday. `max_slots_per_day` limits one developer's total
+    slots on this rental per day, across all their bookings. A rental's `price` must be
+    above 0. Times are company-local. Rental goods are created
     and edited with JSON (not multipart) because of the nested object.
 - Filter the catalogue by `kind` (e.g. the till shows `kind=PRODUCT` and `kind=SERVICE`).
 - **Money is a string**, e.g. `"price": "3.20"`, never a float. Send prices as strings
@@ -622,6 +626,8 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - **Bookings are exclusive and final.** Nobody else can book an overlapping time, and a
   booking can't be cancelled or refunded.
 - `SLOT_UNAVAILABLE` (409): someone booked it first, so reload availability.
+  `DAILY_LIMIT_REACHED` (409): the developer already has too many slots on this rental that
+  day; `details` has `max_slots_per_day`, `already_booked` and `remaining`.
   `INVALID_SLOT` (400): off the slot grid, outside opening hours, a closed day, in the
   past, too far ahead, or too many slots (`details` says which limit).
 - A booking appears in the developer's statement and purchases (`/purchases/me/`) like a

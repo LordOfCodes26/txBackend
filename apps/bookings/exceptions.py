@@ -19,3 +19,9 @@ class SlotUnavailable(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "SLOT_UNAVAILABLE"
     default_detail = "This time is already booked."
+
+
+class DailyLimitReached(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "DAILY_LIMIT_REACHED"
+    default_detail = "You have reached today's booking limit for this rental."

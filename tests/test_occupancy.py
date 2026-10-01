@@ -155,9 +155,9 @@ def test_occupancy_and_people_endpoints(site, auth_client, make_user):
 
     body = client.get(OCC).json()
     assert body["total"] == 3
-    assert [(b["name"], b["count"]) for b in body["buildings"]] == [
-        ("Building 1", 1),
-        ("Building 2", 2),
+    assert [(b["name"], b["count"], b["developers"]) for b in body["buildings"]] == [
+        ("Building 1", 1, 1),
+        ("Building 2", 2, 2),
     ]
 
     people = client.get(PEOPLE).json()["results"]

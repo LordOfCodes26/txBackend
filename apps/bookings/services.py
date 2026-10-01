@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from apps.audit.services import record_audit
@@ -15,7 +16,7 @@ from apps.purchases.services import INACTIVE_DEVELOPER
 from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus
 
-from .exceptions import InvalidSlot, RentalNotAvailable, SlotUnavailable
+from .exceptions import DailyLimitReached, InvalidSlot, RentalNotAvailable, SlotUnavailable
 from .models import Booking
 
 
@@ -34,7 +35,10 @@ def _ensure_bookable(good: Good) -> RentalSettings:
         or position.seller.status != SellerStatus.ACTIVE
     ):
         raise RentalNotAvailable()
-    return good.rental
+    try:
+        return good.rental
+    except RentalSettings.DoesNotExist as exc:
+        raise RentalNotAvailable("This rental has no booking rules yet.") from exc
 
 
 def slots_for_day(good: Good, day: date) -> list[dict]:
@@ -97,6 +101,31 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
     return end
 
 
+def _ensure_daily_limit(rules: RentalSettings, good: Good, developer, start, slots) -> None:
+    """One developer may book at most `max_slots_per_day` slots of a rental per local day,
+    across all their bookings. Safe under concurrency: the caller holds the developer's
+    account lock, so one developer's bookings are processed one at a time."""
+    day = timezone.localtime(start).date()
+    day_start = _local(day, datetime.min.time())
+    already = (
+        Booking.objects.filter(
+            good=good,
+            developer=developer,
+            start__gte=day_start,
+            start__lt=day_start + timedelta(days=1),
+        ).aggregate(n=Sum("slots"))["n"]
+        or 0
+    )
+    if already + slots > rules.max_slots_per_day:
+        raise DailyLimitReached(
+            details={
+                "max_slots_per_day": rules.max_slots_per_day,
+                "already_booked": already,
+                "remaining": max(rules.max_slots_per_day - already, 0),
+            }
+        )
+
+
 def book(
     *,
     actor,
@@ -147,6 +176,7 @@ def book(
             end = _validate_slot(rules, start, slots)
             if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
                 raise SlotUnavailable()
+            _ensure_daily_limit(rules, good, developer, start, slots)
 
             total = finance.money(good.price * slots)
             if total <= 0:

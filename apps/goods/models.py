@@ -89,6 +89,11 @@ class RentalSettings(models.Model):
     max_days_ahead = models.PositiveSmallIntegerField(
         default=30, help_text="How many days in advance a slot can be booked."
     )
+    max_slots_per_day = models.PositiveSmallIntegerField(
+        default=4,
+        validators=[MinValueValidator(1)],
+        help_text="Most slots one developer may book on this rental per day (all bookings).",
+    )
 
     class Meta:
         constraints = [

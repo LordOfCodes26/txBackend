@@ -37,6 +37,7 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = (
         Good.objects.filter(
             Q(kind=GoodKind.RENTAL),
+            Q(rental__isnull=False),
             Q(is_active=True),
             Q(service_position__is_active=True),
             Q(service_position__deleted_at__isnull=True),
