@@ -61,7 +61,10 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
 - **Sample data:** `manage.py seed_demo`, then `manage.py seed_more` (DEBUG only; each part
   runs once). This adds 200 more developers with cards and balances, a demo PIN for every
   demo developer (printed once), Demo Bakery, till readers `Reader1`–`Reader4`
-  (`SN-DEMO-0001`…`0004`), today's door scans and past purchases.
+  (`SN-DEMO-0001`…`0004`), today's door scans and past purchases. Then
+  `manage.py seed_attendance_month [--days 30]` adds a month of realistic door history up
+  to yesterday (arrivals, lunch breaks, building changes, absences, forgotten scan-outs) and
+  rebuilds attendance from it; days that already have attendance are skipped.
 
 ## Deploying to an offline server
 
