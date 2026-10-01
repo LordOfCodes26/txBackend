@@ -42,10 +42,47 @@ class AvailabilityQuerySerializer(serializers.Serializer):
     date = serializers.DateField(help_text="Company-local date, YYYY-MM-DD.")
 
 
-class SlotSerializer(serializers.Serializer):
+SLOT_STATES = ["FREE", "BOOKED", "PAST", "NOT_YET_OPEN"]
+
+
+class LocalTimesMixin(serializers.Serializer):
+    """`start` / `end` as full timestamps plus company-local `start_time` / `end_time`."""
+
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
+    start_time = serializers.SerializerMethodField(help_text="Local, HH:MM.")
+    end_time = serializers.SerializerMethodField(help_text="Local, HH:MM.")
+
+    def get_start_time(self, obj) -> str:
+        return f"{timezone.localtime(obj['start']):%H:%M}"
+
+    def get_end_time(self, obj) -> str:
+        return f"{timezone.localtime(obj['end']):%H:%M}"
+
+
+class SlotSerializer(LocalTimesMixin):
     available = serializers.BooleanField()
+    state = serializers.ChoiceField(choices=SLOT_STATES)
+
+
+class PeriodSerializer(LocalTimesMixin):
+    state = serializers.ChoiceField(choices=SLOT_STATES)
+
+
+class CourtDaySerializer(serializers.Serializer):
+    good = serializers.IntegerField(source="good.pk")
+    name = serializers.CharField(source="good.name")
+    price = serializers.DecimalField(source="good.price", max_digits=12, decimal_places=2)
+    open = serializers.BooleanField(help_text="False on days the court is closed.")
+    opening_time = serializers.TimeField()
+    closing_time = serializers.TimeField()
+    slot_minutes = serializers.IntegerField()
+    periods = PeriodSerializer(many=True)
+
+
+class ScheduleSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    courts = CourtDaySerializer(many=True)
 
 
 class BookingSerializer(serializers.ModelSerializer):

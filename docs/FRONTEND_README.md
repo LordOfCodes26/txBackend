@@ -658,7 +658,8 @@ gets the booking and pays for it.
 | Method | Path | Permission | Notes |
 |---|---|---|---|
 | GET | `/rentals/` | logged in | Bookable rentals with price per slot, `rental` rules, seller, location and images |
-| GET | `/rentals/{id}/availability/?date=YYYY-MM-DD` | logged in | Every slot of that day: `{start, end, available}` |
+| GET | `/rentals/{id}/availability/?date=YYYY-MM-DD` | logged in | Every slot of that day: `{start, end, start_time, end_time, available, state}` |
+| GET | `/rentals/schedule/?date=YYYY-MM-DD` | logged in | **The day for every court**: booked and free periods, to find a blank time (optional `&search=tennis`) |
 | POST | `/purchases/` | own seller, or `purchase.create` | Draft, same as the till (`service_position` of the playground, optional `reader`) |
 | POST | `/purchases/{id}/items/` | same | **Same request as for normal goods**, with the time instead of a quantity: `{good, date, start_time, end_time}`, e.g. `{"good": 7, "date": "2026-10-02", "start_time": "10:00", "end_time": "12:00"}`. Adding the same court again replaces its time. Returns the purchase |
 | PATCH / DELETE | `/purchases/{id}/items/{item}/` | same | PATCH any of `{date, start_time, end_time}` changes the booking's time (rules re-checked; `quantity` is refused for courts); DELETE removes it |
@@ -666,8 +667,9 @@ gets the booking and pays for it.
 | GET | `/bookings/` | own seller, or `purchase.view` | Bookings of the seller's rentals, each with `date`, `start_time`, `end_time`. Filters: `good`, `seller`, `developer`, `date`, `start_after`, `start_before` |
 
 **Booking flow (desk screen):**
-1. List `/rentals/`, pick a court and a date → `/availability/`. Only slots with
-   `available: true` are selectable; consecutive slots can be combined, up to
+1. Pick a date and show `GET /rentals/schedule/?date=…`, so the developer can see the
+   filled times of every court and choose a blank one (or one court's slots via
+   `/rentals/{id}/availability/`). Consecutive free slots can be combined, up to
    `rental.max_slots_per_booking`.
 2. `POST /purchases/` (as at the till) and then add the court **like any good** with
    `POST /purchases/{id}/items/` `{good, date, start_time, end_time}`. Date and times are
@@ -693,6 +695,31 @@ gets the booking and pays for it.
 - **Bookings are exclusive and final.** Nobody else can book an overlapping time on the same
   court, **one developer can't hold two courts at the same time**, and a booking can't be
   cancelled or refunded.
+
+**Day schedule** (`GET /rentals/schedule/?date=2026-10-02`). Each court's day is split into
+periods; neighbouring slots with the same state are merged:
+
+```json
+{"date": "2026-10-02", "courts": [
+  {"good": 7, "name": "Tennis court 1", "price": "15.00", "open": true,
+   "opening_time": "08:00:00", "closing_time": "20:00:00", "slot_minutes": 60,
+   "periods": [
+     {"state": "FREE",   "start_time": "08:00", "end_time": "10:00", "start": "…", "end": "…"},
+     {"state": "BOOKED", "start_time": "10:00", "end_time": "12:00", "start": "…", "end": "…"},
+     {"state": "FREE",   "start_time": "12:00", "end_time": "20:00", "start": "…", "end": "…"}]}]}
+```
+
+| `state` | Meaning | Show |
+|---|---|---|
+| `FREE` | Can be booked | Selectable (e.g. green); a click can prefill `date`, `start_time`, `end_time` |
+| `BOOKED` | Taken by a confirmed booking | Filled (e.g. grey); **who** booked is not shown |
+| `PAST` | Already started | Disabled |
+| `NOT_YET_OPEN` | Beyond `max_days_ahead` | Disabled, "bookable from …" |
+
+`open: false` means the court is closed that weekday (`periods` is empty). Times are in the
+company timezone. A FREE period may be longer than one booking allows; keep the selection
+within `rental.max_slots_per_booking` slots. Drafts at other desks don't block a period, so
+refresh the schedule after `SLOT_UNAVAILABLE`, or when a `purchase_confirmed` event arrives.
 
 **Errors.** When adding a court (`/items/`, nothing is charged yet): `INVALID_SLOT`,
 `SLOT_UNAVAILABLE`, `RENTAL_NOT_AVAILABLE`, `GOOD_NOT_AVAILABLE`. When confirming, the till

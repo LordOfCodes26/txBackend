@@ -60,11 +60,37 @@ def slots_for_day(good: Good, day: date) -> list[dict]:
     while start + step <= closing:
         end = start + step
         taken = any(b_start < end and b_end > start for b_start, b_end in booked)
-        slots.append(
-            {"start": start, "end": end, "available": not taken and start > now and day <= horizon}
-        )
+        if taken:
+            state = "BOOKED"
+        elif start <= now:
+            state = "PAST"
+        elif day > horizon:
+            state = "NOT_YET_OPEN"
+        else:
+            state = "FREE"
+        slots.append({"start": start, "end": end, "available": state == "FREE", "state": state})
         start = end
     return slots
+
+
+def day_schedule(good: Good, day: date) -> dict:
+    """One court's day as periods: consecutive slots with the same state merged, e.g.
+    FREE 08:00-10:00, BOOKED 10:00-12:00, FREE 12:00-20:00. Closed days have none."""
+    periods = []
+    for slot in slots_for_day(good, day):
+        if periods and periods[-1]["state"] == slot["state"]:
+            periods[-1]["end"] = slot["end"]
+        else:
+            periods.append({"state": slot["state"], "start": slot["start"], "end": slot["end"]})
+    rules = good.rental
+    return {
+        "good": good,
+        "open": day.weekday() in rules.weekdays,
+        "opening_time": rules.opening_time,
+        "closing_time": rules.closing_time,
+        "slot_minutes": rules.slot_minutes,
+        "periods": periods,
+    }
 
 
 def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> datetime:

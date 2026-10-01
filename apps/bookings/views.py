@@ -18,6 +18,7 @@ from .serializers import (
     AvailabilityQuerySerializer,
     BookingSerializer,
     RentalSerializer,
+    ScheduleSerializer,
     SlotSerializer,
 )
 
@@ -58,6 +59,20 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
         query.is_valid(raise_exception=True)
         slots = services.slots_for_day(self.get_object(), query.validated_data["date"])
         return Response(SlotSerializer(slots, many=True).data)
+
+    @extend_schema(parameters=[AvailabilityQuerySerializer], responses=ScheduleSerializer)
+    @action(detail=False, methods=["get"])
+    def schedule(self, request):
+        """One day for every court: booked and free periods, to find a blank time.
+        Narrow it with `?search=` like the list."""
+        query = AvailabilityQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        day = query.validated_data["date"]
+        courts = [
+            services.day_schedule(good, day)
+            for good in self.filter_queryset(self.get_queryset()).order_by("name", "pk")
+        ]
+        return Response(ScheduleSerializer({"date": day, "courts": courts}).data)
 
 
 class BookingViewSet(

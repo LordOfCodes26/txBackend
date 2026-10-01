@@ -291,6 +291,69 @@ def test_developer_browses_rentals_and_availability(desk, world):
 
 
 @pytest.mark.django_db
+def test_day_schedule_shows_booked_and_free_times_of_every_court(desk, world):
+    tennis = Good.objects.create(
+        service_position=world.position,
+        name="Tennis court",
+        price="15.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=tennis, slot_minutes=30, opening_time=time(9), closing_time=time(12)
+    )
+    book(desk, world, tomorrow_at(10), slots=2)  # Playground 10-12
+    book(desk, world, tomorrow_at(15))  # Playground 15-16
+
+    day = tomorrow_at(0).date().isoformat()
+    body = desk.get(f"{RENTALS}schedule/?date={day}").json()
+    assert body["date"] == day
+    courts = {c["name"]: c for c in body["courts"]}
+    assert set(courts) == {"Playground", "Tennis court"}
+
+    playground = courts["Playground"]
+    assert (playground["open"], playground["slot_minutes"]) == (True, 60)
+    assert [(p["state"], p["start_time"], p["end_time"]) for p in playground["periods"]] == [
+        ("FREE", "08:00", "10:00"),
+        ("BOOKED", "10:00", "12:00"),
+        ("FREE", "12:00", "15:00"),
+        ("BOOKED", "15:00", "16:00"),
+        ("FREE", "16:00", "20:00"),
+    ]
+    assert [
+        (p["state"], p["start_time"], p["end_time"]) for p in courts["Tennis court"]["periods"]
+    ] == [("FREE", "09:00", "12:00")]
+    # Who booked is not shown, only the times.
+    assert "developer" not in str(body)
+
+    only = desk.get(f"{RENTALS}schedule/?date={day}&search=tennis").json()["courts"]
+    assert [c["name"] for c in only] == ["Tennis court"]
+    assert desk.get(f"{RENTALS}schedule/").status_code == 400
+
+
+@pytest.mark.django_db
+def test_schedule_marks_past_and_closed_days(desk, world):
+    today = timezone.localdate()
+    RentalSettings.objects.filter(good=world.playground).update(
+        opening_time=time(0), closing_time=time(23)
+    )
+    periods = desk.get(f"{RENTALS}schedule/?date={today}").json()["courts"][0]["periods"]
+    assert periods[0]["state"] == "PAST"
+    if timezone.localtime().hour < 22:  # late in the day every slot is already past
+        assert periods[-1]["state"] == "FREE"
+
+    far = today + timedelta(days=20)
+    periods = desk.get(f"{RENTALS}schedule/?date={far}").json()["courts"][0]["periods"]
+    assert {p["state"] for p in periods} == {"NOT_YET_OPEN"}
+
+    RentalSettings.objects.filter(good=world.playground).update(
+        weekdays=[d for d in range(7) if d != far.weekday()]
+    )
+    court = desk.get(f"{RENTALS}schedule/?date={far}").json()["courts"][0]
+    assert (court["open"], court["periods"]) == (False, [])
+
+
+@pytest.mark.django_db
 def test_inactive_rental_is_hidden(desk, world):
     Good.objects.filter(pk=world.playground.pk).update(is_active=False)
     assert desk.get(RENTALS).json()["count"] == 0
