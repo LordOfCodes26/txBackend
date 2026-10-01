@@ -22,11 +22,13 @@ ENV_FILE="${ETC}/backend.env"
 [[ $EUID -eq 0 ]] || { echo "Run as root." >&2; exit 1; }
 
 echo "==> Checking the OS matches the bundle"
-. /etc/os-release
-THIS="${PRETTY_NAME} $(uname -m)"
+# Read the OS details in a subshell: /etc/os-release defines VERSION, which would
+# otherwise overwrite this release's VERSION.
+read -r OS_ID OS_VERSION_ID OS_PRETTY < <(. /etc/os-release && echo "$ID $VERSION_ID $PRETTY_NAME")
+THIS="${OS_PRETTY} $(uname -m)"
 echo "    server: ${THIS}"
 echo "    bundle: $(cat "${BUNDLE}/BUILT_FOR")"
-if [[ "${ID}" != "ubuntu" || "${VERSION_ID}" != "24.04" || "$(uname -m)" != "x86_64" ]] \
+if [[ "${OS_ID}" != "ubuntu" || "${OS_VERSION_ID}" != "24.04" || "$(uname -m)" != "x86_64" ]] \
         && [[ "${FORCE_OS:-}" != "1" ]]; then
     echo "This bundle is for Ubuntu 24.04 x86_64. Build one on a machine matching this server." >&2
     exit 1
@@ -142,6 +144,11 @@ systemctl enable --now backend-backup.timer backend-basebackup.timer
 if ! ls -1d /var/backups/backend/base/*/ >/dev/null 2>&1; then
     # Point-in-time recovery needs a base backup to start from.
     "${RELEASE}/scripts/backup/base_backup.sh"
+fi
+if ! ls -1 /var/backups/backend/db/*.dump >/dev/null 2>&1; then
+    # First dump + restore check now, so backups are proven (and /health/backup/ is
+    # green) from day one instead of after the first night.
+    "${RELEASE}/scripts/backup/nightly.sh"
 fi
 grep -Eq '^OFFSITE_(DIR|RSYNC)=.+' "${ETC}/backup.conf" || \
     echo "WARNING: set OFFSITE_DIR or OFFSITE_RSYNC in ${ETC}/backup.conf: backups are on this disk only."
