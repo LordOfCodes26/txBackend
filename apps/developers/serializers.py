@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import User
@@ -29,13 +30,15 @@ class DeveloperSerializer(serializers.ModelSerializer):
             "user",
             "employee_number",
             "full_name",
-            "email",
             "phone",
+            "home_address",
+            "birthday",
             "department",
             "position_title",
             "manager",
             "manager_detail",
             "start_date",
+            "out_date",
             "status",
             "created_at",
             "updated_at",
@@ -54,10 +57,9 @@ class DeveloperSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This employee number is already in use.")
         return value
 
-    def validate_email(self, value):
-        value = value.lower()
-        if self._others().filter(email__iexact=value).exists():
-            raise serializers.ValidationError("Another developer already uses this email.")
+    def validate_birthday(self, value):
+        if value is not None and value > timezone.localdate():
+            raise serializers.ValidationError("Birthday cannot be in the future.")
         return value
 
     def validate_user(self, user):
@@ -78,6 +80,15 @@ class DeveloperSerializer(serializers.ModelSerializer):
             node = node.manager
         return manager
 
+    def validate(self, attrs):
+        start = attrs.get("start_date", getattr(self.instance, "start_date", None))
+        out = attrs.get("out_date", getattr(self.instance, "out_date", None))
+        if start and out and out < start:
+            raise serializers.ValidationError(
+                {"out_date": ["The out date cannot be before the start date."]}
+            )
+        return attrs
+
 
 class MyDeveloperProfileSerializer(serializers.ModelSerializer):
     manager = DeveloperSummarySerializer(read_only=True)
@@ -88,12 +99,14 @@ class MyDeveloperProfileSerializer(serializers.ModelSerializer):
             "id",
             "employee_number",
             "full_name",
-            "email",
             "phone",
+            "home_address",
+            "birthday",
             "department",
             "position_title",
             "manager",
             "start_date",
+            "out_date",
             "status",
         ]
         read_only_fields = fields

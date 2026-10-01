@@ -17,7 +17,7 @@ def make_developer():
 
     def _make(**extra):
         n = next(counter)
-        data = {"employee_number": f"E{n:05d}", "full_name": f"Dev {n}", "email": f"d{n}@x.com"}
+        data = {"employee_number": f"E{n:05d}", "full_name": f"Dev {n}"}
         return Developer.objects.create(**(data | extra))
 
     return _make

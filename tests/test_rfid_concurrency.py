@@ -35,7 +35,7 @@ def run_concurrently(*funcs):
 
 
 def make_dev(n):
-    return Developer.objects.create(employee_number=f"E{n}", full_name=f"D{n}", email=f"{n}@x.com")
+    return Developer.objects.create(employee_number=f"E{n}", full_name=f"D{n}")
 
 
 def test_concurrent_assignment_of_one_card_to_two_developers():

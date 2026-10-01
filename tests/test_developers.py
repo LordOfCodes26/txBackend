@@ -13,7 +13,6 @@ def payload(n=1, **extra):
     return {
         "employee_number": f"E{n:04d}",
         "full_name": f"Dev {n}",
-        "email": f"dev{n}@example.com",
         "department": "Engineering",
         **extra,
     }
@@ -37,11 +36,19 @@ def make_developer():
 
 
 def test_create_developer_is_audited(manager_client):
-    response = manager_client.post(URL, payload(1, email="Dev1@Example.com"))
+    response = manager_client.post(
+        URL,
+        payload(1, home_address="1 Main St", birthday="1990-05-17", start_date="2020-01-06"),
+    )
     assert response.status_code == 201, response.json()
     body = response.json()
-    assert body["email"] == "dev1@example.com"
+    assert (body["home_address"], body["birthday"], body["out_date"]) == (
+        "1 Main St",
+        "1990-05-17",
+        None,
+    )
     assert body["status"] == DeveloperStatus.ACTIVE
+    assert "email" not in body
 
     log = AuditLog.objects.get(action="developer.created")
     assert log.entity_id == str(body["id"])
@@ -65,15 +72,54 @@ def test_access_by_role(auth_client, make_user, role, list_status, create_status
     assert client.post(URL, payload(1)).status_code == create_status
 
 
-def test_employee_number_and_email_must_be_unique(manager_client, make_developer):
-    make_developer(employee_number="E0001", email="taken@example.com")
-    response = manager_client.post(URL, payload(1, email="TAKEN@example.com"))
+def test_employee_number_must_be_unique(manager_client, make_developer):
+    make_developer(employee_number="E0001")
+    response = manager_client.post(URL, payload(1))
     assert response.status_code == 400
-    assert set(response.json()["error"]["details"]) == {"employee_number", "email"}
+    assert set(response.json()["error"]["details"]) == {"employee_number"}
+
+
+def test_out_date_cannot_precede_start_date(manager_client, make_developer):
+    response = manager_client.post(URL, payload(1, start_date="2024-03-01", out_date="2024-02-29"))
+    assert "out_date" in response.json()["error"]["details"]
+
+    # Also checked against the stored start date on PATCH, and by the database.
+    dev = make_developer(start_date="2024-03-01")
+    response = manager_client.patch(f"{URL}{dev.pk}/", {"out_date": "2024-01-01"})
+    assert response.status_code == 400
+    assert manager_client.patch(f"{URL}{dev.pk}/", {"out_date": "2025-06-30"}).status_code == 200
+
+
+def test_database_enforces_out_date_order(make_developer):
+    from django.db import IntegrityError, transaction
+
+    dev = make_developer(start_date="2024-03-01")
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Developer.objects.filter(pk=dev.pk).update(out_date="2024-01-01")
+
+
+def test_birthday_cannot_be_in_future(manager_client):
+    response = manager_client.post(URL, payload(1, birthday="2999-01-01"))
+    assert "birthday" in response.json()["error"]["details"]
+
+
+def test_new_fields_are_audited_and_filterable(manager_client, make_developer):
+    dev = make_developer(birthday="1991-07-04")
+    make_developer(birthday="1988-02-10")
+    manager_client.patch(f"{URL}{dev.pk}/", {"out_date": "2026-12-31", "home_address": "2 Elm"})
+    log = AuditLog.objects.get(action="developer.updated")
+    assert log.new_values == {"home_address": "2 Elm", "out_date": "2026-12-31"}
+
+    def ids(query):
+        return [d["id"] for d in manager_client.get(f"{URL}?{query}").json()["results"]]
+
+    assert ids("birthday_month=7") == [dev.pk]
+    assert ids("out_after=2026-12-01") == [dev.pk]
+    assert ids("out_before=2026-01-01") == []
 
 
 def test_soft_deleted_developer_frees_identifiers(manager_client, make_developer):
-    old = make_developer(employee_number="E0001", email="dev1@example.com")
+    old = make_developer(employee_number="E0001")
     assert manager_client.delete(f"{URL}{old.pk}/").status_code == 204
 
     assert manager_client.get(f"{URL}{old.pk}/").status_code == 404

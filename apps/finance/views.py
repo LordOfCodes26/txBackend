@@ -52,7 +52,7 @@ class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
         "reopen": ["finance.adjust"],
     }
     filterset_class = DeveloperAccountFilter
-    search_fields = ["developer__full_name", "developer__employee_number", "developer__email"]
+    search_fields = ["developer__full_name", "developer__employee_number"]
     ordering_fields = ["balance", "developer__full_name", "updated_at"]
 
     @extend_schema(responses=DeveloperAccountSerializer)

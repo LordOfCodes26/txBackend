@@ -82,7 +82,10 @@ class Command(BaseCommand):
             dev = Developer.objects.create(
                 employee_number=f"DEMO-{i:04d}",
                 full_name=name,
-                email=f"dev{i}@demo.local",
+                phone=f"+1 555 01{i:02d}",
+                home_address=f"{i} Demo Street, Demo City",
+                birthday=timezone.localdate().replace(year=1985 + i % 15, day=1)
+                - timedelta(days=random.randint(0, 300)),
                 department=dept,
                 position_title="Team lead" if dept not in leads else "Developer",
                 manager=leads.get(dept),

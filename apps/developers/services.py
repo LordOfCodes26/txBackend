@@ -13,12 +13,14 @@ AUDITED_FIELDS = [
     "user",
     "employee_number",
     "full_name",
-    "email",
     "phone",
+    "home_address",
+    "birthday",
     "department",
     "position_title",
     "manager",
     "start_date",
+    "out_date",
     "status",
 ]
 

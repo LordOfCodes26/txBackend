@@ -29,7 +29,7 @@ def reader(api_client, device_and_key):
 
 @pytest.fixture
 def developer(db):
-    return Developer.objects.create(employee_number="E1", full_name="Ada", email="ada@x.com")
+    return Developer.objects.create(employee_number="E1", full_name="Ada")
 
 
 @pytest.fixture

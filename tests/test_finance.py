@@ -24,7 +24,7 @@ def key():
 
 @pytest.fixture
 def developer(db):
-    dev = Developer.objects.create(employee_number="E1", full_name="Ada", email="ada@x.com")
+    dev = Developer.objects.create(employee_number="E1", full_name="Ada")
     services.open_account(dev)
     return dev
 
@@ -246,7 +246,7 @@ def test_ledger_check_detects_drift(finance, developer):
 
 @pytest.mark.django_db
 def test_developer_sees_own_account_and_transactions(auth_client, make_user, finance, developer):
-    other = Developer.objects.create(employee_number="E2", full_name="Bob", email="bob@x.com")
+    other = Developer.objects.create(employee_number="E2", full_name="Bob")
     deposit(finance, developer, "12.00")
     deposit(finance, other, "99.00")
     user = make_user(Roles.DEVELOPER)
@@ -262,9 +262,7 @@ def test_developer_sees_own_account_and_transactions(auth_client, make_user, fin
 
 @pytest.mark.django_db
 def test_account_filters(finance, developer):
-    other = Developer.objects.create(
-        employee_number="E2", full_name="Bob", email="bob@x.com", department="Research"
-    )
+    other = Developer.objects.create(employee_number="E2", full_name="Bob", department="Research")
     deposit(finance, developer, "12.00")
     deposit(finance, other, "99.00")
 
@@ -313,7 +311,7 @@ def run_concurrently(n, fn):
 
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_deposits_all_counted():
-    dev = Developer.objects.create(employee_number="E1", full_name="Ada", email="a@x.com")
+    dev = Developer.objects.create(employee_number="E1", full_name="Ada")
     services.open_account(dev)
     outcomes = run_concurrently(
         10,
@@ -328,7 +326,7 @@ def test_concurrent_deposits_all_counted():
 
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_debits_never_overdraw():
-    dev = Developer.objects.create(employee_number="E1", full_name="Ada", email="a@x.com")
+    dev = Developer.objects.create(employee_number="E1", full_name="Ada")
     services.deposit(actor=None, developer=dev, amount="30.00", idempotency_key="seed-000001")
 
     def spend(i):
@@ -346,7 +344,7 @@ def test_concurrent_debits_never_overdraw():
 
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_retries_with_same_key_deposit_once():
-    dev = Developer.objects.create(employee_number="E1", full_name="Ada", email="a@x.com")
+    dev = Developer.objects.create(employee_number="E1", full_name="Ada")
     services.open_account(dev)
     outcomes = run_concurrently(
         5,

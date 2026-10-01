@@ -26,7 +26,7 @@ def at(day: int, hour: int, minute: int = 0) -> datetime:
 
 @pytest.fixture
 def developer(db):
-    return Developer.objects.create(employee_number="E1", full_name="Ada", email="ada@x.com")
+    return Developer.objects.create(employee_number="E1", full_name="Ada")
 
 
 @pytest.fixture
@@ -251,7 +251,7 @@ def test_developer_sees_only_own_attendance(auth_client, make_user, reader, card
     user = make_user(Roles.DEVELOPER)
     developer.user = user
     developer.save()
-    other = Developer.objects.create(employee_number="E2", full_name="Bob", email="bob@x.com")
+    other = Developer.objects.create(employee_number="E2", full_name="Bob")
     other_card = RFIDCard.objects.create(uid="0411111111")
     RFIDCardAssignment.objects.create(card=other_card, developer=other)
     scan(reader, card, at(21, 9))

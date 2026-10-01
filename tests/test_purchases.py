@@ -43,9 +43,7 @@ def world(db, make_user):
         goods.move_stock(good=cake, kind="INITIAL_STOCK", delta=2)
 
     dev_user = make_user(Roles.DEVELOPER, email="ada@x.com")
-    developer = Developer.objects.create(
-        employee_number="E1", full_name="Ada", email="ada@x.com", user=dev_user
-    )
+    developer = Developer.objects.create(employee_number="E1", full_name="Ada", user=dev_user)
     card = RFIDCard.objects.create(uid="04AABBCCDD")
     RFIDCardAssignment.objects.create(card=card, developer=developer)
     account = finance.open_account(developer)
@@ -447,7 +445,7 @@ def test_two_tills_cannot_overspend_one_balance(world):
 @pytest.mark.django_db(transaction=True)
 def test_two_buyers_race_for_last_items(world, make_user):
     # Two developers buy the last 2 cakes at the same moment; only one gets them.
-    dev2 = Developer.objects.create(employee_number="E2", full_name="Bob", email="b@x.com")
+    dev2 = Developer.objects.create(employee_number="E2", full_name="Bob")
     card2 = RFIDCard.objects.create(uid="04BBBBBBBB")
     RFIDCardAssignment.objects.create(card=card2, developer=dev2)
     acc2 = finance.open_account(dev2)

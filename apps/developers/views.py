@@ -28,8 +28,16 @@ class DeveloperViewSet(viewsets.ModelViewSet):
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = DeveloperFilter
-    search_fields = ["full_name", "email", "employee_number", "department", "position_title"]
-    ordering_fields = ["full_name", "employee_number", "department", "start_date", "created_at"]
+    search_fields = ["full_name", "employee_number", "department", "position_title", "phone"]
+    ordering_fields = [
+        "full_name",
+        "employee_number",
+        "department",
+        "start_date",
+        "out_date",
+        "birthday",
+        "created_at",
+    ]
 
     def perform_create(self, serializer):
         serializer.instance = services.create_developer(

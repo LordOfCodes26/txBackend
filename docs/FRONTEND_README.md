@@ -234,7 +234,7 @@ SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
 
   ```json
   {"error": {"code": "VALIDATION_ERROR", "message": "Invalid input.",
-             "details": {"email": ["Another developer already uses this email."]}}}
+             "details": {"employee_number": ["This employee number is already in use."]}}}
   ```
 
 | HTTP | Typical `code` | Frontend action |
@@ -337,10 +337,17 @@ Users can't grant roles with more permissions than they have themselves
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/developers/` | `developer.view` | Filters: `status`, `department`, `manager`, `has_user`, `started_after`, `started_before`. Search: name, email, employee number, department, title |
+| GET | `/developers/` | `developer.view` | Filters: `status`, `department`, `manager`, `has_user`, `started_after`, `started_before`, `out_after`, `out_before`, `birthday_month` (1–12). Search: name, employee number, department, title, phone. Ordering: `full_name`, `employee_number`, `department`, `start_date`, `out_date`, `birthday`, `created_at` |
 | POST | `/developers/` | `developer.create` | |
 | GET/PATCH/DELETE | `/developers/{id}/` | view / update / delete | DELETE = soft delete, only for mistakes; use `status: "TERMINATED"` for leavers |
 | GET | `/developers/me/` | logged in | Own profile |
+
+Fields: `employee_number`, `full_name`, `phone`, `home_address`, `birthday`, `department`,
+`position_title`, `manager`, `start_date`, `out_date` (last working day), `status`, `user`.
+Developers have **no email field**; a developer's login email lives on their user account.
+Dates are `YYYY-MM-DD`. `out_date` can't be before `start_date`, and `birthday` can't be in
+the future. `home_address` and `birthday` are personal data: show them only on detail and
+edit pages, not in list tables.
 
 `status`: `ACTIVE`, `ON_LEAVE`, `SUSPENDED`, `TERMINATED`. Responses include
 `manager_detail` (`{id, employee_number, full_name, department}`) for display, while
@@ -434,7 +441,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/finance/accounts/` | `finance.view` | Filters: `status`, `developer`, `department`, `balance_min`, `balance_max`. Search: developer name, number, email. Ordering: `balance`, `developer__full_name`, `updated_at` |
+| GET | `/finance/accounts/` | `finance.view` | Filters: `status`, `developer`, `department`, `balance_min`, `balance_max`. Search: developer name, employee number. Ordering: `balance`, `developer__full_name`, `updated_at` |
 | GET | `/finance/accounts/{id}/` | `finance.view` | |
 | GET | `/finance/accounts/me/` | logged in | Own balance (needs a developer profile) |
 | POST | `/finance/accounts/{id}/freeze/`, `/unfreeze/`, `/close/`, `/reopen/` | `finance.adjust` | `{reason?}`. Close only with a zero balance |
