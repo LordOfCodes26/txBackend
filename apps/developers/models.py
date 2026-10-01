@@ -35,6 +35,15 @@ class Developer(TimeStampedModel, SoftDeleteModel):
     home_address = models.TextField(blank=True)
     birthday = models.DateField(null=True, blank=True)
     department = models.CharField(max_length=100, blank=True, db_index=True)
+    # Home building (optional): building managers see and manage only their building's
+    # developers.
+    building = models.ForeignKey(
+        "rfid.Building",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="developers",
+    )
     position_title = models.CharField(max_length=100, blank=True)
     manager = models.ForeignKey(
         "self", on_delete=models.PROTECT, null=True, blank=True, related_name="reports"

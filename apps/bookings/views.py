@@ -9,6 +9,7 @@ from apps.goods.models import Good, GoodKind
 from apps.purchases import services as purchase_services
 from apps.purchases.models import Purchase, PurchaseKind
 from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer
+from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
@@ -74,6 +75,7 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class BookingViewSet(
+    BuildingScopedMixin,
     SellerScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -98,6 +100,7 @@ class BookingViewSet(
     seller_actions = ("list", "retrieve", "change")
     lookup_value_regex = r"\d+"
     position_lookup = "good__service_position"
+    building_lookup = "good__service_position__building"
     scope_permission = "purchase.view"
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
@@ -134,6 +137,7 @@ class BookingViewSet(
 
 
 class BookingCheckoutViewSet(
+    BuildingScopedMixin,
     SellerScopedQuerysetMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
@@ -169,6 +173,7 @@ class BookingCheckoutViewSet(
     seller_actions = ("create", "retrieve", "confirm", "cancel")
     scope_permission = "purchase.view"
     position_lookup = "service_position"
+    building_lookup = "service_position__building"
 
     @staticmethod
     def owner_seller_id(obj):

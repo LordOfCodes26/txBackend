@@ -201,6 +201,7 @@ Default roles, which admins can change:
 | SELLER_MANAGER | Sellers, goods, purchase view, seller finance view |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
 | SELLER | Nothing global; see *Seller self-service* below |
+| BUILDING_MANAGER | Developer view/create/update, RFID view/assign/block/devices, attendance view/correct, purchase view, **all limited to their buildings** (see *Building managers* below) |
 
 If `permissions` is empty, the user only has self-service pages (section 7).
 
@@ -214,6 +215,34 @@ payouts); the backend narrows lists to the seller's own
 objects and returns `404` for other sellers' objects. To tell whether the user is a
 seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
 SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
+
+### Building managers
+
+A user with the **BUILDING_MANAGER** role who is listed in a building's `managers`
+(`PATCH /rfid/buildings/{id}/ {"managers": [<user ids>]}`, by an admin) sees and manages
+only that building's data, through the normal endpoints:
+
+| Area | What they get |
+|---|---|
+| Developers | Only developers whose `building` (home building) is theirs; they must set their building when creating, can't move a developer to another building, can't delete |
+| Cards | Their developers' cards plus unassigned cards; assign only to their developers |
+| Door devices | Only their building's doors; create doors only in their building (no till readers) |
+| Buildings | Only their own; may rename, can't create, delete or change `managers` |
+| Scan history | Scans at their building's doors |
+| Attendance | Records and daily summaries of their developers; manual records / voids only for them |
+| Occupancy | `/attendance/occupancy/` and `/people/` show only their building; the `ws/occupancy/` stream too |
+| Sales | Purchases and bookings of sell positions in their building, and `GET /purchases/performance/`; read-only |
+
+Other objects return `404`; changes that would leave their building fail with a
+validation error. If the same user also has a role that grants a permission everywhere
+(e.g. MANAGER for developers), that permission is not limited. A building manager listed
+in no building sees nothing.
+
+**Sales performance** (`GET /purchases/performance/`, `purchase.view`, also for sellers and
+position managers for their own): one row per sell position with
+`{service_position, service_position_name, seller, seller_name, building, building_name,
+sales_count, sales_total, bookings_count, bookings_total, total}`, highest total first.
+Use the purchase list filters, e.g. `?confirmed_after=2026-10-01T00:00:00Z&confirmed_before=…`.
 
 ### Position managers
 
@@ -381,13 +410,14 @@ Users can't grant roles with more permissions than they have themselves
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/developers/` | `developer.view` | Filters: `status`, `department`, `manager`, `has_user`, `started_after`, `started_before`, `out_after`, `out_before`, `birthday_month` (1–12). Search: name, employee number, department, title, phone. Ordering: `full_name`, `employee_number`, `department`, `start_date`, `out_date`, `birthday`, `created_at` |
+| GET | `/developers/` | `developer.view` | Filters: `status`, `department`, `building`, `manager`, `has_user`, `started_after`, `started_before`, `out_after`, `out_before`, `birthday_month` (1–12). Search: name, employee number, department, title, phone. Ordering: `full_name`, `employee_number`, `department`, `start_date`, `out_date`, `birthday`, `created_at` |
 | POST | `/developers/` | `developer.create` | |
 | GET/PATCH/DELETE | `/developers/{id}/` | view / update / delete | DELETE = soft delete, only for mistakes; use `status: "TERMINATED"` for leavers |
 | GET | `/developers/me/` | logged in | Own profile |
 
 Fields: `employee_number`, `full_name`, `phone`, `home_address`, `birthday`, `department`,
-`position_title`, `manager`, `start_date`, `out_date` (last working day), `status`, `user`.
+`position_title`, `building` (optional home building; read-only `building_name`), `manager`,
+`start_date`, `out_date` (last working day), `status`, `user`.
 Developers have **no email field**; a developer's login email lives on their user account.
 Dates are `YYYY-MM-DD`. `out_date` can't be before `start_date`, and `birthday` can't be in
 the future. `home_address` and `birthday` are personal data: show them only on detail and
@@ -577,7 +607,8 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 | PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
 | POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the card tapped on the counter's reader |
 | POST | `/purchases/{id}/cancel/` | own seller, or `purchase.cancel` | Drafts only |
-| GET | `/purchases/`, `/purchases/{id}/` | own seller, or `purchase.view` | Filters: `status`, `seller`, `service_position`, `developer`, `confirmed_after`, `confirmed_before`, `total_min`, `total_max` |
+| GET | `/purchases/`, `/purchases/{id}/` | own seller, or `purchase.view` | Filters: `kind` (`SALE` / `BOOKING`), `status`, `seller`, `service_position`, `developer`, `confirmed_after`, `confirmed_before`, `total_min`, `total_max` |
+| GET | `/purchases/performance/` | own seller, or `purchase.view` | Sales per sell position (see *Building managers*) |
 | GET | `/purchases/me/` | logged in | The developer's own purchases |
 | POST | `/finance/accounts/me/pin/` | logged in | Developer sets `{pin}` or changes it with `{pin, current_pin}` |
 | POST | `/finance/accounts/{id}/reset-pin/` | `finance.adjust` | Clears a forgotten PIN and any lockout |

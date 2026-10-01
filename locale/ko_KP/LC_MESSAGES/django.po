@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 16:19+0000\n"
+"POT-Creation-Date: 2026-10-01 16:29+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -313,6 +313,9 @@ msgstr "퇴직하였거나 삭제된 개발자에게는 카드를 배정할수 �
 msgid "The card cannot move to this status from its current status."
 msgstr "카드를 현재 상태에서 이 상태로 바꿀수 없습니다."
 
+msgid "You can only manage data of your own building."
+msgstr "자기 건물의 자료만 관리할수 있습니다."
+
 msgid "A card with this UID is already registered."
 msgstr "이 UID를 가진 카드가 이미 등록되였습니다."
 
@@ -397,6 +400,15 @@ msgstr "봉사기오유."
 
 msgid "Only attendance readers may upload buffered scans."
 msgstr "출근판독기만 보관된 판독기록을 올려보낼수 있습니다."
+
+msgid "Building managers can't create buildings."
+msgstr "건물책임자는 건물을 만들수 없습니다."
+
+msgid "Building managers can't change who manages a building."
+msgstr "건물책임자는 건물책임자를 바꿀수 없습니다."
+
+msgid "Building managers can't delete buildings."
+msgstr "건물책임자는 건물을 삭제할수 없습니다."
 
 msgid "The seller's available balance is too low."
 msgstr "판매자의 리용가능한 잔고가 너무 적습니다."

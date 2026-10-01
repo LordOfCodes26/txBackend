@@ -107,6 +107,10 @@ class Building(TimeStampedModel):
 
     code = models.CharField(max_length=20, unique=True, help_text="e.g. B1")
     name = models.CharField(max_length=100, unique=True, help_text="e.g. Building 1")
+    # Users with the BUILDING_MANAGER role who manage this building (see rfid/scope.py).
+    managers = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name="managed_buildings"
+    )
 
     class Meta:
         ordering = ["code"]

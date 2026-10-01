@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
+from apps.rfid.scope import BuildingScopedMixin, building_scope, ensure_in_scope
 from common.permissions import HasPermissions
 
 from . import occupancy, services
@@ -39,6 +40,7 @@ class OwnDataMixin:
 
 
 class AttendanceRecordViewSet(
+    BuildingScopedMixin,
     OwnDataMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -57,6 +59,7 @@ class AttendanceRecordViewSet(
         "void": ["attendance.correct"],
         "me": [],
     }
+    building_lookup = "developer__building"
     filterset_class = AttendanceRecordFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
     ordering_fields = ["event_time", "work_date"]
@@ -69,6 +72,12 @@ class AttendanceRecordViewSet(
     def create(self, request, *args, **kwargs):
         serializer = ManualRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        ensure_in_scope(
+            request.user,
+            "attendance.correct",
+            serializer.validated_data["developer"].building_id,
+            field="developer",
+        )
         record = services.add_manual_record(actor=request.user, **serializer.validated_data)
         return Response(AttendanceRecordSerializer(record).data, status=status.HTTP_201_CREATED)
 
@@ -83,11 +92,12 @@ class AttendanceRecordViewSet(
         return Response(AttendanceRecordSerializer(record).data)
 
 
-class DailyAttendanceViewSet(OwnDataMixin, viewsets.ReadOnlyModelViewSet):
+class DailyAttendanceViewSet(BuildingScopedMixin, OwnDataMixin, viewsets.ReadOnlyModelViewSet):
     queryset = DailyAttendance.objects.select_related("developer")
     serializer_class = DailyAttendanceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["attendance.view"], "retrieve": ["attendance.view"], "me": []}
+    building_lookup = "developer__building"
     filterset_class = DailyAttendanceFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
     ordering_fields = ["work_date", "first_seen", "worked_seconds"]
@@ -101,7 +111,9 @@ class OccupancyView(APIView):
 
     @extend_schema(responses=OccupancySerializer)
     def get(self, request):
-        return Response(occupancy.occupancy())
+        return Response(
+            occupancy.occupancy(buildings=building_scope(request.user, "attendance.view"))
+        )
 
 
 class OccupancyPeopleView(generics.ListAPIView):
@@ -114,6 +126,9 @@ class OccupancyPeopleView(generics.ListAPIView):
 
     def get_queryset(self):
         qs = occupancy.inside().order_by("developer__full_name", "developer_id")
+        scope = building_scope(self.request.user, "attendance.view")
+        if scope is not None:
+            qs = qs.filter(building_id__in=scope)
         params = self.request.query_params
         building = params.get("building")
         if building == "none":

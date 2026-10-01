@@ -68,6 +68,7 @@ class Roles:
     SELLER_MANAGER = "SELLER_MANAGER"
     DEVELOPER = "DEVELOPER"
     SELLER = "SELLER"
+    BUILDING_MANAGER = "BUILDING_MANAGER"
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,24 @@ ROLES: dict[str, RoleSpec] = {
         "Seller manager",
         "Manages sellers and goods",
         _prefixed("seller", "good") | {"purchase.view", "seller_finance.view"},
+    ),
+    # Every permission of this role is narrowed to the user's buildings
+    # (Building.managers); see apps/rfid/scope.py.
+    Roles.BUILDING_MANAGER: RoleSpec(
+        "Building manager",
+        "Developers, cards, doors, attendance and sales of their own building",
+        {
+            "developer.view",
+            "developer.create",
+            "developer.update",
+            "rfid.view",
+            "rfid.assign",
+            "rfid.block",
+            "rfid.device.manage",
+            "attendance.view",
+            "attendance.correct",
+            "purchase.view",
+        },
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.SELLER: RoleSpec("Seller", "Self-service access to own goods and sales"),

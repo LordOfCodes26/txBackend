@@ -63,7 +63,19 @@ def inside():
     )
 
 
-def occupancy() -> dict:
+def occupancy(buildings: frozenset[int] | None = None) -> dict:
+    """Counts per building and in total. `buildings` limits it to those buildings (a
+    building manager's view: other buildings and `unknown_building` are left out)."""
+    data = _occupancy()
+    if buildings is None:
+        return data
+    data["buildings"] = [b for b in data["buildings"] if b["id"] in buildings]
+    data["total"] = sum(b["count"] for b in data["buildings"])
+    data["unknown_building"] = 0
+    return data
+
+
+def _occupancy() -> dict:
     counts = {
         row["building"]: row["n"]
         for row in inside().order_by().values("building").annotate(n=Count("pk"))

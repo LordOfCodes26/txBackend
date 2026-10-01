@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
@@ -177,9 +178,16 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
 
 
 class BuildingSerializer(serializers.ModelSerializer):
+    managers = serializers.PrimaryKeyRelatedField(
+        many=True,
+        required=False,
+        queryset=get_user_model().objects.filter(is_active=True),
+        help_text="User ids of the building's managers (give them the BUILDING_MANAGER role).",
+    )
+
     class Meta:
         model = Building
-        fields = ["id", "code", "name", "created_at"]
+        fields = ["id", "code", "name", "managers", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 

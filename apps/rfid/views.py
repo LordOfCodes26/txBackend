@@ -1,11 +1,12 @@
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import translation
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
@@ -35,6 +36,7 @@ from .models import (
     RFIDEvent,
 )
 from .permissions import IsRFIDDevice
+from .scope import BuildingScopedMixin, building_scope, ensure_in_scope
 from .serializers import (
     BatchResultSerializer,
     BatchScanSerializer,
@@ -58,6 +60,7 @@ ACTIVE_ASSIGNMENTS = "assignments__developer"
 
 
 class RFIDCardViewSet(
+    BuildingScopedMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -89,6 +92,14 @@ class RFIDCardViewSet(
     def get_serializer_class(self):
         return RFIDCardUpdateSerializer if self.action == "partial_update" else RFIDCardSerializer
 
+    def filter_by_buildings(self, qs, scope):
+        """Building managers: cards of their developers, plus unassigned cards (stock)."""
+        active = RFIDCardAssignment.objects.filter(unassigned_at__isnull=True)
+        return qs.filter(
+            Q(pk__in=active.filter(developer__building__in=scope).values("card"))
+            | ~Q(pk__in=active.values("card"))
+        )
+
     def _card_response(self, card, code=status.HTTP_200_OK):
         card = self.get_queryset().get(pk=card.pk)
         return Response(RFIDCardSerializer(card).data, status=code)
@@ -111,9 +122,9 @@ class RFIDCardViewSet(
         serializer = CardAssignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         card = self.get_object()
-        services.assign_card(
-            actor=request.user, card=card, developer=serializer.validated_data["developer"]
-        )
+        developer = serializer.validated_data["developer"]
+        ensure_in_scope(request.user, "rfid.assign", developer.building_id, field="developer")
+        services.assign_card(actor=request.user, card=card, developer=developer)
         return self._card_response(card)
 
     @extend_schema(request=None, responses=RFIDCardSerializer)
@@ -173,17 +184,18 @@ class RFIDCardViewSet(
         return self._transition(request, "retire")
 
 
-class RFIDCardAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
+class RFIDCardAssignmentViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = RFIDCardAssignment.objects.select_related("card", "developer")
     serializer_class = RFIDCardAssignmentSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
-    device_actions = ("create", "batch")
+    building_lookup = "developer__building"
     filterset_class = RFIDCardAssignmentFilter
     ordering_fields = ["assigned_at", "unassigned_at"]
 
 
 class RFIDDeviceViewSet(
+    BuildingScopedMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -211,11 +223,16 @@ class RFIDDeviceViewSet(
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        building = serializer.validated_data.get("building")
+        ensure_in_scope(request.user, "rfid.device.manage", building and building.pk)
         device, key = services.register_device(actor=request.user, **serializer.validated_data)
         data = RFIDDeviceWithKeySerializer(device, context={"api_key": key}).data
         return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
+        if "building" in serializer.validated_data:
+            building = serializer.validated_data["building"]
+            ensure_in_scope(self.request.user, "rfid.device.manage", building and building.pk)
         serializer.instance = services.update_device(
             actor=self.request.user, device=serializer.instance, **serializer.validated_data
         )
@@ -244,6 +261,7 @@ class DeviceLanguageMixin:
 
 class RFIDEventViewSet(
     DeviceLanguageMixin,
+    BuildingScopedMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -260,6 +278,8 @@ class RFIDEventViewSet(
         DeviceIPAuthentication,
     ]
     required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
+    device_actions = ("create", "batch")
+    building_lookup = "device__building"
     filterset_class = RFIDEventFilter
     search_fields = ["uid", "developer__full_name"]
     ordering_fields = ["event_time", "received_at"]
@@ -337,7 +357,7 @@ class DeviceHeartbeatView(DeviceLanguageMixin, APIView):
         return Response(DeviceConfigSerializer(device).data)
 
 
-class BuildingViewSet(viewsets.ModelViewSet):
+class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     queryset = Building.objects.all()
     serializer_class = BuildingSerializer
     permission_classes = [HasPermissions]
@@ -351,3 +371,24 @@ class BuildingViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     pagination_class = None
     filter_backends = []
+    building_lookup = "pk"
+
+    def _scoped(self) -> bool:
+        return building_scope(self.request.user, "rfid.device.manage") is not None
+
+    def perform_create(self, serializer):
+        if self._scoped():
+            raise PermissionDenied(_("Building managers can't create buildings."))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if self._scoped() and "managers" in serializer.validated_data:
+            raise ValidationError(
+                {"managers": [_("Building managers can't change who manages a building.")]}
+            )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if self._scoped():
+            raise PermissionDenied(_("Building managers can't delete buildings."))
+        instance.delete()

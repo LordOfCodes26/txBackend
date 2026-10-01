@@ -11,6 +11,7 @@ from .models import Developer, DeveloperStatus
 
 AUDITED_FIELDS = [
     "user",
+    "building",
     "employee_number",
     "full_name",
     "phone",

@@ -227,3 +227,17 @@ class ConfirmSerializer(serializers.Serializer):
     pin = serializers.CharField(
         write_only=True, max_length=6, help_text="PIN typed by the developer."
     )
+
+
+class PerformanceSerializer(serializers.Serializer):
+    service_position = serializers.IntegerField()
+    service_position_name = serializers.CharField()
+    seller = serializers.IntegerField()
+    seller_name = serializers.CharField()
+    building = serializers.IntegerField(allow_null=True)
+    building_name = serializers.CharField(allow_null=True)
+    sales_count = serializers.IntegerField(help_text="Confirmed till sales.")
+    sales_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    bookings_count = serializers.IntegerField(help_text="Paid court bookings.")
+    bookings_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total = serializers.DecimalField(max_digits=14, decimal_places=2)

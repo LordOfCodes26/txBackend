@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
@@ -6,26 +9,32 @@ from rest_framework.response import Response
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
+from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
 
 from . import services
 from .filters import PurchaseFilter
-from .models import Purchase
+from .models import Purchase, PurchaseKind, PurchaseStatus
 from .serializers import (
     ConfirmSerializer,
     DetectedReaderSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
+    PerformanceSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
     SetReaderSerializer,
     TillReaderSerializer,
 )
 
+ZERO = Decimal("0.00")
+PERFORMANCE_FIGURES = ("sales_count", "sales_total", "bookings_count", "bookings_total", "total")
+
 SELLER_ACTIONS = (
     "list",
+    "performance",
     "retrieve",
     "create",
     "add_item",
@@ -39,6 +48,7 @@ SELLER_ACTIONS = (
 
 
 class PurchaseViewSet(
+    BuildingScopedMixin,
     SellerScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -65,6 +75,7 @@ class PurchaseViewSet(
     required_permissions = {
         "list": ["purchase.view"],
         "retrieve": ["purchase.view"],
+        "performance": ["purchase.view"],
         "create": ["purchase.create"],
         "add_item": ["purchase.create"],
         "item": ["purchase.create"],
@@ -82,6 +93,7 @@ class PurchaseViewSet(
     ordering_fields = ["created_at", "confirmed_at", "total"]
 
     position_lookup = "service_position"
+    building_lookup = "service_position__building"
 
     @staticmethod
     def owner_seller_id(obj):
@@ -113,6 +125,48 @@ class PurchaseViewSet(
             actor=request.user, client_ip=client_ip(request), **serializer.validated_data
         )
         return self._respond(purchase, status.HTTP_201_CREATED)
+
+    @extend_schema(responses=PerformanceSerializer(many=True))
+    @action(detail=False, methods=["get"])
+    def performance(self, request):
+        """Sales per sell position: confirmed till sales and court bookings, counts and
+        totals. Use the list filters, e.g. `?confirmed_after=2026-10-01T00:00:00Z&
+        confirmed_before=...` and `seller`, `service_position`. Narrowed like the list
+        (own seller / position, or a building manager's buildings)."""
+        rows = (
+            self.filter_queryset(self.get_queryset())
+            .filter(status=PurchaseStatus.CONFIRMED)
+            .order_by()
+            .values(
+                "service_position",
+                "service_position__name",
+                "seller",
+                "seller__name",
+                "service_position__building",
+                "service_position__building__name",
+            )
+            .annotate(
+                sales_count=Count("pk", filter=Q(kind=PurchaseKind.SALE)),
+                sales_total=Sum("total", filter=Q(kind=PurchaseKind.SALE), default=ZERO),
+                bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
+                bookings_total=Sum("total", filter=Q(kind=PurchaseKind.BOOKING), default=ZERO),
+                total=Sum("total", default=ZERO),
+            )
+            .order_by("-total", "service_position")
+        )
+        data = [
+            {
+                "service_position": r["service_position"],
+                "service_position_name": r["service_position__name"],
+                "seller": r["seller"],
+                "seller_name": r["seller__name"],
+                "building": r["service_position__building"],
+                "building_name": r["service_position__building__name"],
+                **{k: r[k] for k in PERFORMANCE_FIGURES},
+            }
+            for r in rows
+        ]
+        return Response(PerformanceSerializer(data, many=True).data)
 
     @extend_schema(responses=DetectedReaderSerializer)
     @action(detail=False, methods=["get"], url_path="detected-reader")

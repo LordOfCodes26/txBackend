@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.accounts.models import User
+from apps.rfid.models import Building
 
 from .models import Developer
 
@@ -23,6 +24,13 @@ class DeveloperSerializer(serializers.ModelSerializer):
         queryset=Developer.objects.all(), required=False, allow_null=True
     )
     manager_detail = DeveloperSummarySerializer(source="manager", read_only=True)
+    building = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Home building (optional). Building managers must set their own building.",
+    )
+    building_name = serializers.CharField(source="building.name", read_only=True, default=None)
 
     class Meta:
         model = Developer
@@ -36,6 +44,8 @@ class DeveloperSerializer(serializers.ModelSerializer):
             "birthday",
             "department",
             "position_title",
+            "building",
+            "building_name",
             "manager",
             "manager_detail",
             "start_date",
