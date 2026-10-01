@@ -249,6 +249,11 @@ PURCHASE_CARD_PRESENTATION_SECONDS = env.int("PURCHASE_CARD_PRESENTATION_SECONDS
 # counter's TILL device, so a seller cannot charge an arbitrary card number.
 PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", default=False)
 
+# --- Test console -------------------------------------------------------------
+# A staging-only page (/test-console/) to exercise doors and tills end to end.
+# Never enable it in production.
+TEST_CONSOLE_ENABLED = env.bool("TEST_CONSOLE_ENABLED", default=False)
+
 # --- Logging ----------------------------------------------------------------
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
 LOGGING = {

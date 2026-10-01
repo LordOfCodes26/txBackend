@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from common import health
+from common import health, test_console
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -22,3 +22,13 @@ if settings.DEBUG:
     # nginx serves /media/ in staging and production).
     urlpatterns.append(path("api-auth/", include("rest_framework.urls")))
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# Staging-only test console; the views answer 404 unless TEST_CONSOLE_ENABLED is set.
+urlpatterns += [
+    path("test-console/", test_console.console_page, name="test-console"),
+    path(
+        "api/v1/test-console/door-scan/",
+        test_console.SimulatedDoorScanView.as_view(),
+        name="test-console-door-scan",
+    ),
+]

@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Console</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb;
+          --ok:#0f8a4b; --bad:#c62828; --accent:#2457d6; --warn:#b26a00; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:99px; background:#fff3cd; color:#7a5200; border:1px solid #f0d58a; }
+  main { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:16px; padding:16px 20px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  section h2 { font-size:15px; margin:0 0 10px; display:flex; justify-content:space-between; align-items:center; }
+  .full { grid-column: 1 / -1; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  input, select, button { font:inherit; }
+  input, select { width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fff; }
+  button { padding:7px 12px; border-radius:7px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--accent); }
+  button.danger { background:#fff; color:var(--bad); border-color:var(--bad); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
+  .row > * { flex:1; min-width:120px; }
+  .row > button { flex:0 0 auto; }
+  .seg { display:flex; gap:0; }
+  .seg label { margin:0; flex:1; }
+  .seg input { display:none; }
+  .seg span { display:block; text-align:center; padding:7px; border:1px solid var(--line); cursor:pointer; color:var(--ink); font-size:14px; }
+  .seg label:first-child span { border-radius:7px 0 0 7px; }
+  .seg label:last-child span { border-radius:0 7px 7px 0; }
+  .seg input:checked + span { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .counters { display:grid; grid-template-columns: repeat(auto-fit, minmax(110px,1fr)); gap:8px; margin:6px 0 10px; }
+  .counter { border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .counter b { display:block; font-size:26px; line-height:1.1; }
+  .counter small { color:var(--muted); }
+  .feed, .log { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; font-size:13px; }
+  .feed div, .log div { padding:5px 9px; border-bottom:1px solid var(--line); }
+  .feed div:last-child, .log div:last-child { border-bottom:0; }
+  .log { max-height:300px; font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); } .warn { color:var(--warn); }
+  .pill { display:inline-block; font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--line); margin-left:4px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#bbb; margin-right:5px; }
+  .dot.on { background:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+  .goods { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .goods button { background:#fff; color:var(--ink); border-color:var(--line); }
+  .status { padding:10px 12px; border-radius:8px; margin-top:10px; background:#f0f3fa; }
+  .status.ok { background:#e8f6ee; } .status.bad { background:#fdecec; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Test Console</h1><span class="tag">staging only</span>
+  <form id="login" class="row" style="flex:1; max-width:640px">
+    <input id="email" placeholder="email" autocomplete="username" value="admin@example.com">
+    <input id="password" type="password" placeholder="password" autocomplete="current-password">
+    <button>Log in</button>
+  </form>
+  <div id="who" class="hidden"><span id="whoText"></span> <button class="secondary" id="logout">Log out</button></div>
+</header>
+
+<main id="app" class="hidden">
+  <!-- Door attendance -->
+  <section>
+    <h2>Door attendance <span class="pill">simulated door → same pipeline</span></h2>
+    <div class="row">
+      <div><label>Door</label><select id="door"></select></div>
+      <div><label>Direction</label>
+        <div class="seg"><label><input type="radio" name="dir" value="in" checked><span>in</span></label><label><input type="radio" name="dir" value="out"><span>out</span></label></div></div>
+    </div>
+    <label>Card holder</label>
+    <select id="doorCard"></select>
+    <label>…or any UID (e.g. an unknown card)</label>
+    <input id="doorUid" placeholder="04AABBCCDD">
+    <div class="row" style="margin-top:10px">
+      <button id="doorScan">Scan</button>
+      <button class="secondary" id="doorRandom">Random scan</button>
+      <button class="secondary" id="doorBurst">Burst ×10</button>
+    </div>
+    <div id="doorStatus" class="status hidden"></div>
+  </section>
+
+  <section>
+    <h2>Occupancy <span><span id="occDot" class="dot"></span><small id="occState" class="muted">offline</small></span></h2>
+    <div id="counters" class="counters"></div>
+    <label>Live door feed</label>
+    <div id="feed" class="feed"></div>
+    <div class="row" style="margin-top:8px"><button class="secondary" id="loadInside">Who is inside?</button></div>
+    <table id="inside" class="hidden"><thead><tr><th>Developer</th><th>Building</th><th>Since</th><th>Door</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- Till -->
+  <section>
+    <h2>Till <span><span id="tillDot" class="dot"></span><small id="tillState" class="muted">no counter</small></span></h2>
+    <div class="row">
+      <div><label>Counter</label><select id="counter"></select></div>
+      <div><label>Reader (ID / SN)</label><input id="reader" readonly></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="newPurchase">New purchase</button>
+      <button class="danger" id="cancelPurchase" disabled>Cancel</button>
+    </div>
+    <label>Goods at this counter (click to add)</label>
+    <div id="goods" class="goods"></div>
+    <label>Bucket</label>
+    <table id="bucket"><tbody><tr><td class="muted">No purchase yet</td></tr></tbody></table>
+  </section>
+
+  <section>
+    <h2>Pay</h2>
+    <label>Card holder tapping the reader</label>
+    <select id="tillCard"></select>
+    <div class="row" style="margin-top:10px"><button id="tap" disabled>Tap card on reader</button></div>
+    <div id="presented" class="status hidden"></div>
+    <div id="pinBox" class="hidden">
+      <label>Developer's PIN</label>
+      <div class="row"><input id="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"><button id="confirm">Confirm payment</button></div>
+    </div>
+    <div id="payStatus" class="status hidden"></div>
+  </section>
+
+  <section class="full">
+    <h2>Log <button class="secondary" id="clearLog">Clear</button></h2>
+    <div id="log" class="log"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const API = "/api/v1";
+const state = { access: null, refresh: null, me: null, cards: [], doors: [], readers: [],
+                positions: [], purchase: null, occWs: null, tillWs: null };
+
+// ---------------------------------------------------------------- helpers
+function uuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16);
+  });
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const time = (iso) => iso ? new Date(iso).toLocaleTimeString() : "";
+function log(kind, text, data) {
+  const div = document.createElement("div");
+  const cls = kind === "error" ? "bad" : kind === "ws" ? "muted" : "";
+  div.innerHTML = `<span class="muted">${new Date().toLocaleTimeString()}</span> <b class="${cls}">${esc(kind)}</b> ${esc(text)}` +
+    (data !== undefined ? ` <span class="muted">${esc(JSON.stringify(data))}</span>` : "");
+  $("log").prepend(div);
+}
+function status(el, ok, html) {
+  el.classList.remove("hidden", "ok", "bad");
+  if (ok !== null) el.classList.add(ok ? "ok" : "bad");
+  el.innerHTML = html;
+}
+function errText(body) {
+  if (body && body.error) return `${body.error.code}: ${body.error.message}` +
+    (body.error.details ? " " + JSON.stringify(body.error.details) : "");
+  return JSON.stringify(body);
+}
+
+async function refreshTokens() {
+  const r = await fetch(`${API}/auth/token/refresh/`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh: state.refresh }) });
+  if (!r.ok) throw new Error("session expired");
+  const t = await r.json(); state.access = t.access; state.refresh = t.refresh;
+}
+let refreshing = null;
+async function api(path, { method = "GET", body, headers = {} } = {}) {
+  const call = () => fetch(API + path, { method,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.access}`, ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  let r = await call();
+  if (r.status === 401 && state.refresh) {
+    refreshing ??= refreshTokens().finally(() => { refreshing = null; });
+    try { await refreshing; r = await call(); } catch { doLogout(); throw new Error("Session expired"); }
+  }
+  const data = r.status === 204 ? null : await r.json().catch(() => null);
+  if (method !== "GET") log(r.ok ? method : "error", `${path} → ${r.status}`, r.ok ? undefined : data);
+  return { ok: r.ok, status: r.status, data };
+}
+async function getAll(path) {
+  let url = path, out = [];
+  while (url) {
+    const { ok, data } = await api(url);
+    if (!ok) break;
+    if (Array.isArray(data)) return data;
+    out = out.concat(data.results);
+    url = data.next ? data.next.replace(/^https?:\/\/[^/]+\/api\/v1/, "") : null;
+  }
+  return out;
+}
+async function openSocket(path, onMessage, onState) {
+  const t = await api("/realtime/ticket/", { method: "POST" });
+  if (!t.ok) { onState(false, "no ticket"); return null; }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}${path}?ticket=${t.data.ticket}`);
+  ws.onopen = () => onState(true, "live");
+  ws.onclose = (e) => { onState(false, `closed (${e.code})`); if (state.access && ws.retry !== false)
+    setTimeout(() => ws.reconnect && ws.reconnect(), 3000); };
+  ws.onmessage = (e) => { const msg = JSON.parse(e.data); log("ws", msg.type, msg.data ?? msg); onMessage(msg); };
+  return ws;
+}
+
+// ---------------------------------------------------------------- login
+$("login").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch(`${API}/auth/token/`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
+  const body = await r.json();
+  if (!r.ok) { log("error", "login failed", body); alert(errText(body)); return; }
+  state.access = body.access; state.refresh = body.refresh;
+  $("password").value = "";
+  state.me = (await api("/auth/me/")).data;
+  $("whoText").textContent = `${state.me.email} · ${state.me.roles.join(", ") || "superuser"}`;
+  $("login").classList.add("hidden"); $("who").classList.remove("hidden"); $("app").classList.remove("hidden");
+  await loadData();
+};
+function doLogout() {
+  if (state.refresh) fetch(`${API}/auth/logout/`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh: state.refresh }) });
+  for (const ws of [state.occWs, state.tillWs]) if (ws) { ws.retry = false; ws.close(); }
+  Object.assign(state, { access: null, refresh: null, me: null });
+  $("login").classList.remove("hidden"); $("who").classList.add("hidden"); $("app").classList.add("hidden");
+}
+$("logout").onclick = doLogout;
+$("clearLog").onclick = () => { $("log").innerHTML = ""; };
+
+// ---------------------------------------------------------------- data
+async function loadData() {
+  log("info", "loading devices, cards, counters…");
+  const [devices, cards, positions] = await Promise.all([
+    getAll("/rfid/devices/?page_size=200"),
+    getAll("/rfid/cards/?assigned=true&page_size=200&ordering=label"),
+    getAll("/service-positions/?is_active=true&page_size=200"),
+  ]);
+  state.doors = devices.filter(d => d.purpose === "ATTENDANCE" && d.is_active);
+  state.readers = devices.filter(d => d.purpose === "TILL" && d.is_active);
+  state.cards = cards.filter(c => c.status === "ACTIVE" && c.current_assignment);
+  state.positions = positions;
+  $("door").innerHTML = state.doors.map(d => `<option value="${esc(d.code)}">${esc(d.code)}${d.location ? " · " + esc(d.location) : ""}</option>`).join("");
+  const cardOpts = state.cards.map(c => `<option value="${esc(c.uid)}">${esc(c.current_assignment.developer.full_name)} (${esc(c.current_assignment.developer.employee_number)}) · ${esc(c.uid)}</option>`).join("");
+  $("doorCard").innerHTML = cardOpts; $("tillCard").innerHTML = cardOpts;
+  $("counter").innerHTML = `<option value="">— choose —</option>` + state.positions
+    .map(p => `<option value="${p.id}">${esc(p.seller_detail.name)} / ${esc(p.name)}</option>`).join("");
+  log("info", `${state.doors.length} doors, ${state.readers.length} till readers, ${state.cards.length} cards, ${state.positions.length} counters`);
+  await connectOccupancy();
+}
+
+// ---------------------------------------------------------------- doors and occupancy
+async function doorScan(door, type, uid) {
+  const r = await api("/test-console/door-scan/", { method: "POST", body: { door, type, uid } });
+  if (!r.ok) { status($("doorStatus"), false, esc(errText(r.data))); return; }
+  status($("doorStatus"), r.data.accepted, `<b>${esc(r.data.result)}</b> · ${esc(door)} · ${esc(type)} — ${esc(r.data.display_message)}`);
+}
+const dir = () => document.querySelector("input[name=dir]:checked").value;
+$("doorScan").onclick = () => doorScan($("door").value, dir(), $("doorUid").value.trim() || $("doorCard").value);
+$("doorRandom").onclick = () => {
+  const c = state.cards[Math.floor(Math.random() * state.cards.length)];
+  const d = state.doors[Math.floor(Math.random() * state.doors.length)];
+  doorScan(d.code, Math.random() < .7 ? "in" : "out", c.uid);
+};
+$("doorBurst").onclick = async () => { for (let i = 0; i < 10; i++) { $("doorRandom").onclick(); await new Promise(r => setTimeout(r, 150)); } };
+
+function renderOccupancy(data) {
+  const tiles = data.buildings.map(b => `<div class="counter"><small>${esc(b.name)}</small><b>${b.count}</b></div>`);
+  tiles.push(`<div class="counter"><small>Total inside</small><b>${data.total}</b></div>`);
+  if (data.unknown_building) tiles.push(`<div class="counter"><small>Unknown building</small><b>${data.unknown_building}</b></div>`);
+  $("counters").innerHTML = tiles.join("");
+}
+function addFeed(d) {
+  const div = document.createElement("div");
+  const who = d.developer ? `${esc(d.developer.full_name)}` : `<span class="muted">${esc(d.result)}</span>`;
+  const where = d.building ? esc(d.building.name) : esc(d.device_code);
+  div.innerHTML = `<span class="muted">${time(d.event_time)}</span> <b class="${d.accepted ? "ok" : "bad"}">${esc(d.direction || d.result)}</b> ${who} · ${where} <span class="muted">— ${esc(d.display_message)}</span>`;
+  $("feed").prepend(div);
+  while ($("feed").children.length > 100) $("feed").lastChild.remove();
+}
+async function connectOccupancy() {
+  const setState = (on, text) => { $("occDot").classList.toggle("on", on); $("occState").textContent = text; };
+  const ws = await openSocket("/ws/occupancy/", (msg) => {
+    if (msg.type === "occupancy") renderOccupancy(msg.data);
+    if (msg.type === "attendance") addFeed(msg.data);
+  }, setState);
+  if (ws) { ws.reconnect = connectOccupancy; state.occWs = ws; }
+}
+$("loadInside").onclick = async () => {
+  const people = await getAll("/attendance/occupancy/people/?page_size=200");
+  const tbody = $("inside").querySelector("tbody");
+  tbody.innerHTML = people.map(p => `<tr><td>${esc(p.developer.full_name)}</td><td>${esc(p.building ? p.building.name : "?")}</td><td>${new Date(p.since).toLocaleString()}</td><td>${esc(p.device_code)}</td></tr>`).join("")
+    || `<tr><td class="muted" colspan="4">Nobody inside</td></tr>`;
+  $("inside").classList.remove("hidden");
+};
+
+// ---------------------------------------------------------------- till
+const reader = () => state.readers.find(r => String(r.service_position) === $("counter").value);
+$("counter").onchange = async () => {
+  state.purchase = null; renderBucket();
+  const rd = reader();
+  $("reader").value = rd ? `${rd.code} / ${rd.sn || "(no SN)"}` : "no till reader at this counter";
+  const goods = $("counter").value ? await getAll(`/goods/?service_position=${$("counter").value}&is_active=true&page_size=200`) : [];
+  $("goods").innerHTML = goods.filter(g => g.kind !== "RENTAL").map(g =>
+    `<button data-id="${g.id}" title="${g.track_stock ? "stock " + g.quantity : "no stock tracking"}">${esc(g.name)} · ${esc(g.price)}</button>`).join("")
+    || `<span class="muted">No sellable goods</span>`;
+  $("goods").querySelectorAll("button").forEach(b => b.onclick = () => addItem(b.dataset.id));
+  if (state.tillWs) { state.tillWs.retry = false; state.tillWs.close(); }
+  if ($("counter").value) connectTill();
+};
+async function connectTill() {
+  const setState = (on, text) => { $("tillDot").classList.toggle("on", on); $("tillState").textContent = text; };
+  const ws = await openSocket(`/ws/counters/${$("counter").value}/`, onTillEvent, setState);
+  if (ws) { ws.reconnect = connectTill; state.tillWs = ws; }
+}
+function onTillEvent(msg) {
+  const d = msg.data || {};
+  if (msg.type === "card_tapped") {
+    if (state.purchase && d.purchase === state.purchase.id && d.accepted) {
+      status($("presented"), true, `<b>${esc(d.developer.full_name)}</b> tapped — enter PIN`);
+      $("pinBox").classList.remove("hidden"); $("pin").value = ""; $("pin").focus();
+    } else {
+      status($("presented"), false, esc(d.display_message || d.result));
+    }
+  }
+  if (["purchase_updated", "purchase_cancelled", "purchase_confirmed"].includes(msg.type) && state.purchase && d.id === state.purchase.id) {
+    state.purchase = d; renderBucket();
+  }
+  if (msg.type === "purchase_confirmed" && state.purchase && d.id === state.purchase.id) {
+    status($("payStatus"), true, `<b>Paid ${esc(d.total)} ${esc(d.currency)}</b> by ${esc(d.developer.full_name)} — balance left ${esc(d.balance_after)}`);
+  }
+}
+function renderBucket() {
+  const p = state.purchase, tbody = $("bucket").querySelector("tbody");
+  $("tap").disabled = !p || p.status !== "DRAFT" || !reader();
+  $("cancelPurchase").disabled = !p || p.status !== "DRAFT";
+  if (!p) { tbody.innerHTML = `<tr><td class="muted">No purchase yet</td></tr>`; return; }
+  const rows = p.items.map(i => `<tr><td>${esc(i.good_name)}</td><td>× ${i.quantity}</td><td>${esc(i.unit_price)}</td><td>${esc(i.line_total)}</td></tr>`);
+  rows.push(`<tr><td><b>#${p.id} · ${esc(p.status)}</b></td><td></td><td>Total</td><td><b>${esc(p.total)} ${esc(p.currency)}</b></td></tr>`);
+  tbody.innerHTML = rows.join("");
+}
+$("newPurchase").onclick = async () => {
+  if (!$("counter").value) return alert("Choose a counter first");
+  const r = await api("/purchases/", { method: "POST", body: { service_position: Number($("counter").value) } });
+  if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
+  state.purchase = r.data; renderBucket();
+  ["presented", "payStatus", "pinBox"].forEach(id => $(id).classList.add("hidden"));
+};
+async function addItem(goodId) {
+  if (!state.purchase || state.purchase.status !== "DRAFT") await $("newPurchase").onclick();
+  const r = await api(`/purchases/${state.purchase.id}/items/`, { method: "POST", body: { good: Number(goodId), quantity: 1 } });
+  if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
+  state.purchase = r.data; renderBucket();
+}
+$("cancelPurchase").onclick = async () => {
+  const r = await api(`/purchases/${state.purchase.id}/cancel/`, { method: "POST" });
+  if (r.ok) { state.purchase = r.data; renderBucket(); $("pinBox").classList.add("hidden"); }
+};
+$("tap").onclick = async () => {
+  const rd = reader();
+  // Exactly what the reader sends: no Authorization header, SN + ID identify it.
+  const body = { SN: rd.sn, ID: rd.code, TYPE: "pay", UID: $("tillCard").value };
+  const r = await fetch(`${API}/rfid/events/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await r.json();
+  log(r.ok ? "reader" : "error", `${rd.code} tap → ${r.status}`, r.ok ? { result: data.result, message: data.display_message, purchase: data.purchase } : data);
+  if (!r.ok) status($("presented"), false, esc(errText(data)));
+};
+$("confirm").onclick = async () => {
+  const r = await api(`/purchases/${state.purchase.id}/confirm/`, { method: "POST", body: { pin: $("pin").value },
+    headers: { "Idempotency-Key": uuid() } });
+  $("pin").value = "";
+  if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
+  state.purchase = r.data; renderBucket(); $("pinBox").classList.add("hidden");
+  status($("payStatus"), true, `<b>Paid ${esc(r.data.total)} ${esc(r.data.currency)}</b> by ${esc(r.data.developer.full_name)} — balance left ${esc(r.data.balance_after)}`);
+};
+</script>
+</body>
+</html>
