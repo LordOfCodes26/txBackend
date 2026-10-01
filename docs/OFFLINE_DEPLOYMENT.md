@@ -26,7 +26,21 @@ contains `.env` files, keys or passwords; each server generates its own at insta
 
 ## 2. Copy it to the offline server
 
-Copy both files (USB disk or internal network), then on the offline server:
+Copy the three files from `dist/` into one folder on the offline server (USB disk or
+internal network): `backend-<version>.tar.gz`, its `.sha256` and `install-backend.sh`.
+Then the easy way, which checks, unpacks (`tar -xzf`) and installs in one go:
+
+```bash
+sudo bash install-backend.sh                        # newest backend-*.tar.gz in this folder
+```
+
+To only unpack (no installation), e.g. to look inside first:
+
+```bash
+bash install-backend.sh --extract-only              # unpacks next to the script
+```
+
+Or by hand:
 
 ```bash
 sha256sum -c backend-2026.10.02.tar.gz.sha256      # must say OK

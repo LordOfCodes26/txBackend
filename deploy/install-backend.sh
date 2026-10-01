@@ -7,6 +7,11 @@
 #   sudo bash install-backend.sh                         # newest bundle in this folder
 #   sudo bash install-backend.sh backend-2026.10.03.tar.gz
 #
+# The script unpacks the .tar.gz itself (tar -xzf). To only unpack it, without installing:
+#
+#   bash install-backend.sh --extract-only               # into this folder
+#   bash install-backend.sh --extract-only /opt/unpacked # into another folder
+#
 # Options:
 #   --timezone Area/City     company timezone, e.g. Asia/Seoul (default: keep current, UTC on first install)
 #   --hosts "a,b"            extra host names / IPs clients use to reach the server
@@ -14,6 +19,7 @@
 #   --admin-email EMAIL      create the first admin with this email (asks for the password)
 #   --no-admin               don't create an admin account
 #   --yes                    don't ask for confirmation
+#   --extract-only [DIR]     check and unpack the bundle (default: next to this script), then stop
 #
 # No internet access is needed: the bundle contains the OS packages, Python packages and
 # the application.
@@ -24,6 +30,8 @@ EXTRA_HOSTS=""
 ADMIN_EMAIL=""
 NO_ADMIN=0
 ASSUME_YES=0
+EXTRACT_ONLY=0
+EXTRACT_DIR=""
 BUNDLE_FILE=""
 
 while (( $# )); do
@@ -33,7 +41,10 @@ while (( $# )); do
         --admin-email) ADMIN_EMAIL="$2"; shift 2 ;;
         --no-admin) NO_ADMIN=1; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        --extract-only)
+            EXTRACT_ONLY=1; shift
+            if (( $# )) && [[ "$1" != -* && "$1" != *.tar.gz ]]; then EXTRACT_DIR="$1"; shift; fi ;;
+        -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 2 ;;
         *) BUNDLE_FILE="$1"; shift ;;
     esac
@@ -48,8 +59,8 @@ ask() {  # ask "question" default -> echo answer
     echo "${answer:-$2}"
 }
 
-[[ $EUID -eq 0 ]] || die "Run as root: sudo bash $0"
 HERE=$(cd "$(dirname "$0")" && pwd)
+(( EXTRACT_ONLY )) || [[ $EUID -eq 0 ]] || die "Run as root: sudo bash $0"
 
 # ---------------------------------------------------------------------------- bundle
 if [[ -z "$BUNDLE_FILE" ]]; then
@@ -68,6 +79,21 @@ if [[ -f "$BUNDLE_FILE.sha256" ]]; then
     echo "    checksum OK"
 else
     echo "    WARNING: no $NAME.tar.gz.sha256 next to the bundle; skipping the checksum check."
+fi
+
+unpack() {  # unpack DIR: extract the bundle into DIR/$NAME
+    mkdir -p "$1"
+    rm -rf "${1:?}/$NAME"
+    echo "    tar -xzf $(basename "$BUNDLE_FILE") -C $1"
+    tar -xzf "$BUNDLE_FILE" -C "$1"
+    echo "    unpacked: $1/$NAME ($(du -sh "$1/$NAME" | cut -f1))"
+}
+
+if (( EXTRACT_ONLY )); then
+    say "Unpacking (no installation)"
+    unpack "${EXTRACT_DIR:-$HERE}"
+    echo "    To install from there: sudo $(cd "${EXTRACT_DIR:-$HERE}" && pwd)/$NAME/app/scripts/install_offline.sh"
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------- OS
@@ -92,10 +118,8 @@ fi
 
 # ---------------------------------------------------------------------------- install
 WORK=/var/tmp/backend-install
-say "Extracting to $WORK/$NAME"
-rm -rf "${WORK:?}/$NAME"
-mkdir -p "$WORK"
-tar -xzf "$BUNDLE_FILE" -C "$WORK"
+say "Unpacking the bundle"
+unpack "$WORK"
 
 say "Running the offline installer (OS packages, database, services, backups)"
 "$WORK/$NAME/app/scripts/install_offline.sh"
