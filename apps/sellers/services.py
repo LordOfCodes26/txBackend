@@ -8,7 +8,7 @@ from .exceptions import PositionHasGoods
 from .models import Seller, ServicePosition
 
 SELLER_FIELDS = ["user", "name", "contact_name", "email", "phone", "status", "notes"]
-POSITION_FIELDS = ["seller", "name", "location", "is_active"]
+POSITION_FIELDS = ["seller", "name", "location", "building", "manager", "is_active"]
 
 
 @transaction.atomic

@@ -50,8 +50,11 @@ class SellerViewSet(
     @extend_schema(responses=SellerSerializer)
     @action(detail=False, methods=["get"])
     def me(self, request):
-        """The caller's own seller profile, whatever its status."""
-        seller = Seller.objects.filter(user=request.user).first()
+        """The caller's own seller profile (as owner, or as a position manager)."""
+        seller = (
+            Seller.objects.filter(user=request.user).first()
+            or Seller.objects.filter(positions__manager=request.user).first()
+        )
         if seller is None:
             raise SellerProfileNotFound()
         return Response(SellerSerializer(seller).data)
@@ -72,6 +75,8 @@ class ServicePositionViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     }
     seller_actions = ("list", "retrieve", "create", "partial_update", "destroy")
     scope_permission = "seller.view"
+    position_lookup = "pk"
+    owner_only_actions = ("create", "destroy")
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = ServicePositionFilter
     search_fields = ["name", "location", "seller__name"]
@@ -80,6 +85,10 @@ class ServicePositionViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     @staticmethod
     def owner_seller_id(obj):
         return obj.seller_id
+
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.pk
 
     def perform_create(self, serializer):
         serializer.instance = services.create_position(

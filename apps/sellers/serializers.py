@@ -2,6 +2,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.accounts.models import User
+from apps.rfid.models import Building
 
 from .models import Seller, ServicePosition
 
@@ -53,6 +54,20 @@ class SellerSerializer(serializers.ModelSerializer):
 class ServicePositionSerializer(serializers.ModelSerializer):
     seller = serializers.PrimaryKeyRelatedField(queryset=Seller.objects.all(), required=False)
     seller_detail = SellerSummarySerializer(source="seller", read_only=True)
+    building = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Optional: the building the position is in.",
+    )
+    building_name = serializers.CharField(source="building.name", read_only=True, default=None)
+    manager = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        help_text="User id of the position's manager: sees and manages only this position.",
+    )
+    manager_email = serializers.EmailField(source="manager.email", read_only=True, default=None)
 
     class Meta:
         model = ServicePosition
@@ -62,6 +77,10 @@ class ServicePositionSerializer(serializers.ModelSerializer):
             "seller_detail",
             "name",
             "location",
+            "building",
+            "building_name",
+            "manager",
+            "manager_email",
             "is_active",
             "created_at",
             "updated_at",
@@ -69,7 +88,20 @@ class ServicePositionSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
         validators = []
 
+    def validate_manager(self, user):
+        if user is not None and Seller.objects.filter(user=user).exists():
+            raise serializers.ValidationError(
+                _("This user is a seller's owner and can't also manage a position.")
+            )
+        return user
+
     def validate(self, attrs):
+        if self.context.get("own_positions") is not None:
+            for field in ("manager", "building", "is_active"):
+                if field in attrs:
+                    raise serializers.ValidationError(
+                        {field: [_("Only the seller's owner or staff can change this.")]}
+                    )
         own = self.context.get("own_seller")
         if self.instance is not None:
             if "seller" in attrs and attrs["seller"] != self.instance.seller:

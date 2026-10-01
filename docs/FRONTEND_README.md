@@ -215,6 +215,25 @@ objects and returns `404` for other sellers' objects. To tell whether the user i
 seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
 SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
 
+### Position managers
+
+Each service position can have **one manager login** (`manager` on the position). A
+position manager is narrowed further than the seller's owner (`Seller.user`):
+
+| | Seller's owner | Position manager |
+|---|---|---|
+| Goods, images, stock, stock history | all the seller's positions | **only their position(s)** |
+| Till sales, booking checkouts, bookings, counter WebSocket | all positions | **only their position(s)** |
+| Service positions | list, create, edit, delete, assign managers / building | list and edit **their own** (name, location); can't change `manager`, `building`, `is_active`, can't create or delete |
+| Seller money (balance, ledger, payouts) | yes | **no** (`403`) |
+
+`GET /sellers/me/` returns the seller for both. To know which positions a manager has,
+list `GET /service-positions/` (it's already narrowed). Other positions' objects return
+`404`; creating goods or sales at another position fails with a validation error on
+`service_position`. Staff with `seller.update` (or the owner) assign the manager:
+`PATCH /service-positions/{id}/ {"manager": <user id>}` (`null` removes it). A seller's
+owner can't also be a position manager.
+
 ---
 
 ## 5. Request and response conventions
@@ -475,7 +494,7 @@ POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "sn": "ZK2024A000123
 | POST | `/sellers/` | `seller.create` | `{name, user?, contact_name?, email?, phone?, notes?}`; `user` = the seller's login |
 | GET/PATCH | `/sellers/{id}/` | `seller.view` / `seller.update` | No DELETE: close with `status: "CLOSED"` |
 | GET | `/sellers/me/` | logged in | Own seller profile (any status) |
-| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `is_active`. Sellers omit `seller` on create; managers must send it |
+| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `building`, `manager`, `is_active`. Fields include `building` (optional, `building_name`) and `manager` (user id, `manager_email`). Sellers omit `seller` on create; managers must send it |
 | GET/PATCH/DELETE | `/service-positions/{id}/` | same | DELETE is soft and fails with `POSITION_HAS_GOODS` while it has goods |
 
 Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.

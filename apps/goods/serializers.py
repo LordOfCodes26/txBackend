@@ -112,7 +112,10 @@ class GoodSerializer(serializers.ModelSerializer):
 
     def validate_service_position(self, position):
         own = self.context.get("own_seller")
-        if own is not None and position.seller_id != own.pk:
+        positions = self.context.get("own_positions")
+        if (own is not None and position.seller_id != own.pk) or (
+            positions is not None and position.pk not in positions
+        ):
             raise serializers.ValidationError(_("You can only use your own service positions."))
         if self.instance is not None and position.seller_id != self.instance.seller_id:
             raise serializers.ValidationError(_("A good cannot move to another seller."))

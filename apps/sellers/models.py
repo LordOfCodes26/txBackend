@@ -54,6 +54,22 @@ class ServicePosition(TimeStampedModel, SoftDeleteModel):
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="positions")
     name = models.CharField(max_length=100)
     location = models.CharField(max_length=255, blank=True)
+    # Optional: the building the position is in (Building 1, Building 2, ...).
+    building = models.ForeignKey(
+        "rfid.Building",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="service_positions",
+    )
+    # The position's manager login: sees and manages only this position (see access.py).
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="managed_positions",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

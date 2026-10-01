@@ -14,4 +14,4 @@ class SellerFilter(django_filters.FilterSet):
 class ServicePositionFilter(django_filters.FilterSet):
     class Meta:
         model = ServicePosition
-        fields = ["seller", "is_active"]
+        fields = ["seller", "building", "manager", "is_active"]

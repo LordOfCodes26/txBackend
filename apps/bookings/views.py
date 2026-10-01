@@ -97,6 +97,7 @@ class BookingViewSet(
     }
     seller_actions = ("list", "retrieve", "change")
     lookup_value_regex = r"\d+"
+    position_lookup = "good__service_position"
     scope_permission = "purchase.view"
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
@@ -106,13 +107,19 @@ class BookingViewSet(
     def owner_seller_id(obj):
         return obj.good.service_position.seller_id
 
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.good.service_position_id
+
     @extend_schema(request=BookingChangeSerializer, responses=BookingSerializer)
     @action(detail=True, methods=["post"])
     def change(self, request, pk=None):
         """Move a paid booking to another date / time, and optionally another court of the
         same seller. Allowed until it starts; the new time must cost the same as paid."""
         booking = self.get_object()
-        serializer = BookingChangeSerializer(data=request.data)
+        serializer = BookingChangeSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         booking = services.change_booking(
@@ -161,10 +168,15 @@ class BookingCheckoutViewSet(
     }
     seller_actions = ("create", "retrieve", "confirm", "cancel")
     scope_permission = "purchase.view"
+    position_lookup = "service_position"
 
     @staticmethod
     def owner_seller_id(obj):
         return obj.seller_id
+
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.service_position_id
 
     def _respond(self, purchase, code=status.HTTP_200_OK):
         return Response(PurchaseSerializer(self.queryset.get(pk=purchase.pk)).data, status=code)

@@ -18,7 +18,7 @@ def _authorize(position_id: int, ticket: str, device_key: str):
     - the counter's own active seller, or users with purchase.view (ticket)."""
     from apps.accounts.models import User
     from apps.rfid.authentication import device_for_key
-    from apps.sellers.access import acting_seller
+    from apps.sellers.access import acting_positions, acting_seller
     from apps.sellers.models import ServicePosition
 
     position = ServicePosition.objects.filter(pk=position_id).first()
@@ -39,8 +39,12 @@ def _authorize(position_id: int, ticket: str, device_key: str):
         return False, CLOSE_NOT_FOUND, None
     if user.has_rbac_perm("purchase.view"):
         return True, None, f"user:{user.pk}"
-    seller = acting_seller(user)
-    if seller is not None and seller.pk == position.seller_id:
+    seller, positions = acting_seller(user), acting_positions(user)
+    if (
+        seller is not None
+        and seller.pk == position.seller_id
+        and (positions is None or position.pk in positions)
+    ):
         return True, None, f"user:{user.pk}"
     return False, CLOSE_FORBIDDEN, None
 

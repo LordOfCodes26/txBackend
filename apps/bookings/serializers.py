@@ -143,6 +143,16 @@ class BookingSerializer(serializers.ModelSerializer):
         return f"{timezone.localtime(obj.end):%H:%M}"
 
 
+def _own_court(context, good):
+    own = context.get("own_seller")
+    positions = context.get("own_positions")
+    if (own is not None and good.service_position.seller_id != own.pk) or (
+        positions is not None and good.service_position_id not in positions
+    ):
+        raise serializers.ValidationError(_("You can only book your own courts."))
+    return good
+
+
 class BookingTimeSerializer(serializers.Serializer):
     """Company-local date and start / end time on the court's slot grid."""
 
@@ -170,10 +180,7 @@ class CheckoutCreateSerializer(BookingTimeSerializer):
     )
 
     def validate_good(self, good):
-        own = self.context.get("own_seller")
-        if own is not None and good.service_position.seller_id != own.pk:
-            raise serializers.ValidationError(_("You can only book your own courts."))
-        return good
+        return _own_court(self.context, good)
 
 
 class BookingChangeSerializer(BookingTimeSerializer):
@@ -182,3 +189,6 @@ class BookingChangeSerializer(BookingTimeSerializer):
         required=False,
         help_text="Another court of the same seller; leave out to keep the court.",
     )
+
+    def validate_good(self, good):
+        return _own_court(self.context, good)

@@ -81,9 +81,15 @@ class PurchaseViewSet(
     search_fields = ["developer__full_name", "developer__employee_number", "seller__name"]
     ordering_fields = ["created_at", "confirmed_at", "total"]
 
+    position_lookup = "service_position"
+
     @staticmethod
     def owner_seller_id(obj):
         return obj.seller_id
+
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.service_position_id
 
     def get_queryset(self):
         if self.action == "me":

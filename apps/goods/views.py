@@ -53,6 +53,7 @@ class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     seller_actions = ALL_GOOD_ACTIONS
     scope_permission = "good.view"
     seller_lookup = "service_position__seller"
+    position_lookup = "service_position"
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = GoodFilter
@@ -62,6 +63,10 @@ class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     @staticmethod
     def owner_seller_id(obj):
         return obj.service_position.seller_id
+
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.service_position_id
 
     def perform_create(self, serializer):
         serializer.instance = services.create_good(
@@ -125,9 +130,14 @@ class InventoryMovementViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModel
     seller_actions = ("list", "retrieve")
     scope_permission = "good.view"
     seller_lookup = "good__service_position__seller"
+    position_lookup = "good__service_position"
     filterset_class = InventoryMovementFilter
     ordering_fields = ["created_at"]
 
     @staticmethod
     def owner_seller_id(obj):
         return obj.good.service_position.seller_id
+
+    @staticmethod
+    def owner_position_id(obj):
+        return obj.good.service_position_id
