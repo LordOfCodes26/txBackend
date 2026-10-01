@@ -653,13 +653,33 @@ So your screen reacts as it will in production. Then confirm with the PIN as usu
 - **Bookings are exclusive and final.** Nobody else can book an overlapping time on the same
   court, **one developer can't hold two courts at the same time**, and a booking can't be
   cancelled or refunded.
-- `SLOT_UNAVAILABLE` (409): someone booked it first, so reload availability.
-  `DAILY_LIMIT_REACHED` (409): the developer already has too many slots on this rental that
-  day; `details` has `max_slots_per_day`, `already_booked` and `remaining`.
-  `ALREADY_BOOKED_THEN` (409): the developer already has another court at that time;
-  `details` has the existing `booking`, `good` (court name), `start` and `end`.
-  `INVALID_SLOT` (400): off the slot grid, outside opening hours, a closed day, in the
-  past, too far ahead, or too many slots (`details` says which limit).
+**Errors when booking** (`POST /bookings/`); nothing is charged on any error:
+
+| `code` | Meaning | Show / do |
+|---|---|---|
+| `SLOT_UNAVAILABLE` (409) | Someone booked an overlapping time on this court first | "Just taken", reload availability |
+| `ALREADY_BOOKED_THEN` (409) | The developer already holds another court at that time; `details`: `booking`, `good` (court), `start`, `end` | "You already have *Football field* 10:00–12:00" |
+| `DAILY_LIMIT_REACHED` (409) | Too many slots on this court that day; `details`: `max_slots_per_day`, `already_booked`, `remaining` | "1 slot left today" |
+| `INVALID_SLOT` (400) | Off the slot grid, outside opening hours, a closed day, in the past, too far ahead, or too many slots; `details` says which limit | Reload availability; use `start` exactly as returned |
+| `RENTAL_NOT_AVAILABLE` (409) | The court was deactivated, has no rules, or its seller is closed | Remove it from the list |
+| `INSUFFICIENT_BALANCE` (409) | Not enough balance; `details`: `balance`, `required` | Show both amounts |
+| `INVALID_PIN` (400) / `PIN_LOCKED` (423) / `PIN_NOT_SET` (409) | PIN problems, same as at the till; `details.attempts_remaining` / `details.locked_until` | Same messages as the till |
+| `DEVELOPER_NOT_ACTIVE`, `ACCOUNT_NOT_ACTIVE` (409) | Suspended/terminated developer, or frozen/closed account | Show `message` |
+
+**Prevent errors in the UI before submitting:**
+
+- Load the developer's bookings for the chosen day (`GET /bookings/me/?date=YYYY-MM-DD`) and
+  **grey out slots that overlap a court they already hold**, so `ALREADY_BOOKED_THEN` can't happen.
+- From the same list, compute the slots already used on this court that day and show
+  **"N of `max_slots_per_day` left"**; limit the selectable slots accordingly.
+- Show the price as `price × slots` (money strings, no float maths) next to the current
+  balance (`/finance/accounts/me/`); disable "Book" when the balance is too low.
+- Times: availability returns full timestamps; display them in the browser's local time.
+  Slot rules (opening hours, which day a slot belongs to) are in the **company timezone**
+  set on the server (`TIME_ZONE`, currently UTC on staging).
+- Generate a new `Idempotency-Key` when the confirm dialog opens; reuse it for retries of
+  that same attempt only.
+
 - A booking appears in the developer's statement and purchases (`/purchases/me/`) like a
   till purchase, and in the seller's earnings.
 - Sellers see who booked what at `/bookings/?date=…`, e.g. for a daily schedule screen.
