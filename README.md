@@ -72,6 +72,8 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
 
 ## Deploying to an offline server
 
+Step-by-step guide: `docs/OFFLINE_DEPLOYMENT.md`. Summary:
+
 The production server may have no internet access, so nothing is downloaded at install
 time — the app runs natively under systemd behind nginx, not in Docker.
 
