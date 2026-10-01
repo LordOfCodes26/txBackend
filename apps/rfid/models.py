@@ -159,6 +159,11 @@ class RFIDDevice(TimeStampedModel):
         related_name="till_devices",
         help_text="TILL devices only: the counter whose purchases receive this reader's taps.",
     )
+    sn = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="TILL readers: serial number they send as `SN`; with `ID` it authenticates them.",
+    )
     allowed_ip = models.GenericIPAddressField(
         null=True,
         blank=True,
@@ -184,6 +189,11 @@ class RFIDDevice(TimeStampedModel):
                 condition=Q(purpose=DevicePurpose.ATTENDANCE) | Q(allowed_ip__isnull=True),
                 name="rfid_only_attendance_devices_use_ip_auth",
             ),
+            models.CheckConstraint(
+                condition=Q(purpose=DevicePurpose.TILL) | Q(sn=""),
+                name="rfid_only_till_devices_have_sn",
+            ),
+            models.UniqueConstraint("sn", condition=~Q(sn=""), name="rfid_device_sn_unique"),
             models.CheckConstraint(
                 condition=(
                     Q(purpose=DevicePurpose.TILL, service_position__isnull=False)
@@ -216,6 +226,19 @@ class RFIDDevice(TimeStampedModel):
 
     def check_api_key(self, key: str) -> bool:
         return secrets.compare_digest(self.api_key_hash, self.hash_key(key))
+
+    @staticmethod
+    def normalize_sn(sn: str) -> str:
+        return str(sn).strip().upper()
+
+    def check_sn(self, sn: str) -> bool:
+        if not self.sn or not sn:
+            return False
+        return secrets.compare_digest(self.sn.encode(), self.normalize_sn(sn).encode())
+
+    def save(self, *args, **kwargs):
+        self.sn = self.normalize_sn(self.sn or "")
+        super().save(*args, **kwargs)
 
 
 class ScanDirection(models.TextChoices):

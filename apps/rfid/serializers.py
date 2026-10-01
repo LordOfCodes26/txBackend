@@ -108,6 +108,12 @@ class RFIDCardAssignmentSerializer(serializers.ModelSerializer):
 
 class RFIDDeviceSerializer(serializers.ModelSerializer):
     online = serializers.BooleanField(source="is_online", read_only=True)
+    sn = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=100,
+        help_text="TILL readers: the serial number they send as `SN` (stored upper-case).",
+    )
 
     class Meta:
         model = RFIDDevice
@@ -121,6 +127,7 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "service_position",
             "direction",
             "allowed_ip",
+            "sn",
             "is_active",
             "online",
             "last_seen_at",
@@ -160,6 +167,21 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"allowed_ip": ["Only ATTENDANCE door devices may authenticate by IP."]}
             )
+        sn = RFIDDevice.normalize_sn(attrs.get("sn", "") or "")
+        if "sn" in attrs:
+            attrs["sn"] = sn
+        if sn and purpose != DevicePurpose.TILL:
+            raise serializers.ValidationError(
+                {"sn": ["Only TILL readers authenticate by serial number."]}
+            )
+        if sn:
+            clash = RFIDDevice.objects.filter(sn=sn)
+            if self.instance is not None:
+                clash = clash.exclude(pk=self.instance.pk)
+            if clash.exists():
+                raise serializers.ValidationError(
+                    {"sn": ["Another device already has this serial number."]}
+                )
         return attrs
 
 
@@ -346,7 +368,10 @@ class ScanResponseSerializer(serializers.ModelSerializer):
 class HeartbeatSerializer(serializers.Serializer):
     app_version = serializers.CharField(max_length=50, required=False, allow_blank=True)
     ID = serializers.CharField(
-        required=False, help_text="Device code; needed only for IP-authenticated doors."
+        required=False, help_text="Device code; needed for key-less doors and till readers."
+    )
+    SN = serializers.CharField(
+        required=False, help_text="Till readers without a key: their serial number."
     )
 
 

@@ -218,6 +218,10 @@ RFID_TCP_MAX_FRAME_BYTES = env.int("RFID_TCP_MAX_FRAME_BYTES", default=2048)
 RFID_TCP_IDLE_TIMEOUT_SECONDS = env.int("RFID_TCP_IDLE_TIMEOUT_SECONDS", default=300)
 RFID_TCP_MAX_CONNECTIONS = env.int("RFID_TCP_MAX_CONNECTIONS", default=200)
 RFID_TCP_MAX_CONNECTIONS_PER_IP = env.int("RFID_TCP_MAX_CONNECTIONS_PER_IP", default=10)
+# Till readers authenticate by serial number (SN) + ID; lock an address out after this
+# many failures within RFID_SN_LOCKOUT_SECONDS.
+RFID_SN_MAX_FAILURES = env.int("RFID_SN_MAX_FAILURES", default=10)
+RFID_SN_LOCKOUT_SECONDS = env.int("RFID_SN_LOCKOUT_SECONDS", default=900)
 
 # --- Attendance -------------------------------------------------------------
 # How scans become IN/OUT: "none" (first/last scan only), "toggle" (alternate IN/OUT),

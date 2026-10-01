@@ -397,20 +397,23 @@ edit pages, not in list tables.
 | `purpose` | Examples | Required / allowed fields | Authentication |
 |---|---|---|---|
 | `ATTENDANCE` | `Door1` (Building 1), `Door2` (Building 2) | `code`, `building`; optional `allowed_ip`, `name`, `location` | Fixed IP (`allowed_ip`) or API key |
-| `TILL` | `Reader1`, `Reader2`, … | `code`, `service_position` (the counter); no `building`, no `allowed_ip` | **API key only** |
+| `TILL` | `Reader1`, `Reader2`, … | `code`, `service_position` (the counter), `sn` (the reader's serial number); no `building`, no `allowed_ip` | **Serial number + ID** (`sn`), or API key |
 
 ```json
 POST /rfid/devices/  {"code": "Door1", "purpose": "ATTENDANCE", "building": 1, "allowed_ip": "10.20.0.11"}
-POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "service_position": 3}
+POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "service_position": 3, "sn": "ZK2024A0001234"}
 ```
 
 - `code` must be exactly what the hardware sends as `ID` (`Door1`, `Reader2`, …).
 - Validation errors to show next to the fields: a till with a `building` or `allowed_ip`, an
-  attendance device with a `service_position`, or a till without one.
+  attendance device with a `service_position` or `sn`, a till without a `service_position`,
+  or a serial number already used by another device.
+- `sn` is shown in full (upper-case) and can be edited; changes are audited.
 - Doors that authenticate by IP don't need their key, but registration still returns one.
   Show it anyway (the door may support it later).
-- Device list columns: `code`, `purpose`, building or counter, `online` (heard from in the
-  last 2 minutes), `last_seen_at`, `last_ip`, `app_version`, `allowed_ip`, `is_active`.
+- Device list columns: `code`, `purpose`, building or counter, `sn` (tills), `allowed_ip`
+  (doors), `online` (heard from in the last 2 minutes), `last_seen_at`, `last_ip`,
+  `app_version`, `is_active`.
   `?online=false` lists devices needing attention.
 - Changes to devices (including `allowed_ip`) are recorded in the audit log.
 

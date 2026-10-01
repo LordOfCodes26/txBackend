@@ -9,9 +9,12 @@ A connection may carry one scan or many (kept open). The server answers every fr
     ${"result": "ACCEPTED", "accepted": true, "direction": "IN", "message": "Welcome, Ada"}$
     ${"result": "ERROR", "accepted": false, "error": "..."}$
 
-Authentication is the door's fixed IP: the peer address must equal the `allowed_ip` of the
-active ATTENDANCE device whose code is `ID` (the same rule as key-less HTTP). There is no
-proxy in front of this port, so the peer address is the real sender.
+Authentication:
+- doors: fixed IP. The peer address must equal the `allowed_ip` of the active ATTENDANCE
+  device whose code is `ID`. There is no proxy in front of this port, so the peer address
+  is the real sender.
+- till readers: the frame carries `SN` (serial number) and `ID`; both must match an
+  active TILL device (same rule as key-less HTTP, with lockout after repeated failures).
 
 Scans go through `services.record_scan`, exactly like HTTP scans (attendance, occupancy,
 live dashboard events).
@@ -80,6 +83,7 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
     from rest_framework.exceptions import ValidationError
 
     from . import services
+    from .authentication import SNLockedOut, till_for_sn
     from .models import DevicePurpose, RFIDDevice
     from .serializers import ScanResponseSerializer, ScanSerializer
 
@@ -90,20 +94,31 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
     if not isinstance(data, dict):
         return _error("Frame must be a JSON object.")
 
-    code = next(
-        (str(v).strip() for k, v in data.items() if str(k).lower() in ("id", "device_id")), ""
-    )
+    fields = {str(k).lower(): v for k, v in data.items()}
+    code = str(fields.get("id") or fields.get("device_id") or "").strip()
     if not code:
         return _error("Missing ID.")
-    device = RFIDDevice.objects.filter(
-        code__iexact=code,
-        allowed_ip=peer_ip,
-        is_active=True,
-        purpose=DevicePurpose.ATTENDANCE,
-    ).first()
-    if device is None:
-        logger.warning("RFID TCP: rejected ID=%r from %s (no matching door/IP)", code, peer_ip)
-        return _error("No door device with this ID is registered for this IP.")
+    sn = str(fields.get("sn") or "").strip()
+    if sn:
+        # Till readers: serial number + ID.
+        try:
+            device = till_for_sn(code, sn, peer_ip)
+        except SNLockedOut:
+            return _error("Too many failed attempts; try again later.")
+        if device is None:
+            logger.warning("RFID TCP: rejected till ID=%r from %s (wrong SN)", code, peer_ip)
+            return _error("Unknown till reader ID or serial number.")
+    else:
+        # Doors: fixed IP + ID.
+        device = RFIDDevice.objects.filter(
+            code__iexact=code,
+            allowed_ip=peer_ip,
+            is_active=True,
+            purpose=DevicePurpose.ATTENDANCE,
+        ).first()
+        if device is None:
+            logger.warning("RFID TCP: rejected ID=%r from %s (no matching door/IP)", code, peer_ip)
+            return _error("No door device with this ID is registered for this IP.")
 
     serializer = ScanSerializer(data=data, context={"device": device})
     try:
@@ -118,13 +133,16 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
         direction=serializer.validated_data["direction"],
     )
     body = ScanResponseSerializer(event).data
-    return {
+    reply = {
         "result": body["result"],
         "accepted": body["accepted"],
         "direction": body["direction"],
         "message": body["display_message"],
         "event_id": body["id"],
     }
+    if device.purpose == DevicePurpose.TILL:
+        reply["purchase"] = body["purchase"]
+    return reply
 
 
 class DoorTCPServer:

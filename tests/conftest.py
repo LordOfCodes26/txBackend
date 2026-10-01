@@ -7,6 +7,16 @@ from apps.accounts.rbac import Roles
 PASSWORD = "Str0ng-pass-phrase!"
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Throttle and lockout counters live in the cache; don't leak them between tests."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def api_client():
     return APIClient()

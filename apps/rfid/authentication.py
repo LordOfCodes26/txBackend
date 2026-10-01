@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.core.cache import cache
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
@@ -100,6 +102,72 @@ def _device_code_from_body(request) -> str:
         if str(key).lower() in ("id", "device_id") and isinstance(value, str):
             return value.strip()
     return ""
+
+
+class SNLockedOut(Exception):
+    pass
+
+
+def _fail_key(ip: str) -> str:
+    return f"rfid-sn-fail:{ip}"
+
+
+def till_for_sn(code: str, sn: str, ip: str | None) -> RFIDDevice | None:
+    """The active TILL device named `code` whose serial number is `sn`, else None.
+
+    Serial numbers are not secret-grade (often printed on the device), so repeated
+    failures from one address lock that address out (RFID_SN_MAX_FAILURES within
+    RFID_SN_LOCKOUT_SECONDS) to stop guessing.
+    """
+    key = _fail_key(ip or "unknown")
+    if cache.get(key, 0) >= settings.RFID_SN_MAX_FAILURES:
+        raise SNLockedOut()
+    device = RFIDDevice.objects.filter(
+        code__iexact=code, is_active=True, purpose=DevicePurpose.TILL
+    ).first()
+    if device is not None and device.check_sn(sn):
+        return device
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=settings.RFID_SN_LOCKOUT_SECONDS)
+    return None
+
+
+def _body_value(request, *names: str) -> str:
+    try:
+        data = request.data
+    except Exception:  # unparsable body: let the view report it
+        return ""
+    if not hasattr(data, "items"):
+        return ""
+    for key, value in data.items():
+        if str(key).lower() in names and isinstance(value, str | int):
+            return str(value).strip()
+    return ""
+
+
+class DeviceSNAuthentication(BaseAuthentication):
+    """Key-less authentication for till readers: the body carries `SN` (the reader's serial
+    number) and `ID` (its code). Used only when there is no Authorization header."""
+
+    def authenticate(self, request):
+        if get_authorization_header(request) or request.method != "POST":
+            return None
+        sn = _body_value(request, "sn")
+        if not sn:
+            return None
+        code = _body_value(request, "id", "device_id")
+        try:
+            device = till_for_sn(code, sn, client_ip(request))
+        except SNLockedOut as exc:
+            raise AuthenticationFailed("Too many failed attempts; try again later.") from exc
+        if device is None:
+            raise AuthenticationFailed("Unknown till reader ID or serial number.")
+        return DevicePrincipal(device), device
+
+    def authenticate_header(self, request):
+        return "Device"
 
 
 class DeviceAuthenticationScheme(OpenApiAuthenticationExtension):

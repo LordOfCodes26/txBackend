@@ -78,8 +78,8 @@ ${"ID":"Door1","Type":"in","UID":"04A2B3C4"}$
   …), or `ERROR` when the packet itself was rejected. Use `accepted` for the green/red
   light and `message` for a display. A door that ignores replies still works.
 - **Authentication is the fixed IP** (same rule as above): the connection must come from
-  the `allowed_ip` registered for the device named in `ID`. Only ATTENDANCE devices may
-  use TCP; till readers use HTTPS with their key.
+  the `allowed_ip` registered for the device named in `ID`. Doors authenticate by IP;
+  till readers on TCP authenticate with `SN` + `ID` (see *TILL devices only*).
 - **Finding a door's IP:** point the door at the server and tap a card. The rejection is
   logged with the address the server saw (`journalctl -u backend-tcp`: `rejected
   ID='Door1' from 203.0.113.5`). Register that address as the door's `allowed_ip`. If the
@@ -232,26 +232,39 @@ A response with `accepted: false` is still a **successful request**; don't retry
 
 ### TILL devices only
 
-**Till reader format.** Till readers (`Reader1`, `Reader2`, …, one per counter) send:
+**Till reader format.** Till readers (`Reader1`, `Reader2`, …, one per counter) send their
+serial number with every tap. **No API key is needed**: `SN` + `ID` identify and
+authenticate the reader.
 
 ```http
 POST /api/v1/rfid/events/
-Authorization: Device <api_key of Reader1>
+Content-Type: application/json
 
-{"ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"}
+{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"}
 ```
+
+or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Reader1","TYPE":"pay","UID":"04A2B3C4"}$`
 
 | Field | Meaning |
 |---|---|
-| `ID` | The reader's device code; must match the key's device |
+| `SN` | The reader's serial number, exactly as registered for this device (case and surrounding spaces don't matter) |
+| `ID` | The reader's device code |
 | `TYPE` | Always `pay` (case-insensitive) |
 | `UID` | Card UID |
 
-`TYPE` must fit the device: till readers send `pay`, doors send `in`/`out`. A mismatch is
-refused with `400` (`{"type": ["Till readers send `pay`."]}`), which usually means a device
-was configured with another device's key. **Till readers always need their API key**;
-the fixed-IP method is only for doors, because payments move money.
-
+- Register each reader with its serial number: `POST /api/v1/rfid/devices/
+  {"code": "Reader1", "purpose": "TILL", "service_position": 3, "sn": "ZK2024A0001234"}`.
+  Each serial number can belong to only one device.
+- Both `SN` and `ID` must match an active till reader, otherwise the reply is `401`
+  ("Unknown till reader ID or serial number"). After **10 failed attempts from one
+  address within 15 minutes**, that address is blocked for 15 minutes (guessing protection).
+- `TYPE` must fit the device: till readers send `pay`, doors send `in`/`out`.
+- Heartbeats work the same way: `POST /api/v1/rfid/device/heartbeat/ {"SN": "...", "ID": "Reader1"}`.
+- **Security note:** a serial number is often printed on the device. Anyone who knows it
+  and the reader's ID could send fake taps for that counter. Nobody can be charged without
+  the developer's PIN, but treat serial numbers as confidential (keep labels covered, don't
+  share device lists). An API key (`Authorization: Device <key>`) is still accepted as a
+  stronger alternative.
 
 - The server attaches an accepted tap to the **newest open (DRAFT) purchase at the
   device's counter**, and returns its id in `purchase`. If no purchase is open,
