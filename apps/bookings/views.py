@@ -1,33 +1,31 @@
 from django.db.models import Q
-from drf_spectacular.utils import extend_schema
-from rest_framework import mixins, viewsets
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.developers.exceptions import DeveloperProfileNotFound
-from apps.developers.models import Developer
 from apps.goods.models import Good, GoodKind
+from apps.purchases import services as purchase_services
+from apps.purchases.models import Purchase, PurchaseKind
+from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from apps.sellers.models import SellerStatus
+from common.idempotency import HEADER, require_idempotency_key
+from common.middleware import client_ip
 
 from . import services
 from .filters import BookingFilter
 from .models import Booking
 from .serializers import (
     AvailabilityQuerySerializer,
+    BookingChangeSerializer,
     BookingSerializer,
+    CheckoutCreateSerializer,
     RentalSerializer,
     ScheduleSerializer,
     SlotSerializer,
 )
-
-
-def _own_developer(request) -> Developer:
-    developer = Developer.objects.filter(user=request.user).first()
-    if developer is None:
-        raise DeveloperProfileNotFound()
-    return developer
 
 
 class RentalViewSet(viewsets.ReadOnlyModelViewSet):
@@ -81,10 +79,8 @@ class BookingViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    """Court bookings (read-only). Bookings are made at the playground desk: add them to a
-    draft purchase like any good
-    (`POST /purchases/{id}/items/` with `start`); the developer taps their card and
-    enters the PIN, and confirming the purchase creates the booking. Bookings are final.
+    """Court bookings. They are paid at the desk through `/bookings/checkout/` (card tap +
+    PIN). Until it starts, a booking can be moved (`change`); there are no refunds.
 
     Sellers see bookings of their rentals; `purchase.view` sees all.
     """
@@ -94,8 +90,13 @@ class BookingViewSet(
     )
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
-    required_permissions = {"list": ["purchase.view"], "retrieve": ["purchase.view"]}
-    seller_actions = ("list", "retrieve")
+    required_permissions = {
+        "list": ["purchase.view"],
+        "retrieve": ["purchase.view"],
+        "change": ["purchase.create"],
+    }
+    seller_actions = ("list", "retrieve", "change")
+    lookup_value_regex = r"\d+"
     scope_permission = "purchase.view"
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
@@ -104,3 +105,116 @@ class BookingViewSet(
     @staticmethod
     def owner_seller_id(obj):
         return obj.good.service_position.seller_id
+
+    @extend_schema(request=BookingChangeSerializer, responses=BookingSerializer)
+    @action(detail=True, methods=["post"])
+    def change(self, request, pk=None):
+        """Move a paid booking to another date / time, and optionally another court of the
+        same seller. Allowed until it starts; the new time must cost the same as paid."""
+        booking = self.get_object()
+        serializer = BookingChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        booking = services.change_booking(
+            actor=request.user,
+            booking=booking,
+            day=data["date"],
+            start_time=data["start_time"],
+            end_time=data["end_time"],
+            good=data.get("good"),
+        )
+        return Response(BookingSerializer(self.queryset.get(pk=booking.pk)).data)
+
+
+class BookingCheckoutViewSet(
+    SellerScopedQuerysetMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Pay for a court booking at the desk, separately from till sales.
+
+    POST creates the checkout for one court and time; the developer taps their card on the
+    desk's reader (`card_tapped` on the counter WebSocket, `presented_card` here) and enters
+    the PIN; `confirm` books it for the card holder. The id is a purchase id.
+    """
+
+    queryset = (
+        Purchase.objects.filter(kind=PurchaseKind.BOOKING)
+        .select_related(
+            "seller",
+            "service_position",
+            "developer",
+            "card",
+            "account_transaction",
+            "presented_event__developer",
+            "reader",
+        )
+        .prefetch_related("items__good__rental", "bookings")
+    )
+    serializer_class = PurchaseSerializer
+    permission_classes = [CatalogPermission]
+    required_permissions = {
+        "create": ["purchase.create"],
+        "retrieve": ["purchase.view"],
+        "confirm": ["purchase.confirm"],
+        "cancel": ["purchase.cancel"],
+    }
+    seller_actions = ("create", "retrieve", "confirm", "cancel")
+    scope_permission = "purchase.view"
+
+    @staticmethod
+    def owner_seller_id(obj):
+        return obj.seller_id
+
+    def _respond(self, purchase, code=status.HTTP_200_OK):
+        return Response(PurchaseSerializer(self.queryset.get(pk=purchase.pk)).data, status=code)
+
+    @extend_schema(request=CheckoutCreateSerializer, responses={201: PurchaseSerializer})
+    def create(self, request, *args, **kwargs):
+        serializer = CheckoutCreateSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        purchase = services.start_checkout(
+            actor=request.user,
+            good=data["good"],
+            day=data["date"],
+            start_time=data["start_time"],
+            end_time=data["end_time"],
+            reader=data.get("reader"),
+            client_ip=client_ip(request),
+        )
+        return self._respond(purchase, status.HTTP_201_CREATED)
+
+    @extend_schema(
+        request=ConfirmSerializer,
+        responses={201: PurchaseSerializer, 200: PurchaseSerializer},
+        parameters=[
+            OpenApiParameter(
+                HEADER,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="Unique per payment attempt; a retry with the same key is safe.",
+            )
+        ],
+        description="Charge the developer who tapped and book the court for them. 201 when "
+        "booked now; 200 when this Idempotency-Key already did.",
+    )
+    @action(detail=True, methods=["post"])
+    def confirm(self, request, pk=None):
+        key = require_idempotency_key(request)
+        purchase = self.get_object()
+        serializer = ConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase, created = purchase_services.confirm_purchase(
+            actor=request.user, purchase=purchase, idempotency_key=key, **serializer.validated_data
+        )
+        return self._respond(purchase, status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """Abandon the checkout before paying."""
+        purchase = purchase_services.cancel_purchase(actor=request.user, purchase=self.get_object())
+        return self._respond(purchase)

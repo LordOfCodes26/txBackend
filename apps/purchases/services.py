@@ -5,7 +5,6 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import record_audit
 from apps.developers.models import DeveloperStatus
@@ -31,7 +30,7 @@ from .exceptions import (
     SelfPurchaseForbidden,
     SellerNotActive,
 )
-from .models import Purchase, PurchaseItem, PurchaseStatus
+from .models import Purchase, PurchaseItem, PurchaseKind, PurchaseStatus
 
 INACTIVE_DEVELOPER = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
 
@@ -47,9 +46,9 @@ def _ensure_sellable(good: Good, purchase: Purchase, *, booking: bool = False) -
     """`booking`: the line is a booking (has a start time); only rentals are booked."""
     if (good.kind == GoodKind.RENTAL) != booking:
         raise GoodNotAvailable(
-            _("Rentals need a date, a start time and an end time.")
+            _("Courts are booked separately, not added to a till purchase.")
             if good.kind == GoodKind.RENTAL
-            else _("Only rentals have a date and time."),
+            else _("Only courts can be booked."),
             details={"good": good.pk},
         )
     if (
@@ -87,7 +86,12 @@ def readers_at(ip: str | None):
 
 @transaction.atomic
 def create_purchase(
-    *, actor, service_position: ServicePosition, reader=None, client_ip: str | None = None
+    *,
+    actor,
+    service_position: ServicePosition,
+    reader=None,
+    client_ip: str | None = None,
+    kind: str = PurchaseKind.SALE,
 ) -> Purchase:
     """`reader` may be given explicitly. Otherwise, if exactly one till reader was last heard
     from the seller's PC address, it's used; else the first tap from that address decides."""
@@ -102,6 +106,7 @@ def create_purchase(
         created_by=actor,
         reader=reader,
         client_ip=client_ip,
+        kind=kind,
     )
 
 
@@ -119,93 +124,43 @@ def set_reader(*, purchase: Purchase, reader) -> Purchase:
     return purchase
 
 
-TIME_FIELDS = ("date", "start_time", "end_time")
-
-
-def _booking_time(good: Good, times: dict, current: PurchaseItem | None = None):
-    """(start, slots) of a rental line from `date`, `start_time`, `end_time` (company-local).
-    When changing a line, missing fields keep their current values."""
-    from apps.bookings import services as bookings
-
-    if current is not None and current.start is not None:
-        local = timezone.localtime(current.start)
-        length = timedelta(minutes=good.rental.slot_minutes * current.quantity)
-        end = timezone.localtime(current.start + length)
-        times = {"date": local.date(), "start_time": local.time(), "end_time": end.time()} | {
-            k: v for k, v in times.items() if v is not None
-        }
-    missing = [f for f in TIME_FIELDS if times.get(f) is None]
-    if missing:
-        raise ValidationError(
-            {f: [_("Rentals need a date, a start time and an end time.")] for f in missing}
+def _ensure_sale(purchase: Purchase, good: Good | None = None) -> None:
+    """Courts are booked through their own checkout (apps.bookings), never in a till cart,
+    and a booking checkout holds its one court only."""
+    if purchase.kind == PurchaseKind.BOOKING:
+        raise GoodNotAvailable(_("A booking checkout holds one court only."))
+    if good is not None and good.kind == GoodKind.RENTAL:
+        raise GoodNotAvailable(
+            _("Courts are booked separately, not added to a till purchase."),
+            details={"good": good.pk},
         )
-    return bookings.time_range(
-        good=good, day=times["date"], start_time=times["start_time"], end_time=times["end_time"]
-    )
-
-
-def _refuse_times(times: dict) -> None:
-    given = [f for f in TIME_FIELDS if times.get(f) is not None]
-    if given:
-        raise ValidationError({f: [_("Only rentals have a date and time.")] for f in given})
 
 
 @transaction.atomic
-def add_item(*, purchase: Purchase, good: Good, quantity: int = 1, **times) -> PurchaseItem:
-    """Add a good, or increase its quantity if it is already in the bucket.
-
-    Rentals (courts) are added the same way with `date`, `start_time` and `end_time`
-    (company-local, on the rental's slot grid) instead of a quantity. The developer who
-    taps their card and enters the PIN gets the booking and pays for it. Adding the same
-    rental again replaces its time.
-    """
-    from apps.bookings import services as bookings
-
+def add_item(*, purchase: Purchase, good: Good, quantity: int = 1) -> PurchaseItem:
+    """Add a good, or increase its quantity if it is already in the bucket."""
     purchase = _lock_draft(purchase)
-    good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
-    if good.kind == GoodKind.RENTAL:
-        start, slots = _booking_time(good, times)
-        bookings.check_line(good=good, start=start, slots=slots)
-        _ensure_sellable(good, purchase, booking=True)
-        item, _created = PurchaseItem.objects.update_or_create(
-            purchase=purchase, good=good, defaults={"quantity": slots, "start": start}
-        )
-    else:
-        _refuse_times(times)
-        _ensure_sellable(good, purchase)
-        item, created = PurchaseItem.objects.get_or_create(
-            purchase=purchase, good=good, defaults={"quantity": quantity}
-        )
-        if not created:
-            item.quantity += quantity
-        _check_stock_hint(good, item.quantity)
-        item.save()
+    good = Good.all_objects.select_related("service_position").get(pk=good.pk)
+    _ensure_sale(purchase, good)
+    _ensure_sellable(good, purchase)
+    item, created = PurchaseItem.objects.get_or_create(
+        purchase=purchase, good=good, defaults={"quantity": quantity}
+    )
+    if not created:
+        item.quantity += quantity
+    _check_stock_hint(good, item.quantity)
+    item.save()
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 
 
 @transaction.atomic
-def update_item(
-    *, purchase: Purchase, item: PurchaseItem, quantity: int | None = None, **times
-) -> PurchaseItem:
-    """Change the quantity of a good, or the date / start / end time of a booking."""
-    from apps.bookings import services as bookings
-
+def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
     purchase = _lock_draft(purchase)
-    if item.start is not None:
-        if quantity is not None:
-            raise ValidationError({"quantity": [_("Change a booking's date and times instead.")]})
-        start, slots = _booking_time(item.good, times, current=item)
-        bookings.check_line(good=item.good, start=start, slots=slots)
-        item.start, item.quantity = start, slots
-        item.save(update_fields=["start", "quantity"])
-    else:
-        _refuse_times(times)
-        if quantity is None:
-            raise ValidationError({"quantity": [_("This field is required.")]})
-        _check_stock_hint(item.good, quantity)
-        item.quantity = quantity
-        item.save(update_fields=["quantity"])
+    _ensure_sale(purchase)
+    _check_stock_hint(item.good, quantity)
+    item.quantity = quantity
+    item.save(update_fields=["quantity"])
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 
@@ -213,6 +168,7 @@ def update_item(
 @transaction.atomic
 def remove_item(*, purchase: Purchase, item: PurchaseItem) -> None:
     purchase = _lock_draft(purchase)
+    _ensure_sale(purchase)
     item.delete()
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
 

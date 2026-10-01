@@ -7,12 +7,15 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
+from apps.finance.models import DeveloperAccount
 from apps.goods.models import Good, GoodKind, RentalSettings
 from apps.purchases.models import Purchase
 from apps.sellers.models import SellerStatus
 
 from .exceptions import (
     AlreadyBookedThen,
+    BookingPriceDifferent,
+    BookingStarted,
     DailyLimitReached,
     InvalidSlot,
     RentalNotAvailable,
@@ -128,7 +131,9 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
     return end
 
 
-def _ensure_daily_limit(rules: RentalSettings, good: Good, developer, start, slots) -> None:
+def _ensure_daily_limit(
+    rules: RentalSettings, good: Good, developer, start, slots, exclude: int | None = None
+) -> None:
     """One developer may book at most `max_slots_per_day` slots of a rental per local day,
     across all their bookings. Safe under concurrency: the caller holds the developer's
     account lock, so one developer's bookings are processed one at a time."""
@@ -140,7 +145,9 @@ def _ensure_daily_limit(rules: RentalSettings, good: Good, developer, start, slo
             developer=developer,
             start__gte=day_start,
             start__lt=day_start + timedelta(days=1),
-        ).aggregate(n=Sum("slots"))["n"]
+        )
+        .exclude(pk=exclude)
+        .aggregate(n=Sum("slots"))["n"]
         or 0
     )
     if already + slots > rules.max_slots_per_day:
@@ -166,6 +173,32 @@ def time_range(*, good: Good, day: date, start_time, end_time) -> tuple[datetime
             details={"slot_minutes": rules.slot_minutes},
         )
     return start, int(minutes // rules.slot_minutes)
+
+
+def _ensure_developer_free(developer, start, end, exclude: int | None = None) -> None:
+    clash = (
+        Booking.objects.filter(developer=developer, start__lt=end, end__gt=start)
+        .exclude(pk=exclude)
+        .select_related("good")
+        .first()
+    )
+    if clash is not None:
+        raise AlreadyBookedThen(
+            details={
+                "booking": clash.pk,
+                "good": clash.good.name,
+                "start": clash.start.isoformat(),
+                "end": clash.end.isoformat(),
+            }
+        )
+
+
+def _constraint_error(exc: IntegrityError) -> Exception:
+    """A concurrent request won: either the court or the developer's time is taken."""
+    cause = getattr(exc.__cause__, "diag", None)
+    if cause is not None and cause.constraint_name == "booking_one_court_per_developer":
+        return AlreadyBookedThen()
+    return SlotUnavailable()
 
 
 def check_line(*, good: Good, start: datetime, slots: int) -> datetime:
@@ -196,20 +229,7 @@ def book_lines(
         if Booking.objects.filter(good=good, start__lt=end, end__gt=item.start).exists():
             raise SlotUnavailable(details={"good": good.pk, "start": item.start.isoformat()})
         _ensure_daily_limit(rules, good, developer, item.start, item.quantity)
-        clash = (
-            Booking.objects.filter(developer=developer, start__lt=end, end__gt=item.start)
-            .select_related("good")
-            .first()
-        )
-        if clash is not None:
-            raise AlreadyBookedThen(
-                details={
-                    "booking": clash.pk,
-                    "good": clash.good.name,
-                    "start": clash.start.isoformat(),
-                    "end": clash.end.isoformat(),
-                }
-            )
+        _ensure_developer_free(developer, item.start, end)
         try:
             with transaction.atomic():
                 booking = Booking.objects.create(
@@ -221,11 +241,7 @@ def book_lines(
                     slots=item.quantity,
                 )
         except IntegrityError as exc:
-            # A concurrent confirmation won: either the court or the developer's time is taken.
-            cause = getattr(exc.__cause__, "diag", None)
-            if cause is not None and cause.constraint_name == "booking_one_court_per_developer":
-                raise AlreadyBookedThen() from exc
-            raise SlotUnavailable() from exc
+            raise _constraint_error(exc) from exc
         record_audit(
             "booking.created",
             actor=actor,
@@ -241,3 +257,104 @@ def book_lines(
         )
         bookings.append(booking)
     return bookings
+
+
+# --- Checkout: a court booking is paid like a till sale, but on its own -------------------
+
+
+@transaction.atomic
+def start_checkout(
+    *, actor, good: Good, day: date, start_time, end_time, reader=None, client_ip=None
+) -> Purchase:
+    """A draft BOOKING purchase holding exactly this court and time. The developer taps
+    their card on the desk's reader and enters the PIN; `confirm_purchase` then books it
+    for the card holder. The time is not held until then."""
+    from apps.purchases import services as purchases
+    from apps.purchases.models import PurchaseItem, PurchaseKind
+
+    good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
+    start, slots = time_range(good=good, day=day, start_time=start_time, end_time=end_time)
+    check_line(good=good, start=start, slots=slots)
+    purchase = purchases.create_purchase(
+        actor=actor,
+        service_position=good.service_position,
+        reader=reader,
+        client_ip=client_ip,
+        kind=PurchaseKind.BOOKING,
+    )
+    PurchaseItem.objects.create(purchase=purchase, good=good, quantity=slots, start=start)
+    return purchase
+
+
+# --- Changing a paid booking -------------------------------------------------------------
+
+
+@transaction.atomic
+def change_booking(
+    *, actor, booking: Booking, day: date, start_time, end_time, good: Good | None = None
+) -> Booking:
+    """Move a paid booking to another time and/or another court of the same seller.
+
+    Allowed until the booking starts. For now the new time must cost the same as what was
+    paid (no money moves); the same rules as a new booking apply, ignoring the booking
+    itself. Locks: account, then the courts by id (as at checkout).
+    """
+    booking = Booking.objects.select_for_update().select_related("purchase").get(pk=booking.pk)
+    if booking.start <= timezone.now():
+        raise BookingStarted()
+    target = good or booking.good
+    DeveloperAccount.objects.select_for_update().filter(developer=booking.developer_id).first()
+    courts = {
+        g.pk: g
+        for g in Good.all_objects.select_for_update(of=("self",))
+        .select_related("service_position__seller", "rental")
+        .filter(pk__in={booking.good_id, target.pk})
+        .order_by("pk")
+    }
+    target = courts[target.pk]
+    if target.service_position.seller_id != booking.good.service_position.seller_id:
+        raise RentalNotAvailable(_("A booking can only move to a court of the same seller."))
+    rules = _ensure_bookable(target)
+    start, slots = time_range(good=target, day=day, start_time=start_time, end_time=end_time)
+    end = _validate_slot(rules, start, slots)
+
+    paid = booking.purchase.total
+    price = target.price * slots
+    if price != paid:
+        raise BookingPriceDifferent(details={"paid": str(paid), "new_price": str(price)})
+
+    if (
+        Booking.objects.filter(good=target, start__lt=end, end__gt=start)
+        .exclude(pk=booking.pk)
+        .exists()
+    ):
+        raise SlotUnavailable()
+    _ensure_daily_limit(rules, target, booking.developer, start, slots, exclude=booking.pk)
+    _ensure_developer_free(booking.developer, start, end, exclude=booking.pk)
+
+    old = {
+        "good": booking.good_id,
+        "start": booking.start.isoformat(),
+        "end": booking.end.isoformat(),
+        "slots": booking.slots,
+    }
+    booking.good, booking.start, booking.end, booking.slots = target, start, end, slots
+    booking.change_count += 1
+    try:
+        with transaction.atomic():
+            booking.save()
+    except IntegrityError as exc:
+        raise _constraint_error(exc) from exc
+    record_audit(
+        "booking.changed",
+        actor=actor,
+        entity=booking,
+        old_values=old,
+        new_values={
+            "good": target.pk,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "slots": slots,
+        },
+    )
+    return booking

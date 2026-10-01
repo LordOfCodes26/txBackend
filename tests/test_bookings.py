@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
+from apps.bookings import services as bookings
 from apps.bookings.exceptions import SlotUnavailable
 from apps.bookings.models import Booking
 from apps.developers.models import Developer
@@ -26,6 +27,7 @@ GOODS = "/api/v1/goods/"
 RENTALS = "/api/v1/rentals/"
 BOOKINGS = "/api/v1/bookings/"
 PURCHASES = "/api/v1/purchases/"
+CHECKOUT = "/api/v1/bookings/checkout/"
 PIN = "4826"
 UID = "04AABBCCDD"
 
@@ -93,20 +95,17 @@ def times(start, slots=1, slot_minutes=60):
     return {"date": local.date(), "start_time": f"{local:%H:%M}", "end_time": f"{end:%H:%M}"}
 
 
-def add_booking(client, world, start, slots=1, good=None, purchase=None):
-    """Add a booking line to a (new) draft; returns (purchase id, response)."""
-    if purchase is None:
-        purchase = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
+def add_booking(client, world, start, slots=1, good=None, **extra):
+    """Start a booking checkout at the desk; returns (checkout id or None, response)."""
     response = client.post(
-        f"{PURCHASES}{purchase}/items/",
-        {"good": (good or world.playground).pk, **times(start, slots)},
+        CHECKOUT, {"good": (good or world.playground).pk, **times(start, slots), **extra}
     )
-    return purchase, response
+    return response.json().get("id"), response
 
 
 def confirm(client, purchase, pin=PIN, uid=UID, idem=None):
     return client.post(
-        f"{PURCHASES}{purchase}/confirm/",
+        f"{CHECKOUT}{purchase}/confirm/",
         {"card_uid": uid, "pin": pin},
         HTTP_IDEMPOTENCY_KEY=idem or key(),
     )
@@ -116,20 +115,21 @@ def book(client, world, start, slots=1, pin=PIN, idem=None, good=None, uid=UID):
     """The whole desk flow: draft, booking line, card + PIN. Returns the first error
     response, or the confirmation response."""
     purchase, response = add_booking(client, world, start, slots, good)
-    if response.status_code != 200:
+    if response.status_code != 201:
         return response
     return confirm(client, purchase, pin=pin, uid=uid, idem=idem)
 
 
 def draft(world, good, start, slots=1):
-    """A draft purchase with one booking line, prepared at the desk (service level)."""
-    purchase = purchases.create_purchase(actor=world.seller_user, service_position=world.position)
+    """A booking checkout prepared at the desk (service level)."""
     local = timezone.localtime(start)
-    end = (local + timedelta(hours=slots)).time()
-    purchases.add_item(
-        purchase=purchase, good=good, date=local.date(), start_time=local.time(), end_time=end
+    return bookings.start_checkout(
+        actor=world.seller_user,
+        good=good,
+        day=local.date(),
+        start_time=local.time(),
+        end_time=(local + timedelta(hours=slots)).time(),
     )
-    return purchase
 
 
 def balance(world):
@@ -219,51 +219,6 @@ def test_kind_cannot_change(auth_client, world):
 def test_database_forbids_stock_on_non_products(world):
     with pytest.raises(IntegrityError), transaction.atomic():
         Good.objects.filter(pk=world.playground.pk).update(track_stock=True)
-
-
-@pytest.mark.django_db
-def test_rentals_are_added_like_goods_with_date_and_times(auth_client, world):
-    client = auth_client(world.seller_user)
-    pid = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
-    response = client.post(f"{PURCHASES}{pid}/items/", {"good": world.playground.pk})
-    assert response.status_code == 400
-    assert set(response.json()["error"]["details"]) == {"date", "start_time", "end_time"}
-    ball = Good.objects.create(
-        service_position=world.position, name="Ball", price="5.00", track_stock=False
-    )
-    response = client.post(f"{PURCHASES}{pid}/items/", {"good": ball.pk, "start_time": "10:00"})
-    assert "start_time" in response.json()["error"]["details"]
-    day = tomorrow_at(0).date().isoformat()
-    response = client.post(
-        f"{PURCHASES}{pid}/items/",
-        {"good": world.playground.pk, "date": day, "start_time": "12:00", "end_time": "10:00"},
-    )
-    assert "end_time" in response.json()["error"]["details"]
-    response = client.post(
-        f"{PURCHASES}{pid}/items/",
-        {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "11:30"},
-    )
-    assert response.json()["error"]["code"] == "INVALID_SLOT"
-    assert response.json()["error"]["details"] == {"slot_minutes": 60}
-
-    # Goods and a court in one purchase: 10:00-12:00 = 2 slots of 60 minutes.
-    client.post(f"{PURCHASES}{pid}/items/", {"good": ball.pk, "quantity": 2})
-    response = client.post(
-        f"{PURCHASES}{pid}/items/",
-        {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "12:00"},
-    )
-    items = response.json()["items"]
-    assert [(i["good_name"], i["quantity"], i["line_total"]) for i in items] == [
-        ("Ball", 2, "10.00"),
-        ("Playground", 2, "40.00"),
-    ]
-    assert (items[1]["date"], items[1]["start_time"], items[1]["end_time"]) == (
-        day,
-        "10:00",
-        "12:00",
-    )
-    assert items[0]["date"] is None
-    assert response.json()["total"] == "50.00"
 
 
 # --- Browsing and availability ----------------------------------------------------------
@@ -376,7 +331,8 @@ def test_closed_weekday_has_no_slots(desk, world):
 @pytest.mark.django_db
 def test_booking_charges_developer_and_credits_seller(desk, world):
     pid, draft = add_booking(desk, world, tomorrow_at(14), slots=2)
-    assert draft.status_code == 200, draft.json()
+    assert draft.status_code == 201, draft.json()
+    assert draft.json()["kind"] == "BOOKING"
     line = draft.json()["items"][0]
     assert (line["kind"], line["quantity"], line["line_total"]) == ("RENTAL", 2, "40.00")
     assert timezone.localtime(datetime.fromisoformat(line["end"])).hour == 16
@@ -428,24 +384,8 @@ def test_slot_taken_while_the_developer_enters_the_pin(desk, world):
     r = confirm(desk, second, pin="5082", uid="04BB")
     assert (r.status_code, r.json()["error"]["code"]) == (409, "SLOT_UNAVAILABLE")
     assert Purchase.objects.get(pk=second).status == "DRAFT"
+    assert desk.post(f"{CHECKOUT}{second}/cancel/").json()["status"] == "CANCELLED"
     assert finance.open_account(bob).balance == Decimal("50.00")
-
-
-@pytest.mark.django_db
-def test_changing_the_time_rechecks_the_rules(desk, world):
-    pid, draft = add_booking(desk, world, tomorrow_at(10))
-    item = f"{PURCHASES}{pid}/items/{draft.json()['items'][0]['id']}/"
-    r = desk.patch(item, {"end_time": "14:00"})  # 4 slots
-    assert r.json()["error"]["details"] == {"max_slots_per_booking": 3}
-    r = desk.patch(item, {"end_time": "13:00"})
-    line = r.json()["items"][0]
-    assert (line["start_time"], line["end_time"], line["line_total"]) == ("10:00", "13:00", "60.00")
-    r = desk.patch(item, {"start_time": "15:00", "end_time": "16:00"})
-    assert (r.json()["items"][0]["start_time"], r.json()["items"][0]["quantity"]) == ("15:00", 1)
-    assert desk.patch(item, {"quantity": 2}).status_code == 400
-    # Adding the same court again replaces its time.
-    _, again = add_booking(desk, world, tomorrow_at(8), purchase=pid)
-    assert [(i["start_time"], i["end_time"]) for i in again.json()["items"]] == [("08:00", "09:00")]
 
 
 @pytest.mark.django_db
@@ -463,29 +403,7 @@ def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
         good=pool, slot_minutes=60, opening_time=time(8), closing_time=time(20)
     )
     _, r = add_booking(desk, world, tomorrow_at(10), good=pool)
-    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
-
-
-@pytest.mark.django_db
-def test_booking_with_a_tapped_card(desk, world, settings):
-    """Production flow: no typed UID; the developer taps the card on the desk's reader."""
-    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = False
-    reader, _key = rfid.register_device(actor=None, code="Reader1", purpose="TILL")
-    pid = desk.post(PURCHASES, {"service_position": world.position.pk, "reader": "Reader1"}).json()[
-        "id"
-    ]
-    add_booking(desk, world, tomorrow_at(10), purchase=pid)
-
-    r = desk.post(f"{PURCHASES}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
-    assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"
-
-    rfid.record_scan(device=reader, uid=UID)
-    assert (
-        desk.get(f"{PURCHASES}{pid}/").json()["presented_card"]["developer"]["full_name"] == "Ada"
-    )
-    r = desk.post(f"{PURCHASES}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
-    assert r.status_code == 201, r.json()
-    assert Booking.objects.get().developer == world.developer
+    assert r.json()["error"]["details"] == {"good": ["You can only book your own courts."]}
 
 
 @pytest.mark.django_db
@@ -783,3 +701,176 @@ def test_same_developer_racing_for_two_courts_gets_one(world):
     ]
     winner = Booking.objects.get()  # either court may win the race
     assert balance(world) == Decimal("100.00") - winner.good.price  # charged exactly once
+
+
+# --- Split from goods -------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_courts_and_goods_never_share_a_purchase(desk, world):
+    ball = Good.objects.create(
+        service_position=world.position, name="Ball", price="5.00", track_stock=False
+    )
+    sale = desk.post(PURCHASES, {"service_position": world.position.pk}).json()
+    assert sale["kind"] == "SALE"
+    r = desk.post(f"{PURCHASES}{sale['id']}/items/", {"good": world.playground.pk})
+    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
+
+    checkout, _ = add_booking(desk, world, tomorrow_at(10))
+    r = desk.post(f"{PURCHASES}{checkout}/items/", {"good": ball.pk})
+    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
+    item = Purchase.objects.get(pk=checkout).items.get()
+    assert desk.delete(f"{PURCHASES}{checkout}/items/{item.pk}/").status_code == 409
+    # Checkouts only hold courts; till purchases aren't visible there.
+    assert desk.get(f"{CHECKOUT}{sale['id']}/").status_code == 404
+    assert [p["kind"] for p in desk.get(f"{PURCHASES}?kind=BOOKING").json()["results"]] == [
+        "BOOKING"
+    ]
+
+
+@pytest.mark.django_db
+def test_checkout_input_validation(desk, world):
+    day = tomorrow_at(0).date().isoformat()
+    r = desk.post(CHECKOUT, {"good": world.playground.pk})
+    assert set(r.json()["error"]["details"]) == {"date", "start_time", "end_time"}
+    r = desk.post(
+        CHECKOUT,
+        {"good": world.playground.pk, "date": day, "start_time": "12:00", "end_time": "10:00"},
+    )
+    assert "end_time" in r.json()["error"]["details"]
+    r = desk.post(
+        CHECKOUT,
+        {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "11:30"},
+    )
+    assert (r.json()["error"]["code"], r.json()["error"]["details"]) == (
+        "INVALID_SLOT",
+        {"slot_minutes": 60},
+    )
+    ball = Good.objects.create(
+        service_position=world.position, name="Ball", price="5.00", track_stock=False
+    )
+    r = desk.post(
+        CHECKOUT, {"good": ball.pk, "date": day, "start_time": "10:00", "end_time": "11:00"}
+    )
+    assert "good" in r.json()["error"]["details"]
+
+
+@pytest.mark.django_db
+def test_booking_with_a_tapped_card(desk, world, settings):
+    """Production flow: no typed UID; the developer taps the card on the desk's reader."""
+    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = False
+    reader, _key = rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    pid, r = add_booking(desk, world, tomorrow_at(10), reader="Reader1")
+    assert r.json()["reader"] == "Reader1"
+
+    r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
+    assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"
+
+    rfid.record_scan(device=reader, uid=UID)
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"]["developer"]["full_name"] == "Ada"
+    r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
+    assert r.status_code == 201, r.json()
+    assert Booking.objects.get().developer == world.developer
+
+
+# --- Changing a paid booking -------------------------------------------------------------
+
+
+def change(client, booking, **body):
+    return client.post(f"{BOOKINGS}{booking}/change/", body)
+
+
+@pytest.fixture
+def paid(desk, world):
+    """Ada's paid booking: Playground tomorrow 10:00-12:00 (2 x 20.00)."""
+    assert book(desk, world, tomorrow_at(10), slots=2).status_code == 201
+    return Booking.objects.get()
+
+
+@pytest.mark.django_db
+def test_change_booking_time(desk, world, paid):
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert (body["start_time"], body["end_time"], body["change_count"]) == ("14:00", "16:00", 1)
+    slots = desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
+    assert [s["start_time"] for s in slots if s["state"] == "BOOKED"] == ["14:00", "15:00"]
+    # No money moved.
+    assert balance(world) == Decimal("60.00")
+    assert finance.ledger_mismatches() == [] and seller_ledger_mismatches() == []
+    log = AuditLog.objects.get(action="booking.changed")
+    assert log.old_values["start"] == tomorrow_at(10).isoformat()
+    # Overlapping its own old time is fine.
+    r = change(desk, paid.pk, date=day, start_time="15:00", end_time="17:00")
+    assert r.status_code == 200
+
+
+@pytest.mark.django_db
+def test_change_to_another_court(desk, world, paid):
+    tennis = Good.objects.create(
+        service_position=world.position,
+        name="Tennis court",
+        price="20.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=tennis, slot_minutes=60, opening_time=time(8), closing_time=time(20)
+    )
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, good=tennis.pk, date=day, start_time="10:00", end_time="12:00")
+    assert (r.status_code, r.json()["good_name"]) == (200, "Tennis court")
+    # The playground is free again.
+    assert book(desk, world, tomorrow_at(10), slots=1, uid=UID).json()["error"]["code"] == (
+        "ALREADY_BOOKED_THEN"  # Ada holds the tennis court then
+    )
+
+
+@pytest.mark.django_db
+def test_change_must_cost_the_same(desk, world, paid):
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="15:00")
+    assert r.status_code == 409
+    assert r.json()["error"] == {
+        "code": "BOOKING_PRICE_DIFFERENT",
+        "message": "The new time must cost the same as the booking (same number of slots "
+        "and price).",
+        "details": {"paid": "40.00", "new_price": "20.00"},
+    }
+
+
+@pytest.mark.django_db
+def test_change_follows_the_booking_rules(desk, world, paid):
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=bob)
+    finance.deposit(actor=None, developer=bob, amount="50.00", idempotency_key="seed-0002")
+    finance.set_pin(actor=None, account=finance.open_account(bob), pin="5082", current_pin=None)
+    assert book(desk, world, tomorrow_at(14), slots=2, pin="5082", uid="04BB").status_code == 201
+
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, date=day, start_time="15:00", end_time="17:00")
+    assert r.json()["error"]["code"] == "SLOT_UNAVAILABLE"
+    r = change(desk, paid.pk, date=day, start_time="10:30", end_time="12:30")
+    assert r.json()["error"]["code"] == "INVALID_SLOT"
+    paid.refresh_from_db()
+    assert (paid.start, paid.change_count) == (tomorrow_at(10), 0)
+
+
+@pytest.mark.django_db
+def test_started_bookings_cannot_change(desk, world, paid):
+    Booking.objects.filter(pk=paid.pk).update(
+        start=timezone.now() - timedelta(minutes=5), end=timezone.now() + timedelta(minutes=55)
+    )
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.json()["error"]["code"] == "BOOKING_STARTED"
+
+
+@pytest.mark.django_db
+def test_only_the_courts_seller_changes_bookings(auth_client, make_user, world, paid):
+    other = make_user(Roles.SELLER)
+    Seller.objects.create(name="Other", user=other)
+    day = tomorrow_at(0).date().isoformat()
+    r = change(auth_client(other), paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.status_code == 404

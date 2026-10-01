@@ -17,6 +17,11 @@ class PurchaseStatus(models.TextChoices):
     CANCELLED = "CANCELLED", "Cancelled"
 
 
+class PurchaseKind(models.TextChoices):
+    SALE = "SALE", "Sale of goods at a till"
+    BOOKING = "BOOKING", "Court booking checkout"
+
+
 class Purchase(TimeStampedModel):
     """A sale at a seller's till.
 
@@ -26,6 +31,8 @@ class Purchase(TimeStampedModel):
     """
 
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="purchases")
+    # SALE: goods at a till. BOOKING: one court booking (apps.bookings), paid the same way.
+    kind = models.CharField(max_length=10, choices=PurchaseKind.choices, default=PurchaseKind.SALE)
     service_position = models.ForeignKey(
         ServicePosition, on_delete=models.PROTECT, related_name="purchases"
     )

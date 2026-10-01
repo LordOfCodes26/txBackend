@@ -1,10 +1,12 @@
 from django.conf import settings
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
-from apps.goods.models import Good
+from apps.goods.models import Good, GoodKind
 from apps.goods.serializers import GoodImageSerializer, RentalSettingsSerializer
+from apps.purchases.serializers import ReaderField
 from apps.sellers.serializers import SellerSummarySerializer
 
 from .models import Booking
@@ -119,6 +121,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "start",
             "end",
             "slots",
+            "change_count",
             "total",
             "currency",
             "balance_after",
@@ -138,3 +141,44 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def get_end_time(self, obj) -> str:
         return f"{timezone.localtime(obj.end):%H:%M}"
+
+
+class BookingTimeSerializer(serializers.Serializer):
+    """Company-local date and start / end time on the court's slot grid."""
+
+    date = serializers.DateField(help_text="YYYY-MM-DD")
+    start_time = serializers.TimeField(help_text="e.g. 10:00")
+    end_time = serializers.TimeField(help_text="e.g. 12:00")
+
+    def validate(self, attrs):
+        if attrs["end_time"] <= attrs["start_time"]:
+            raise serializers.ValidationError(
+                {"end_time": [_("The end time must be after the start time.")]}
+            )
+        return attrs
+
+
+class CheckoutCreateSerializer(BookingTimeSerializer):
+    good = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.filter(kind=GoodKind.RENTAL), help_text="The court."
+    )
+    reader = ReaderField(
+        required=False,
+        allow_null=True,
+        help_text="Code of the till reader at the desk; detected from the PC's address if "
+        "left out (as for till purchases).",
+    )
+
+    def validate_good(self, good):
+        own = self.context.get("own_seller")
+        if own is not None and good.service_position.seller_id != own.pk:
+            raise serializers.ValidationError(_("You can only book your own courts."))
+        return good
+
+
+class BookingChangeSerializer(BookingTimeSerializer):
+    good = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.filter(kind=GoodKind.RENTAL),
+        required=False,
+        help_text="Another court of the same seller; leave out to keep the court.",
+    )

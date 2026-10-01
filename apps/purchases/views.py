@@ -147,9 +147,8 @@ class PurchaseViewSet(
     @extend_schema(request=ItemAddSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
-        """Add a good (or increase its quantity). A rental (court) is added the same way
-        with `start` = its first slot and `quantity` = number of slots. Returns the whole
-        purchase."""
+        """Add a good (or increase its quantity). Courts are booked separately
+        (`/bookings/checkout/`). Returns the whole purchase."""
         purchase = self.get_object()
         serializer = ItemAddSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -160,8 +159,7 @@ class PurchaseViewSet(
     @extend_schema(methods=["DELETE"], request=None, responses=PurchaseSerializer)
     @action(detail=True, methods=["patch", "delete"], url_path=r"items/(?P<item_id>\d+)")
     def item(self, request, pk=None, item_id=None):
-        """PATCH changes the quantity (for a booking: the number of slots); DELETE removes
-        the item. Returns the whole purchase."""
+        """PATCH changes the quantity; DELETE removes the item. Returns the whole purchase."""
         purchase = self.get_object()
         item = get_object_or_404(purchase.items, pk=item_id)
         if request.method == "DELETE":

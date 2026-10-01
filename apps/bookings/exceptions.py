@@ -32,3 +32,17 @@ class AlreadyBookedThen(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "ALREADY_BOOKED_THEN"
     default_detail = _("You already have a booking at this time.")
+
+
+class BookingStarted(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "BOOKING_STARTED"
+    default_detail = _("This booking has already started and can't be changed.")
+
+
+class BookingPriceDifferent(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "BOOKING_PRICE_DIFFERENT"
+    default_detail = _(
+        "The new time must cost the same as the booking (same number of slots and price)."
+    )

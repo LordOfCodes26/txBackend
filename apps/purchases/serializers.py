@@ -114,6 +114,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
         model = Purchase
         fields = [
             "id",
+            "kind",
             "status",
             "seller",
             "service_position",
@@ -205,33 +206,13 @@ class DetectedReaderSerializer(serializers.Serializer):
     candidates = TillReaderSerializer(many=True)
 
 
-class BookingTimeMixin(serializers.Serializer):
-    """Rentals (courts): company-local date and start / end time on the slot grid."""
-
-    date = serializers.DateField(required=False, help_text="Rentals: the day, YYYY-MM-DD.")
-    start_time = serializers.TimeField(required=False, help_text="Rentals: e.g. 10:00.")
-    end_time = serializers.TimeField(required=False, help_text="Rentals: e.g. 12:00.")
-
-    def validate(self, attrs):
-        start, end = attrs.get("start_time"), attrs.get("end_time")
-        if start and end and end <= start:
-            raise serializers.ValidationError(
-                {"end_time": [_("The end time must be after the start time.")]}
-            )
-        return attrs
-
-
-class ItemAddSerializer(BookingTimeMixin):
+class ItemAddSerializer(serializers.Serializer):
     good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
-    quantity = serializers.IntegerField(
-        min_value=1, max_value=999, default=1, help_text="Goods only; ignored for rentals."
-    )
+    quantity = serializers.IntegerField(min_value=1, max_value=999, default=1)
 
 
-class ItemUpdateSerializer(BookingTimeMixin):
-    quantity = serializers.IntegerField(
-        min_value=1, max_value=999, required=False, help_text="Goods: the new quantity."
-    )
+class ItemUpdateSerializer(serializers.Serializer):
+    quantity = serializers.IntegerField(min_value=1, max_value=999)
 
 
 class ConfirmSerializer(serializers.Serializer):
