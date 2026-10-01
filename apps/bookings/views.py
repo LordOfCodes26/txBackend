@@ -67,7 +67,8 @@ class BookingViewSet(
     viewsets.GenericViewSet,
 ):
     """Court bookings (read-only). Bookings are made at the playground desk: add them to a
-    draft purchase (`POST /purchases/{id}/bookings/`); the developer taps their card and
+    draft purchase like any good
+    (`POST /purchases/{id}/items/` with `start`); the developer taps their card and
     enters the PIN, and confirming the purchase creates the booking. Bookings are final.
 
     Sellers see bookings of their rentals; `purchase.view` sees all.

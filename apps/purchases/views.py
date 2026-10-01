@@ -14,7 +14,6 @@ from . import services
 from .filters import PurchaseFilter
 from .models import Purchase
 from .serializers import (
-    BookingLineSerializer,
     ConfirmSerializer,
     DetectedReaderSerializer,
     ItemAddSerializer,
@@ -30,7 +29,6 @@ SELLER_ACTIONS = (
     "retrieve",
     "create",
     "add_item",
-    "add_booking",
     "item",
     "set_reader",
     "readers",
@@ -69,7 +67,6 @@ class PurchaseViewSet(
         "retrieve": ["purchase.view"],
         "create": ["purchase.create"],
         "add_item": ["purchase.create"],
-        "add_booking": ["purchase.create"],
         "item": ["purchase.create"],
         "set_reader": ["purchase.create"],
         "readers": ["purchase.create"],
@@ -150,23 +147,13 @@ class PurchaseViewSet(
     @extend_schema(request=ItemAddSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="items")
     def add_item(self, request, pk=None):
-        """Add a good (or increase its quantity). Returns the whole purchase."""
+        """Add a good (or increase its quantity). A rental (court) is added the same way
+        with `start` = its first slot and `quantity` = number of slots. Returns the whole
+        purchase."""
         purchase = self.get_object()
         serializer = ItemAddSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         services.add_item(purchase=purchase, **serializer.validated_data)
-        return self._respond(purchase)
-
-    @extend_schema(request=BookingLineSerializer, responses=PurchaseSerializer)
-    @action(detail=True, methods=["post"], url_path="bookings")
-    def add_booking(self, request, pk=None):
-        """Add a court booking (rental, first slot, number of slots). The developer who taps
-        their card and enters the PIN at confirmation gets the booking and pays for it.
-        Adding the same rental again replaces its time. Returns the whole purchase."""
-        purchase = self.get_object()
-        serializer = BookingLineSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        services.add_booking(purchase=purchase, **serializer.validated_data)
         return self._respond(purchase)
 
     @extend_schema(methods=["PATCH"], request=ItemUpdateSerializer, responses=PurchaseSerializer)

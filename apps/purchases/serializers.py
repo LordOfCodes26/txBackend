@@ -188,15 +188,13 @@ class DetectedReaderSerializer(serializers.Serializer):
 
 class ItemAddSerializer(serializers.Serializer):
     good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
-    quantity = serializers.IntegerField(min_value=1, max_value=999, default=1)
-
-
-class BookingLineSerializer(serializers.Serializer):
-    good = serializers.PrimaryKeyRelatedField(
-        queryset=Good.objects.all(), help_text="The rental (court) to book."
+    quantity = serializers.IntegerField(
+        min_value=1, max_value=999, default=1, help_text="Rentals: the number of slots."
     )
-    start = serializers.DateTimeField(help_text="Start of the first slot (from availability).")
-    slots = serializers.IntegerField(min_value=1, max_value=48, default=1)
+    start = serializers.DateTimeField(
+        required=False,
+        help_text="Rentals only (required): start of the first slot, as returned by availability.",
+    )
 
 
 class ItemUpdateSerializer(serializers.Serializer):

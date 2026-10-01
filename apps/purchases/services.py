@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import record_audit
 from apps.developers.models import DeveloperStatus
@@ -46,9 +47,9 @@ def _ensure_sellable(good: Good, purchase: Purchase, *, booking: bool = False) -
     """`booking`: the line is a booking (has a start time); only rentals are booked."""
     if (good.kind == GoodKind.RENTAL) != booking:
         raise GoodNotAvailable(
-            _("Rentals need a start time: add them as a booking.")
+            _("Rentals need the start of the first slot.")
             if good.kind == GoodKind.RENTAL
-            else _("Only rentals can be booked."),
+            else _("Only rentals have a start time."),
             details={"good": good.pk},
         )
     if (
@@ -119,37 +120,36 @@ def set_reader(*, purchase: Purchase, reader) -> Purchase:
 
 
 @transaction.atomic
-def add_item(*, purchase: Purchase, good: Good, quantity: int) -> PurchaseItem:
-    """Add a good, or increase its quantity if it is already in the bucket."""
-    purchase = _lock_draft(purchase)
-    good = Good.all_objects.select_related("service_position").get(pk=good.pk)
-    _ensure_sellable(good, purchase)
-    item, created = PurchaseItem.objects.get_or_create(
-        purchase=purchase, good=good, defaults={"quantity": quantity}
-    )
-    if not created:
-        item.quantity += quantity
-    _check_stock_hint(good, item.quantity)
-    item.save()
-    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
-    return item
+def add_item(*, purchase: Purchase, good: Good, quantity: int, start=None) -> PurchaseItem:
+    """Add a good, or increase its quantity if it is already in the bucket.
 
-
-@transaction.atomic
-def add_booking(*, purchase: Purchase, good: Good, start, slots: int) -> PurchaseItem:
-    """Add a court booking (rental good, first slot, number of slots) to a draft. The
-    developer who taps their card and enters the PIN gets the booking and pays for it.
-    Adding the same rental again replaces its time."""
+    Rentals (courts) are added the same way with `start` (the first slot); `quantity` is
+    the number of slots. The developer who taps their card and enters the PIN gets the
+    booking and pays for it. Adding the same rental again replaces its time.
+    """
     from apps.bookings import services as bookings
 
     purchase = _lock_draft(purchase)
     good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
     if good.kind == GoodKind.RENTAL:
-        bookings.check_line(good=good, start=start, slots=slots)
-    _ensure_sellable(good, purchase, booking=True)
-    item, _created = PurchaseItem.objects.update_or_create(
-        purchase=purchase, good=good, defaults={"quantity": slots, "start": start}
-    )
+        if start is None:
+            raise ValidationError({"start": [_("Rentals need the start of the first slot.")]})
+        bookings.check_line(good=good, start=start, slots=quantity)
+    elif start is not None:
+        raise ValidationError({"start": [_("Only rentals have a start time.")]})
+    _ensure_sellable(good, purchase, booking=start is not None)
+    if start is not None:
+        item, _created = PurchaseItem.objects.update_or_create(
+            purchase=purchase, good=good, defaults={"quantity": quantity, "start": start}
+        )
+    else:
+        item, created = PurchaseItem.objects.get_or_create(
+            purchase=purchase, good=good, defaults={"quantity": quantity}
+        )
+        if not created:
+            item.quantity += quantity
+        _check_stock_hint(good, item.quantity)
+        item.save()
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 

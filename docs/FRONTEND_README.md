@@ -496,7 +496,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
   - `PRODUCT`: tangible; optional stock (`track_stock`, `initial_quantity`, `/stock/`)
   - `SERVICE`: intangible and sold at the till (made-to-order coffee, haircut); no stock
   - `RENTAL`: booked by time slot (playground, pool); `price` is **per slot**. Requires a
-    `rental` object; rentals are added to a purchase as a booking (`/purchases/{id}/bookings/`), not with `/items/`.
+    `rental` object; rentals are added to a purchase with `/items/` like other goods, plus `start` (first slot) and `quantity` = slots.
     ```json
     "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00",
                "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3,
@@ -660,7 +660,7 @@ gets the booking and pays for it.
 | GET | `/rentals/` | logged in | Bookable rentals with price per slot, `rental` rules, seller, location and images |
 | GET | `/rentals/{id}/availability/?date=YYYY-MM-DD` | logged in | Every slot of that day: `{start, end, available}` |
 | POST | `/purchases/` | own seller, or `purchase.create` | Draft, same as the till (`service_position` of the playground, optional `reader`) |
-| POST | `/purchases/{id}/bookings/` | same | `{good, start, slots}`: add a court booking. Adding the same court again replaces its time. Returns the purchase |
+| POST | `/purchases/{id}/items/` | same | **Same request as for normal goods**, plus `start`: `{good, start, quantity}` where `quantity` = number of slots. Adding the same court again replaces its time. Returns the purchase |
 | PATCH / DELETE | `/purchases/{id}/items/{item}/` | same | PATCH `{quantity}` changes the **number of slots** (rules re-checked); DELETE removes it |
 | POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the tapped card's holder and **creates the booking(s)** |
 | GET | `/bookings/` | own seller, or `purchase.view` | Bookings of the seller's rentals. Filters: `good`, `seller`, `developer`, `date`, `start_after`, `start_before` |
@@ -669,8 +669,9 @@ gets the booking and pays for it.
 1. List `/rentals/`, pick a court and a date → `/availability/`. Only slots with
    `available: true` are selectable; consecutive slots can be combined, up to
    `rental.max_slots_per_booking`.
-2. `POST /purchases/` (as at the till) and then `POST /purchases/{id}/bookings/` with the
-   first slot's `start` **exactly as returned by availability** and the number of `slots`.
+2. `POST /purchases/` (as at the till) and then add the court **like any good** with
+   `POST /purchases/{id}/items/` `{good, start, quantity}`: `start` is the first slot's
+   start **exactly as returned by availability**, `quantity` the number of slots.
    The purchase's `items[]` now has a line with `kind: "RENTAL"`, `start`, `end`,
    `quantity` (= slots) and `line_total` (= price × slots).
 3. From here it's **the till checkout screen, unchanged**: "Tap your card" → the
@@ -678,9 +679,9 @@ gets the booking and pays for it.
    the PIN → `POST /purchases/{id}/confirm/`. *Simulate tap* in the test console works too.
 4. On `201`, show the booking: court, `start`–`end`, `total`, `balance_after`.
 
-- A purchase may hold several courts, or courts plus goods sold at the same desk. Rentals
-  can't be added with `/items/` (`GOOD_NOT_AVAILABLE`: "add them as a booking"), and only
-  rentals can be added with `/bookings/`.
+- A purchase may hold several courts, or courts plus goods sold at the same desk (one
+  cart, one card tap, one PIN). `start` is required for rentals and refused for other goods
+  (`VALIDATION_ERROR` on `start`).
 - The slot is **not held** while the draft is open: if another desk confirms the same time
   first, this confirmation fails with `SLOT_UNAVAILABLE` and nothing is charged.
 - Only the **outdoor playground** is bookable; each court (football, basketball, volleyball,
@@ -689,7 +690,7 @@ gets the booking and pays for it.
   court, **one developer can't hold two courts at the same time**, and a booking can't be
   cancelled or refunded.
 
-**Errors.** When adding (`/bookings/`, nothing is charged yet): `INVALID_SLOT`,
+**Errors.** When adding a court (`/items/`, nothing is charged yet): `INVALID_SLOT`,
 `SLOT_UNAVAILABLE`, `RENTAL_NOT_AVAILABLE`, `GOOD_NOT_AVAILABLE`. When confirming, the till
 errors (`CARD_NOT_PRESENTED`, `CARD_NOT_USABLE`, PIN errors, `INSUFFICIENT_BALANCE`, …) plus
 these; nothing is charged on any error:
@@ -849,7 +850,7 @@ before → after table.
 | My earnings and payouts (seller) | `seller-finance/accounts/me/`, `seller-finance/transactions/`, `seller-finance/payouts/` | active seller |
 | Seller balances and payout queue (finance) | `seller-finance/accounts/`, `seller-finance/payouts/?status=REQUESTED` | `seller_finance.view` |
 | My purchases | `purchases/me/` | anyone with a developer profile |
-| Playground desk: book a court (day view of slots → card tap + PIN, the till checkout) | `rentals/`, `rentals/{id}/availability/`, `purchases/`, `purchases/{id}/bookings/`, `purchases/{id}/confirm/` | the playground's seller, or `purchase.create` + `purchase.confirm` |
+| Playground desk: book a court (day view of slots → card tap + PIN, the till checkout) | `rentals/`, `rentals/{id}/availability/`, `purchases/`, `purchases/{id}/items/`, `purchases/{id}/confirm/` | the playground's seller, or `purchase.create` + `purchase.confirm` |
 | Rental schedule (seller) | `bookings/?date=` | active seller, or `purchase.view` |
 | Audit log | `audit-logs/` | `audit.view` |
 

@@ -91,8 +91,8 @@ def add_booking(client, world, start, slots=1, good=None, purchase=None):
     if purchase is None:
         purchase = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
     response = client.post(
-        f"{PURCHASES}{purchase}/bookings/",
-        {"good": (good or world.playground).pk, "start": start.isoformat(), "slots": slots},
+        f"{PURCHASES}{purchase}/items/",
+        {"good": (good or world.playground).pk, "start": start.isoformat(), "quantity": slots},
     )
     return purchase, response
 
@@ -117,7 +117,7 @@ def book(client, world, start, slots=1, pin=PIN, idem=None, good=None, uid=UID):
 def draft(world, good, start, slots=1):
     """A draft purchase with one booking line, prepared at the desk (service level)."""
     purchase = purchases.create_purchase(actor=world.seller_user, service_position=world.position)
-    purchases.add_booking(purchase=purchase, good=good, start=start, slots=slots)
+    purchases.add_item(purchase=purchase, good=good, quantity=slots, start=start)
     return purchase
 
 
@@ -211,11 +211,30 @@ def test_database_forbids_stock_on_non_products(world):
 
 
 @pytest.mark.django_db
-def test_rentals_cannot_be_sold_at_the_till(auth_client, world):
+def test_rentals_are_added_like_goods_with_a_start(auth_client, world):
     client = auth_client(world.seller_user)
-    pid = client.post("/api/v1/purchases/", {"service_position": world.position.pk}).json()["id"]
-    response = client.post(f"/api/v1/purchases/{pid}/items/", {"good": world.playground.pk})
-    assert response.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
+    pid = client.post(PURCHASES, {"service_position": world.position.pk}).json()["id"]
+    response = client.post(f"{PURCHASES}{pid}/items/", {"good": world.playground.pk})
+    assert response.status_code == 400
+    assert "start" in response.json()["error"]["details"]
+    ball = Good.objects.create(
+        service_position=world.position, name="Ball", price="5.00", track_stock=False
+    )
+    response = client.post(
+        f"{PURCHASES}{pid}/items/", {"good": ball.pk, "start": tomorrow_at(10).isoformat()}
+    )
+    assert "start" in response.json()["error"]["details"]
+    # Goods and a court in one purchase.
+    client.post(f"{PURCHASES}{pid}/items/", {"good": ball.pk, "quantity": 2})
+    response = client.post(
+        f"{PURCHASES}{pid}/items/",
+        {"good": world.playground.pk, "start": tomorrow_at(10).isoformat(), "quantity": 2},
+    )
+    assert [(i["good_name"], i["quantity"], i["line_total"]) for i in response.json()["items"]] == [
+        ("Ball", 2, "10.00"),
+        ("Playground", 2, "40.00"),
+    ]
+    assert response.json()["total"] == "50.00"
 
 
 # --- Browsing and availability ----------------------------------------------------------
@@ -336,12 +355,6 @@ def test_changing_slots_rechecks_the_rules(desk, world):
 
 @pytest.mark.django_db
 def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
-    ball = Good.objects.create(
-        service_position=world.position, name="Ball", price="5.00", track_stock=False
-    )
-    _, r = add_booking(desk, world, tomorrow_at(10), good=ball)
-    assert r.json()["error"]["code"] == "GOOD_NOT_AVAILABLE"
-
     other = Seller.objects.create(name="Other", user=make_user(Roles.SELLER))
     position = ServicePosition.objects.create(seller=other, name="Pool")
     pool = Good.objects.create(
