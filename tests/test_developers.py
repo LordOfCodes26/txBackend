@@ -61,7 +61,6 @@ def test_create_developer_is_audited(manager_client):
         (Roles.BOSS, 200, 201),
         (Roles.MANAGER, 200, 201),
         (Roles.FINANCE_MANAGER, 200, 403),
-        (Roles.SELLER_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),
         (Roles.SELLER, 403, 403),
     ],

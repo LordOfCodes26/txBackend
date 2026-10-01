@@ -198,7 +198,6 @@ Default roles, which admins can change:
 | BOSS | Everything |
 | MANAGER | Developers, RFID, attendance, user list, audit log, seller/goods view |
 | FINANCE_MANAGER | Developer and seller finance, developer view, purchase view, audit log |
-| SELLER_MANAGER | Sellers, goods, purchase view, seller finance view |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
 | SELLER | Nothing global; see *Seller self-service* below |
 | BUILDING_MANAGER | Developer view/create/update, RFID view/assign/block/devices, attendance view/correct, purchase view, **all limited to their buildings** (see *Building managers* below) |
@@ -524,7 +523,7 @@ POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "sn": "ZK2024A000123
 | POST | `/sellers/` | `seller.create` | `{name, user?, contact_name?, email?, phone?, notes?}`; `user` = the seller's login |
 | GET/PATCH | `/sellers/{id}/` | `seller.view` / `seller.update` | No DELETE: close with `status: "CLOSED"` |
 | GET | `/sellers/me/` | logged in | Own seller profile (any status) |
-| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `building`, `manager`, `is_active`. Fields include `building` (optional, `building_name`) and `manager` (user id, `manager_email`). Sellers omit `seller` on create; managers must send it |
+| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `building`, `manager`, `is_active`. Fields include `building` (optional, `building_name`) and `manager` (user id, `manager_email`). Sellers omit `seller` on create; staff (e.g. BOSS) must send it |
 | GET/PATCH/DELETE | `/service-positions/{id}/` | same | DELETE is soft and fails with `POSITION_HAS_GOODS` while it has goods |
 
 Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.

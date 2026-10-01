@@ -48,9 +48,9 @@ def test_stale_permissions_are_reported_and_pruned_on_request():
 
 
 def test_user_permissions_come_from_all_roles(make_user):
-    user = make_user(Roles.FINANCE_MANAGER, Roles.SELLER_MANAGER)
-    assert user.has_rbac_perms(["finance.deposit", "good.create"])
-    assert not user.has_rbac_perm("developer.delete")
+    user = make_user(Roles.FINANCE_MANAGER, Roles.MANAGER)
+    assert user.has_rbac_perms(["finance.deposit", "developer.create"])
+    assert not user.has_rbac_perm("seller.create")
 
 
 def test_inactive_user_has_no_permissions(make_user):
@@ -67,7 +67,6 @@ def test_superuser_has_every_permission(make_user):
         (Roles.BOSS, 200),
         (Roles.MANAGER, 200),
         (Roles.FINANCE_MANAGER, 403),
-        (Roles.SELLER_MANAGER, 403),
         (Roles.DEVELOPER, 403),
         (Roles.SELLER, 403),
     ],

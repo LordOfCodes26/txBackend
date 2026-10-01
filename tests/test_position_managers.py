@@ -92,7 +92,7 @@ def test_manager_has_no_access_to_seller_money(auth_client, cafe):
 
 def test_staff_assign_manager_and_building(auth_client, make_user, cafe):
     b1 = Building.objects.create(code="B1", name="Building 1")
-    staff_user = make_user(Roles.SELLER_MANAGER)
+    staff_user = make_user(Roles.BOSS)
     staff = auth_client(staff_user)
     newbie = make_user(email="counter@cafe.x")
     r = staff.patch(

@@ -163,7 +163,7 @@ def test_connection_rules(shop, make_user):
     other_seller_user = make_user(Roles.SELLER)
     Seller.objects.create(name="Other", user=other_seller_user)
     _, other_till_key = rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
-    staff = make_user(Roles.SELLER_MANAGER)  # has purchase.view
+    staff = make_user(Roles.FINANCE_MANAGER)  # has purchase.view
     used = issue_ticket(shop["seller_user"])
 
     async def scenario():

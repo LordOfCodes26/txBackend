@@ -13,7 +13,7 @@ POSITIONS = "/api/v1/service-positions/"
 
 @pytest.fixture
 def seller_manager(auth_client, make_user):
-    return auth_client(make_user(Roles.SELLER_MANAGER))
+    return auth_client(make_user(Roles.BOSS))
 
 
 @pytest.fixture
@@ -51,7 +51,6 @@ def test_sellers_cannot_be_deleted(seller_manager, seller_user):
     ("role", "view", "create"),
     [
         (Roles.BOSS, 200, 201),
-        (Roles.SELLER_MANAGER, 200, 201),
         (Roles.MANAGER, 200, 403),
         (Roles.FINANCE_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),

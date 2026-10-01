@@ -65,7 +65,6 @@ class Roles:
     BOSS = "BOSS"
     MANAGER = "MANAGER"
     FINANCE_MANAGER = "FINANCE_MANAGER"
-    SELLER_MANAGER = "SELLER_MANAGER"
     DEVELOPER = "DEVELOPER"
     SELLER = "SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
@@ -96,11 +95,6 @@ ROLES: dict[str, RoleSpec] = {
         "Finance manager",
         "Manages developer balances and deposits",
         _prefixed("finance", "seller_finance") | {"developer.view", "purchase.view", "audit.view"},
-    ),
-    Roles.SELLER_MANAGER: RoleSpec(
-        "Seller manager",
-        "Manages sellers and goods",
-        _prefixed("seller", "good") | {"purchase.view", "seller_finance.view"},
     ),
     # Every permission of this role is narrowed to the user's buildings
     # (Building.managers); see apps/rfid/scope.py.

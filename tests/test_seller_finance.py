@@ -229,7 +229,6 @@ def test_sellers_cannot_approve_or_pay(auth_client, seller_user, seller):
     [
         (Roles.BOSS, 200, 201),
         (Roles.FINANCE_MANAGER, 200, 201),
-        (Roles.SELLER_MANAGER, 200, 403),
         (Roles.MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),
     ],

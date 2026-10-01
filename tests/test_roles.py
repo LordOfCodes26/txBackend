@@ -108,6 +108,6 @@ def test_boss_can_step_down_when_another_boss_exists(auth_client, boss, make_use
 
 
 def test_roles_endpoint_lists_permissions(auth_client, boss):
-    response = auth_client(boss).get("/api/v1/roles/SELLER_MANAGER/")
+    response = auth_client(boss).get("/api/v1/roles/MANAGER/")
     assert response.status_code == 200
-    assert "good.create" in response.json()["permissions"]
+    assert "developer.create" in response.json()["permissions"]
