@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.developers.models import Developer
@@ -62,7 +63,7 @@ class RFIDCardSerializer(serializers.ModelSerializer):
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError("A card with this UID is already registered.")
+            raise serializers.ValidationError(_("A card with this UID is already registered."))
         return value
 
 
@@ -150,19 +151,19 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
         building = attrs.get("building", getattr(self.instance, "building", None))
         if purpose != DevicePurpose.ATTENDANCE and building is not None:
             raise serializers.ValidationError(
-                {"building": ["Only ATTENDANCE devices belong to a building."]}
+                {"building": [_("Only ATTENDANCE devices belong to a building.")]}
             )
         allowed_ip = attrs.get("allowed_ip", getattr(self.instance, "allowed_ip", None))
         if purpose != DevicePurpose.ATTENDANCE and allowed_ip:
             raise serializers.ValidationError(
-                {"allowed_ip": ["Only ATTENDANCE door devices may authenticate by IP."]}
+                {"allowed_ip": [_("Only ATTENDANCE door devices may authenticate by IP.")]}
             )
         sn = RFIDDevice.normalize_sn(attrs.get("sn", "") or "")
         if "sn" in attrs:
             attrs["sn"] = sn
         if sn and purpose != DevicePurpose.TILL:
             raise serializers.ValidationError(
-                {"sn": ["Only TILL readers authenticate by serial number."]}
+                {"sn": [_("Only TILL readers authenticate by serial number.")]}
             )
         if sn:
             clash = RFIDDevice.objects.filter(sn=sn)
@@ -170,7 +171,7 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
                 clash = clash.exclude(pk=self.instance.pk)
             if clash.exists():
                 raise serializers.ValidationError(
-                    {"sn": ["Another device already has this serial number."]}
+                    {"sn": [_("Another device already has this serial number.")]}
                 )
         return attrs
 
@@ -271,7 +272,7 @@ class ScanSerializer(serializers.Serializer):
 
     def validate_device_id(self, value):
         if value.strip().lower() != self.context["device"].code.lower():
-            raise serializers.ValidationError("Does not match the authenticated device.")
+            raise serializers.ValidationError(_("Does not match the authenticated device."))
         return value
 
     def validate(self, attrs):
@@ -280,9 +281,9 @@ class ScanSerializer(serializers.Serializer):
         kind = attrs.pop("type", "")
         purpose = self.context["device"].purpose
         if purpose == DevicePurpose.TILL and kind not in ("", PAY):
-            raise serializers.ValidationError({"type": ["Till readers send `pay`."]})
+            raise serializers.ValidationError({"type": [_("Till readers send `pay`.")]})
         if purpose == DevicePurpose.ATTENDANCE and kind == PAY:
-            raise serializers.ValidationError({"type": ["Door devices send `in` or `out`."]})
+            raise serializers.ValidationError({"type": [_("Door devices send `in` or `out`.")]})
         attrs["direction"] = kind if kind in ScanDirection.values else ""
         return attrs
 
@@ -290,17 +291,17 @@ class ScanSerializer(serializers.Serializer):
         limit = timezone.now() + timedelta(seconds=settings.RFID_MAX_FUTURE_SKEW_SECONDS)
         if value > limit:
             raise serializers.ValidationError(
-                "Event time is in the future; check the reader clock."
+                _("Event time is in the future; check the reader clock.")
             )
         return value
 
 
 DISPLAY_MESSAGES = {
-    "UNKNOWN_CARD": "Unknown card",
-    "UNASSIGNED_CARD": "Card not assigned",
-    "BLOCKED_CARD": "Card blocked",
-    "RETIRED_CARD": "Card no longer valid",
-    "INACTIVE_DEVELOPER": "Not active - contact your manager",
+    "UNKNOWN_CARD": _("Unknown card"),
+    "UNASSIGNED_CARD": _("Card not assigned"),
+    "BLOCKED_CARD": _("Card blocked"),
+    "RETIRED_CARD": _("Card no longer valid"),
+    "INACTIVE_DEVELOPER": _("Not active - contact your manager"),
 }
 
 
@@ -336,12 +337,12 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         if obj.result in ("ACCEPTED", "DUPLICATE") and obj.developer is not None:
             if obj.device.purpose == DevicePurpose.TILL:
                 if self.get_purchase(obj) is None:
-                    return "No open purchase for this reader"
-                return f"{obj.developer.full_name} - enter PIN"
+                    return _("No open purchase for this reader")
+                return _("%(name)s - enter PIN") % {"name": obj.developer.full_name}
             if obj.direction == "OUT":
-                return f"Goodbye, {obj.developer.full_name}"
-            return f"Welcome, {obj.developer.full_name}"
-        return DISPLAY_MESSAGES.get(obj.result, obj.result)
+                return _("Goodbye, %(name)s") % {"name": obj.developer.full_name}
+            return _("Welcome, %(name)s") % {"name": obj.developer.full_name}
+        return str(DISPLAY_MESSAGES.get(obj.result, obj.result))
 
     def get_purchase(self, obj) -> int | None:
         if obj.device.purpose != DevicePurpose.TILL:
@@ -385,7 +386,7 @@ class BatchScanItemSerializer(serializers.Serializer):
         limit = timezone.now() + timedelta(seconds=settings.RFID_MAX_FUTURE_SKEW_SECONDS)
         if value > limit:
             raise serializers.ValidationError(
-                "Event time is in the future; check the reader clock."
+                _("Event time is in the future; check the reader clock.")
             )
         return value
 
@@ -399,7 +400,7 @@ class BatchScanSerializer(serializers.Serializer):
     def validate_events(self, value):
         if len(value) > settings.RFID_BATCH_MAX_EVENTS:
             raise serializers.ValidationError(
-                f"At most {settings.RFID_BATCH_MAX_EVENTS} events per batch."
+                _("At most %(max)s events per batch.") % {"max": settings.RFID_BATCH_MAX_EVENTS}
             )
         ids = [e["client_event_id"] for e in value]
         if len(ids) != len(set(ids)):

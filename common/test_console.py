@@ -10,6 +10,7 @@ door. Till taps from the page use the real device endpoint with SN + ID.
 from django.conf import settings
 from django.http import Http404
 from django.shortcuts import render
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound, ValidationError
@@ -59,7 +60,7 @@ class SimulatedDoorScanView(APIView):
             code__iexact=code, purpose=DevicePurpose.ATTENDANCE, is_active=True
         ).first()
         if device is None:
-            raise NotFound("No active door with this code.")
+            raise NotFound(_("No active door with this code."))
         payload = {
             "ID": device.code,
             "Type": request.data.get("type"),
@@ -67,7 +68,7 @@ class SimulatedDoorScanView(APIView):
         }
         serializer = ScanSerializer(data=payload, context={"device": device})
         serializer.is_valid(raise_exception=True)
-        event, _ = services.record_scan(
+        event, _created = services.record_scan(
             device=device,
             uid=serializer.validated_data["uid"],
             direction=serializer.validated_data["direction"],
@@ -79,11 +80,11 @@ def _purchase_for(request, purchase_id) -> Purchase:
     """The purchase, if the caller may handle it (its own seller, or purchase.* staff)."""
     purchase = Purchase.objects.filter(pk=purchase_id).select_related("reader").first()
     if purchase is None:
-        raise NotFound("No such purchase.")
+        raise NotFound(_("No such purchase."))
     user = request.user
     seller = acting_seller(user)
     if not (user.has_rbac_perm("purchase.create") or (seller and seller.pk == purchase.seller_id)):
-        raise NotFound("No such purchase.")
+        raise NotFound(_("No such purchase."))
     return purchase
 
 
@@ -124,7 +125,7 @@ class SimulateTapView(APIView):
         _ensure_enabled()
         purchase = _purchase_for(request, request.data.get("purchase"))
         if purchase.status != PurchaseStatus.DRAFT:
-            raise ValidationError({"purchase": ["Only draft purchases can be paid."]})
+            raise ValidationError({"purchase": [_("Only draft purchases can be paid.")]})
         uid = str(request.data.get("uid") or "").strip()
         if not uid:
             assignment = (
@@ -136,14 +137,14 @@ class SimulateTapView(APIView):
             )
             if assignment is None:
                 raise ValidationError(
-                    {"developer": ["This developer has no active card; send a `uid` instead."]}
+                    {"developer": [_("This developer has no active card; send a `uid` instead.")]}
                 )
             uid = assignment.card.uid
         reader = purchase.reader
         if reader is None:
             reader = _simulator_reader(request.user)
             purchases.set_reader(purchase=purchase, reader=reader)
-        event, _ = services.record_scan(device=reader, uid=normalize_uid(uid))
+        event, _created = services.record_scan(device=reader, uid=normalize_uid(uid))
         return Response(ScanResponseSerializer(event).data, status=201)
 
 

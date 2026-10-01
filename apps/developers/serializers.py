@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.accounts.models import User
@@ -54,17 +55,17 @@ class DeveloperSerializer(serializers.ModelSerializer):
     def validate_employee_number(self, value):
         value = value.strip()
         if self._others().filter(employee_number=value).exists():
-            raise serializers.ValidationError("This employee number is already in use.")
+            raise serializers.ValidationError(_("This employee number is already in use."))
         return value
 
     def validate_birthday(self, value):
         if value is not None and value > timezone.localdate():
-            raise serializers.ValidationError("Birthday cannot be in the future.")
+            raise serializers.ValidationError(_("Birthday cannot be in the future."))
         return value
 
     def validate_user(self, user):
         if user is not None and self._others().filter(user=user).exists():
-            raise serializers.ValidationError("This user is linked to another developer.")
+            raise serializers.ValidationError(_("This user is linked to another developer."))
         return user
 
     def validate_manager(self, manager):
@@ -75,7 +76,7 @@ class DeveloperSerializer(serializers.ModelSerializer):
         node = manager
         while node is not None and node.pk not in seen:
             if node.pk == self.instance.pk:
-                raise serializers.ValidationError("A developer cannot report to themselves.")
+                raise serializers.ValidationError(_("A developer cannot report to themselves."))
             seen.add(node.pk)
             node = node.manager
         return manager
@@ -85,7 +86,7 @@ class DeveloperSerializer(serializers.ModelSerializer):
         out = attrs.get("out_date", getattr(self.instance, "out_date", None))
         if start and out and out < start:
             raise serializers.ValidationError(
-                {"out_date": ["The out date cannot be before the start date."]}
+                {"out_date": [_("The out date cannot be before the start date.")]}
             )
         return attrs
 

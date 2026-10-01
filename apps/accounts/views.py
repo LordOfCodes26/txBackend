@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -56,7 +57,7 @@ class LogoutView(APIView):
             raise ValidationError({"refresh": [str(exc)]}) from exc
         user = request.user
         if user.is_authenticated and str(token.get("user_id")) != str(user.pk):
-            raise ValidationError({"refresh": ["Token does not belong to this user."]})
+            raise ValidationError({"refresh": [_("Token does not belong to this user.")]})
         token.blacklist()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

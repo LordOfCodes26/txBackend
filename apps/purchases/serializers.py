@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -141,7 +142,7 @@ class PurchaseCreateSerializer(serializers.Serializer):
     def validate_service_position(self, position):
         own = self.context.get("own_seller")
         if own is not None and position.seller_id != own.pk:
-            raise serializers.ValidationError("You can only sell at your own service positions.")
+            raise serializers.ValidationError(_("You can only sell at your own service positions."))
         return position
 
 

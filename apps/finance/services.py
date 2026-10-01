@@ -6,6 +6,7 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Subquery, Sum
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
@@ -31,7 +32,7 @@ def money(value) -> Decimal:
 
 
 def open_account(developer: Developer) -> DeveloperAccount:
-    account, _ = DeveloperAccount.objects.get_or_create(developer=developer)
+    account, _created = DeveloperAccount.objects.get_or_create(developer=developer)
     return account
 
 
@@ -54,9 +55,9 @@ def post_transaction(
     amount = money(amount)
     account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
     if account.status == AccountStatus.CLOSED:
-        raise AccountNotActive("This account is closed.")
+        raise AccountNotActive(_("This account is closed."))
     if amount < 0 and account.status == AccountStatus.FROZEN:
-        raise AccountNotActive("This account is frozen and cannot be debited.")
+        raise AccountNotActive(_("This account is frozen and cannot be debited."))
 
     new_balance = account.balance + amount
     if new_balance < 0:
@@ -189,7 +190,7 @@ def change_status(
         raise InvalidAccountTransition()
     if target == AccountStatus.CLOSED and account.balance != 0:
         raise InvalidAccountTransition(
-            "Pay out or adjust the remaining balance to zero before closing.",
+            _("Pay out or adjust the remaining balance to zero before closing."),
             details={"balance": str(account.balance)},
         )
     old = account.status
@@ -238,9 +239,9 @@ def validate_pin_format(pin: str) -> None:
     from rest_framework.exceptions import ValidationError
 
     if not (pin.isdigit() and 4 <= len(pin) <= 6):
-        raise ValidationError({"pin": ["The PIN must be 4 to 6 digits."]})
+        raise ValidationError({"pin": [_("The PIN must be 4 to 6 digits.")]})
     if _pin_is_trivial(pin):
-        raise ValidationError({"pin": ["Choose a less obvious PIN (not 1111 or 1234)."]})
+        raise ValidationError({"pin": [_("Choose a less obvious PIN (not 1111 or 1234).")]})
 
 
 @transaction.atomic
@@ -250,7 +251,7 @@ def set_pin(*, actor, account: DeveloperAccount, pin: str, current_pin: str | No
     if account.pin_hash and not (current_pin and check_password(current_pin, account.pin_hash)):
         from rest_framework.exceptions import ValidationError
 
-        raise ValidationError({"current_pin": ["The current PIN is incorrect."]})
+        raise ValidationError({"current_pin": [_("The current PIN is incorrect.")]})
     validate_pin_format(pin)
     changed = bool(account.pin_hash)
     account.pin_hash = make_password(pin)

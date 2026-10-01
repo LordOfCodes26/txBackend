@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError, RestrictedError
 from django.http import Http404
+from django.utils.translation import gettext_lazy as _
 from psycopg import errors as pg_errors
 from rest_framework import exceptions, status
 from rest_framework.response import Response
@@ -23,12 +24,12 @@ class DomainError(exceptions.APIException):
         class InsufficientBalance(DomainError):
             status_code = 409
             code = "INSUFFICIENT_BALANCE"
-            default_detail = "Developer account has insufficient balance."
+            default_detail = _("Developer account has insufficient balance.")
     """
 
     status_code = status.HTTP_400_BAD_REQUEST
     code = "DOMAIN_ERROR"
-    default_detail = "The request violates a business rule."
+    default_detail = _("The request violates a business rule.")
 
     def __init__(self, message: str | None = None, *, details: dict | None = None):
         super().__init__(detail=message or self.default_detail)
@@ -38,13 +39,13 @@ class DomainError(exceptions.APIException):
 class Conflict(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "CONFLICT"
-    default_detail = "The request conflicts with existing data."
+    default_detail = _("The request conflicts with existing data.")
 
 
 class InUse(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "IN_USE"
-    default_detail = "This item is still in use and can't be deleted."
+    default_detail = _("This item is still in use and can't be deleted.")
 
 
 def _error_body(code: str, message: str, details=None) -> dict:
@@ -80,14 +81,14 @@ def exception_handler(exc, context):
         logger.exception("Unhandled API error", exc_info=exc)
         set_rollback()
         return Response(
-            _error_body("INTERNAL_ERROR", "An unexpected error occurred."),
+            _error_body("INTERNAL_ERROR", str(_("An unexpected error occurred."))),
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     if isinstance(exc, DomainError):
         response.data = _error_body(exc.code, str(exc.detail), exc.details)
     elif isinstance(exc, exceptions.ValidationError):
-        response.data = _error_body("VALIDATION_ERROR", "Invalid input.", exc.detail)
+        response.data = _error_body("VALIDATION_ERROR", str(_("Invalid input.")), exc.detail)
     else:
         detail = exc.detail
         if isinstance(detail, dict):  # e.g. simplejwt's InvalidToken

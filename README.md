@@ -122,3 +122,18 @@ after upgrading packages in the dev venv.
   add `common.db.append_only_trigger(table)` to their migration.
 - **Soft delete**: inherit `common.models.SoftDeleteModel`; make unique constraints
   partial on `deleted_at IS NULL`.
+
+## Translations (English / Korean, DPRK usage)
+
+User-facing messages are wrapped in `gettext_lazy` (`_("...")`); clients pick the language
+with `Accept-Language`. After adding or changing a message:
+
+```bash
+.venv/bin/python manage.py makemessages -l ko_KP --no-location --no-wrap \
+    -i ".venv/*" -i "tests/*" -i "*/migrations/*" -i "*/management/*" -i "scripts/*"
+# translate the new entries in locale/ko_KP/LC_MESSAGES/django.po, then:
+.venv/bin/python manage.py compilemessages -l ko_KP
+```
+
+Commit both `django.po` and `django.mo` (the offline server has no gettext tools).
+`tests/test_i18n.py` fails if a message is untranslated or the `.mo` is stale.

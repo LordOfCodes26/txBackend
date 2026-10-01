@@ -1,3 +1,4 @@
+from django.utils.translation import gettext_lazy as _
 from rest_framework import status
 
 from common.exceptions import DomainError
@@ -6,52 +7,52 @@ from common.exceptions import DomainError
 class InsufficientBalance(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "INSUFFICIENT_BALANCE"
-    default_detail = "Developer account has insufficient balance."
+    default_detail = _("Developer account has insufficient balance.")
 
 
 class AccountNotActive(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "ACCOUNT_NOT_ACTIVE"
-    default_detail = "This account cannot be used for this operation in its current status."
+    default_detail = _("This account cannot be used for this operation in its current status.")
 
 
 class DepositLimitExceeded(DomainError):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "DEPOSIT_LIMIT_EXCEEDED"
-    default_detail = "The amount exceeds the maximum allowed for a single deposit."
+    default_detail = _("The amount exceeds the maximum allowed for a single deposit.")
 
 
 class SelfTransactionForbidden(DomainError):
     status_code = status.HTTP_403_FORBIDDEN
     code = "SELF_TRANSACTION_FORBIDDEN"
-    default_detail = "You cannot deposit to or adjust your own account."
+    default_detail = _("You cannot deposit to or adjust your own account.")
 
 
 class IdempotencyKeyReused(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "IDEMPOTENCY_KEY_REUSED"
-    default_detail = "This Idempotency-Key was already used for a different request."
+    default_detail = _("This Idempotency-Key was already used for a different request.")
 
 
 class InvalidAccountTransition(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "INVALID_ACCOUNT_TRANSITION"
-    default_detail = "The account cannot move to this status from its current status."
+    default_detail = _("The account cannot move to this status from its current status.")
 
 
 class PinNotSet(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "PIN_NOT_SET"
-    default_detail = "The developer has not set a purchase PIN yet."
+    default_detail = _("The developer has not set a purchase PIN yet.")
 
 
 class InvalidPin(DomainError):
     status_code = status.HTTP_400_BAD_REQUEST
     code = "INVALID_PIN"
-    default_detail = "The PIN is incorrect."
+    default_detail = _("The PIN is incorrect.")
 
 
 class PinLocked(DomainError):
     status_code = status.HTTP_423_LOCKED
     code = "PIN_LOCKED"
-    default_detail = "Too many wrong PIN attempts. Try again later."
+    default_detail = _("Too many wrong PIN attempts. Try again later.")

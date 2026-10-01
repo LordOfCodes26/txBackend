@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.developers.models import Developer
@@ -49,7 +50,7 @@ class ManualRecordSerializer(serializers.Serializer):
 
     def validate_event_time(self, value):
         if value > timezone.now() + timedelta(minutes=5):
-            raise serializers.ValidationError("Cannot add attendance in the future.")
+            raise serializers.ValidationError(_("Cannot add attendance in the future."))
         return value
 
 

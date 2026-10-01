@@ -17,6 +17,15 @@ def _clear_cache():
     cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_language():
+    """A request with Accept-Language leaves its language active in the test thread."""
+    from django.utils import translation
+
+    yield
+    translation.deactivate()
+
+
 @pytest.fixture
 def api_client():
     return APIClient()

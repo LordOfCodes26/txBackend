@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
@@ -44,7 +45,7 @@ def _ensure_bookable(good: Good) -> RentalSettings:
     try:
         return good.rental
     except RentalSettings.DoesNotExist as exc:
-        raise RentalNotAvailable("This rental has no booking rules yet.") from exc
+        raise RentalNotAvailable(_("This rental has no booking rules yet.")) from exc
 
 
 def slots_for_day(good: Good, day: date) -> list[dict]:
@@ -82,22 +83,22 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
 
     if not 1 <= slots <= rules.max_slots_per_booking:
         raise InvalidSlot(
-            f"Book between 1 and {rules.max_slots_per_booking} slots.",
+            _("Book between 1 and %(max)s slots.") % {"max": rules.max_slots_per_booking},
             details={"max_slots_per_booking": rules.max_slots_per_booking},
         )
     if start <= timezone.now():
-        raise InvalidSlot("This slot has already started.")
+        raise InvalidSlot(_("This slot has already started."))
     if day > timezone.localdate() + timedelta(days=rules.max_days_ahead):
         raise InvalidSlot(
-            f"Bookings open {rules.max_days_ahead} days in advance.",
+            _("Bookings open %(days)s days in advance.") % {"days": rules.max_days_ahead},
             details={"max_days_ahead": rules.max_days_ahead},
         )
     if day.weekday() not in rules.weekdays:
-        raise InvalidSlot("The rental is closed on this day.")
+        raise InvalidSlot(_("The rental is closed on this day."))
     offset = (local_start - opening).total_seconds()
     if offset < 0 or offset % step.total_seconds() or end > closing:
         raise InvalidSlot(
-            "Pick a start time on the slot grid within opening hours.",
+            _("Pick a start time on the slot grid within opening hours."),
             details={
                 "opening_time": rules.opening_time.isoformat(),
                 "closing_time": rules.closing_time.isoformat(),
@@ -200,7 +201,7 @@ def book(
 
             total = finance.money(good.price * slots)
             if total <= 0:
-                raise RentalNotAvailable("Rentals must have a positive price.")
+                raise RentalNotAvailable(_("Rentals must have a positive price."))
             position = good.service_position
             purchase = Purchase.objects.create(
                 seller=position.seller, service_position=position, created_by=actor

@@ -1,5 +1,6 @@
 import re
 
+from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 
 HEADER = "Idempotency-Key"
@@ -15,6 +16,10 @@ def require_idempotency_key(request) -> str:
     key = request.headers.get(HEADER, "").strip()
     if not _VALID.match(key):
         raise ValidationError(
-            {HEADER: ["Required header: 8-64 characters (letters, digits, _ . : -); use a UUID."]}
+            {
+                HEADER: [
+                    _("Required header: 8-64 characters (letters, digits, _ . : -); use a UUID.")
+                ]
+            }
         )
     return key

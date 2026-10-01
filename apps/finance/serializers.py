@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.developers.models import Developer
@@ -68,7 +69,7 @@ class AdjustmentSerializer(serializers.Serializer):
 
     def validate_amount(self, value):
         if value == 0:
-            raise serializers.ValidationError("Amount cannot be zero.")
+            raise serializers.ValidationError(_("Amount cannot be zero."))
         return value
 
 

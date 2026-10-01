@@ -1,0 +1,612 @@
+# Korean (DPRK, 조선어) translations of the backend's API and device messages.
+# Review: wording should be checked by a native speaker of DPRK standard Korean.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: backend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-01 15:04+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: Korean (DPRK)\n"
+"Language: ko_KP\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "You cannot grant or manage access beyond your own permissions."
+msgstr "자기 권한을 넘어서는 접근권한은 주거나 관리할수 없습니다."
+
+msgid "At least one active user must keep the BOSS role."
+msgstr "활성 리용자 적어도 한명은 BOSS 역할을 가지고있어야 합니다."
+
+msgid "The user already has this role."
+msgstr "이 리용자는 이미 이 역할을 가지고있습니다."
+
+msgid "The user does not have this role."
+msgstr "이 리용자에게는 이 역할이 없습니다."
+
+msgid "A user with this email already exists."
+msgstr "이 전자우편주소를 가진 리용자가 이미 있습니다."
+
+msgid "Current password is incorrect."
+msgstr "현재 암호가 틀립니다."
+
+msgid "Token does not belong to this user."
+msgstr "이 토큰은 이 리용자의것이 아닙니다."
+
+msgid "This attendance record is already void."
+msgstr "이 출근기록은 이미 무효로 되였습니다."
+
+msgid "Cannot add attendance in the future."
+msgstr "앞으로의 날자에는 출근기록을 추가할수 없습니다."
+
+msgid "This rental is not available for booking."
+msgstr "이 임대대상은 예약할수 없습니다."
+
+msgid "This time is not a bookable slot."
+msgstr "이 시간은 예약할수 있는 시간대가 아닙니다."
+
+msgid "This time is already booked."
+msgstr "이 시간은 이미 예약되였습니다."
+
+msgid "You have reached today's booking limit for this rental."
+msgstr "이 임대대상에 대한 오늘의 예약한도에 이르렀습니다."
+
+msgid "You already have a booking at this time."
+msgstr "이 시간에 이미 예약이 있습니다."
+
+msgid "This rental has no booking rules yet."
+msgstr "이 임대대상에는 아직 예약규정이 없습니다."
+
+#, python-format
+msgid "Book between 1 and %(max)s slots."
+msgstr "시간대는 1개부터 %(max)s개까지 예약할수 있습니다."
+
+msgid "This slot has already started."
+msgstr "이 시간대는 이미 시작되였습니다."
+
+#, python-format
+msgid "Bookings open %(days)s days in advance."
+msgstr "예약은 %(days)s일전부터 할수 있습니다."
+
+msgid "The rental is closed on this day."
+msgstr "이날에는 운영하지 않습니다."
+
+msgid "Pick a start time on the slot grid within opening hours."
+msgstr "운영시간안의 시간대 시작시간을 선택하십시오."
+
+msgid "Rentals must have a positive price."
+msgstr "임대료금은 0보다 커야 합니다."
+
+msgid "Reassign this developer's direct reports before deleting them."
+msgstr "삭제하기전에 이 개발자의 직속 하급자들을 다른 사람에게 옮기십시오."
+
+msgid "Your account is not linked to a developer profile."
+msgstr "당신의 계정은 개발자자료와 련결되여있지 않습니다."
+
+msgid "This employee number is already in use."
+msgstr "이 종업원번호는 이미 리용되고있습니다."
+
+msgid "Birthday cannot be in the future."
+msgstr "생일은 앞으로의 날자일수 없습니다."
+
+msgid "This user is linked to another developer."
+msgstr "이 리용자는 다른 개발자와 련결되여있습니다."
+
+msgid "A developer cannot report to themselves."
+msgstr "개발자는 자기자신의 하급자로 될수 없습니다."
+
+msgid "The out date cannot be before the start date."
+msgstr "퇴직날자는 입직날자보다 앞설수 없습니다."
+
+msgid "Developer account has insufficient balance."
+msgstr "개발자계정의 잔고가 부족합니다."
+
+msgid "This account cannot be used for this operation in its current status."
+msgstr "현재 상태에서는 이 계정으로 이 조작을 할수 없습니다."
+
+msgid "The amount exceeds the maximum allowed for a single deposit."
+msgstr "금액이 한번 입금의 최대한도를 넘었습니다."
+
+msgid "You cannot deposit to or adjust your own account."
+msgstr "자기 계정에는 입금하거나 조정할수 없습니다."
+
+msgid "This Idempotency-Key was already used for a different request."
+msgstr "이 Idempotency-Key는 이미 다른 요청에 리용되였습니다."
+
+msgid "The account cannot move to this status from its current status."
+msgstr "계정을 현재 상태에서 이 상태로 바꿀수 없습니다."
+
+msgid "The developer has not set a purchase PIN yet."
+msgstr "개발자가 아직 구입용 암호번호를 설정하지 않았습니다."
+
+msgid "The PIN is incorrect."
+msgstr "암호번호가 틀립니다."
+
+msgid "Too many wrong PIN attempts. Try again later."
+msgstr "암호번호를 너무 여러번 틀리게 입력하였습니다. 후에 다시 하십시오."
+
+msgid "Amount cannot be zero."
+msgstr "금액은 0일수 없습니다."
+
+msgid "This account is closed."
+msgstr "이 계정은 페쇄되였습니다."
+
+msgid "This account is frozen and cannot be debited."
+msgstr "이 계정은 동결되여 출금할수 없습니다."
+
+msgid "Pay out or adjust the remaining balance to zero before closing."
+msgstr "페쇄하기전에 남은 잔고를 지불하거나 0으로 조정하십시오."
+
+msgid "The PIN must be 4 to 6 digits."
+msgstr "암호번호는 4~6자리 수자여야 합니다."
+
+msgid "Choose a less obvious PIN (not 1111 or 1234)."
+msgstr "쉽게 알아낼수 없는 암호번호를 선택하십시오 (1111, 1234 등은 안됩니다)."
+
+msgid "The current PIN is incorrect."
+msgstr "현재 암호번호가 틀립니다."
+
+msgid "Not enough stock for this change."
+msgstr "이 변경을 하기에는 재고가 부족합니다."
+
+msgid "This good does not track stock."
+msgstr "이 상품은 재고를 관리하지 않습니다."
+
+msgid "The counted quantity equals the current stock; nothing to adjust."
+msgstr "센 수량이 현재 재고와 같으므로 조정할것이 없습니다."
+
+msgid "This good already has the maximum number of images."
+msgstr "이 상품에는 이미 최대개수의 화상이 있습니다."
+
+#, python-format
+msgid "Images must be at most %(limit)s MB."
+msgstr "화상은 %(limit)s MB를 넘을수 없습니다."
+
+msgid "Must be after the opening time (same day)."
+msgstr "시작시간보다 뒤여야 합니다 (같은 날)."
+
+msgid "You can only use your own service positions."
+msgstr "자기의 봉사매대만 리용할수 있습니다."
+
+msgid "A good cannot move to another seller."
+msgstr "상품을 다른 판매자에게 옮길수 없습니다."
+
+msgid "Only allowed when creating; use the stock endpoint."
+msgstr "새로 만들 때에만 지정할수 있습니다. 재고조작을 리용하십시오."
+
+msgid "The kind of a good cannot be changed; create a new good."
+msgstr "상품의 종류는 바꿀수 없습니다. 새 상품을 만드십시오."
+
+msgid "Only RENTAL goods have rental settings."
+msgstr "임대(RENTAL) 상품만 임대설정을 가질수 있습니다."
+
+#, python-format
+msgid "%(kind)s goods have no stock."
+msgstr "%(kind)s 상품에는 재고가 없습니다."
+
+msgid "Rental settings are required for RENTAL goods."
+msgstr "임대(RENTAL) 상품에는 임대설정이 있어야 합니다."
+
+msgid "Rentals need a price above 0 (charged per slot)."
+msgstr "임대료금은 0보다 커야 합니다 (시간대마다 받습니다)."
+
+msgid "Goods that don't track stock have no quantity."
+msgstr "재고를 관리하지 않는 상품에는 수량이 없습니다."
+
+msgid "This seller already uses this SKU."
+msgstr "이 판매자는 이미 이 상품번호(SKU)를 리용하고있습니다."
+
+msgid "Required for ADJUSTMENT."
+msgstr "조정(ADJUSTMENT)에는 반드시 있어야 합니다."
+
+#, python-format
+msgid "Required for %(kind)s."
+msgstr "%(kind)s에는 반드시 있어야 합니다."
+
+#, python-format
+msgid "A reason is required for %(kind)s."
+msgstr "%(kind)s에는 리유를 입력하여야 합니다."
+
+msgid "Only draft purchases can be changed."
+msgstr "작성중인 구입만 변경할수 있습니다."
+
+msgid "Add at least one item before confirming."
+msgstr "확정하기전에 적어도 한개의 상품을 추가하십시오."
+
+msgid "This good is not available for sale."
+msgstr "이 상품은 판매할수 없습니다."
+
+msgid "The seller or service position is not active."
+msgstr "판매자 또는 봉사매대가 활성상태가 아닙니다."
+
+msgid "This card cannot be used for purchases."
+msgstr "이 카드로는 구입할수 없습니다."
+
+msgid "The card holder is not an active developer."
+msgstr "카드소유자가 활성개발자가 아닙니다."
+
+msgid "Sellers cannot charge their own card."
+msgstr "판매자는 자기 카드로 결제할수 없습니다."
+
+msgid "Ask the developer to tap their card on this counter's reader."
+msgstr "개발자에게 이 매대의 판독기에 카드를 대도록 하십시오."
+
+msgid "Typed card numbers are not accepted; the card must be tapped on the reader."
+msgstr "카드번호를 입력하는것은 허용되지 않습니다. 카드를 판독기에 대야 합니다."
+
+msgid "You can only sell at your own service positions."
+msgstr "자기의 봉사매대에서만 판매할수 있습니다."
+
+msgid "Rentals are booked by developers, not sold at the till."
+msgstr "임대는 개발자가 예약하는것이며 판매대에서 팔지 않습니다."
+
+msgid "Unknown card."
+msgstr "등록되지 않은 카드입니다."
+
+msgid "This card is blocked."
+msgstr "이 카드는 차단되였습니다."
+
+msgid "This card is retired."
+msgstr "이 카드는 페기되였습니다."
+
+msgid "This card is not assigned to anyone."
+msgstr "이 카드는 누구에게도 배정되지 않았습니다."
+
+msgid "A different card was tapped meanwhile; ask for the PIN again."
+msgstr "그사이에 다른 카드가 대여졌습니다. 암호번호를 다시 요구하십시오."
+
+msgid "The card changed owner; scan it again."
+msgstr "카드소유자가 바뀌였습니다. 카드를 다시 대십시오."
+
+msgid "The purchase total must be greater than zero."
+msgstr "구입총액은 0보다 커야 합니다."
+
+msgid "Invalid device credentials."
+msgstr "장치인증정보가 옳지 않습니다."
+
+msgid "No door device with this ID is registered for this IP."
+msgstr "이 IP주소에 이 ID로 등록된 출입문장치가 없습니다."
+
+msgid "Too many failed attempts; try again later."
+msgstr "실패한 시도가 너무 많습니다. 후에 다시 하십시오."
+
+msgid "Unknown till reader ID or serial number."
+msgstr "판매대판독기의 ID 또는 일련번호가 등록되지 않았습니다."
+
+msgid "Only active cards can be assigned."
+msgstr "활성카드만 배정할수 있습니다."
+
+msgid "This card is already assigned to a developer."
+msgstr "이 카드는 이미 개발자에게 배정되였습니다."
+
+msgid "This developer already has an active card. Use replace instead."
+msgstr "이 개발자에게는 이미 활성카드가 있습니다. 교체를 리용하십시오."
+
+msgid "Cards cannot be assigned to terminated or deleted developers."
+msgstr "퇴직하였거나 삭제된 개발자에게는 카드를 배정할수 없습니다."
+
+msgid "The card cannot move to this status from its current status."
+msgstr "카드를 현재 상태에서 이 상태로 바꿀수 없습니다."
+
+msgid "A card with this UID is already registered."
+msgstr "이 UID를 가진 카드가 이미 등록되였습니다."
+
+msgid "Only ATTENDANCE devices belong to a building."
+msgstr "출근(ATTENDANCE) 장치만 건물에 속할수 있습니다."
+
+msgid "Only ATTENDANCE door devices may authenticate by IP."
+msgstr "출근(ATTENDANCE) 출입문장치만 IP주소로 인증할수 있습니다."
+
+msgid "Only TILL readers authenticate by serial number."
+msgstr "판매대(TILL) 판독기만 일련번호로 인증할수 있습니다."
+
+msgid "Another device already has this serial number."
+msgstr "다른 장치가 이미 이 일련번호를 가지고있습니다."
+
+msgid "Does not match the authenticated device."
+msgstr "인증된 장치와 일치하지 않습니다."
+
+msgid "Till readers send `pay`."
+msgstr "판매대판독기는 `pay`를 보내야 합니다."
+
+msgid "Door devices send `in` or `out`."
+msgstr "출입문장치는 `in` 또는 `out`을 보내야 합니다."
+
+msgid "Event time is in the future; check the reader clock."
+msgstr "사건시간이 앞으로의 시간입니다. 판독기의 시계를 확인하십시오."
+
+msgid "Unknown card"
+msgstr "등록되지 않은 카드"
+
+msgid "Card not assigned"
+msgstr "배정되지 않은 카드"
+
+msgid "Card blocked"
+msgstr "차단된 카드"
+
+msgid "Card no longer valid"
+msgstr "더는 쓸수 없는 카드"
+
+msgid "Not active - contact your manager"
+msgstr "비활성 - 책임자에게 문의하십시오"
+
+msgid "No open purchase for this reader"
+msgstr "이 판독기에 진행중인 구입이 없습니다"
+
+#, python-format
+msgid "%(name)s - enter PIN"
+msgstr "%(name)s - 암호번호를 입력하십시오"
+
+#, python-format
+msgid "Goodbye, %(name)s"
+msgstr "안녕히 가십시오, %(name)s"
+
+#, python-format
+msgid "Welcome, %(name)s"
+msgstr "어서 오십시오, %(name)s"
+
+#, python-format
+msgid "At most %(max)s events per batch."
+msgstr "한번에 최대 %(max)s개의 사건만 보낼수 있습니다."
+
+msgid "Unassign or replace the card before retiring it."
+msgstr "카드를 페기하기전에 배정을 해제하거나 교체하십시오."
+
+msgid "Frame is not valid JSON."
+msgstr "프레임이 옳은 JSON이 아닙니다."
+
+msgid "Frame must be a JSON object."
+msgstr "프레임은 JSON 객체여야 합니다."
+
+msgid "Missing ID."
+msgstr "ID가 없습니다."
+
+msgid "Too many connections."
+msgstr "련결이 너무 많습니다."
+
+msgid "Frame too large."
+msgstr "프레임이 너무 큽니다."
+
+msgid "Server error."
+msgstr "봉사기오유."
+
+msgid "Only attendance readers may upload buffered scans."
+msgstr "출근판독기만 보관된 판독기록을 올려보낼수 있습니다."
+
+msgid "The seller's available balance is too low."
+msgstr "판매자의 리용가능한 잔고가 너무 적습니다."
+
+msgid "The payout cannot move to this status from its current status."
+msgstr "지불을 현재 상태에서 이 상태로 바꿀수 없습니다."
+
+msgid "A payout must be approved by someone other than its requester."
+msgstr "지불은 요청한 사람이 아닌 다른 사람이 승인하여야 합니다."
+
+msgid "You cannot approve, pay or adjust your own seller's money."
+msgstr "자기 판매자의 돈은 승인, 지불, 조정할수 없습니다."
+
+msgid "You can only request payouts for your own seller."
+msgstr "자기 판매자에 대해서만 지불을 요청할수 있습니다."
+
+msgid "This field is required."
+msgstr "이 항목은 반드시 입력하여야 합니다."
+
+msgid "Your account is not linked to a seller."
+msgstr "당신의 계정은 판매자와 련결되여있지 않습니다."
+
+msgid "Move or delete this position's goods before deleting it."
+msgstr "삭제하기전에 이 매대의 상품들을 옮기거나 삭제하십시오."
+
+msgid "A seller with this name already exists."
+msgstr "이 이름을 가진 판매자가 이미 있습니다."
+
+msgid "This user is already linked to another seller."
+msgstr "이 리용자는 이미 다른 판매자와 련결되여있습니다."
+
+msgid "A position cannot move to another seller."
+msgstr "매대를 다른 판매자에게 옮길수 없습니다."
+
+msgid "You can only create positions for your own seller."
+msgstr "자기 판매자의 매대만 만들수 있습니다."
+
+msgid "This seller already has a position with this name."
+msgstr "이 판매자에게는 이미 이 이름의 매대가 있습니다."
+
+msgid "The request violates a business rule."
+msgstr "요청이 업무규정에 어긋납니다."
+
+msgid "The request conflicts with existing data."
+msgstr "요청이 기존자료와 충돌합니다."
+
+msgid "This item is still in use and can't be deleted."
+msgstr "이 항목은 아직 리용되고있으므로 삭제할수 없습니다."
+
+msgid "An unexpected error occurred."
+msgstr "예상하지 못한 오유가 발생하였습니다."
+
+msgid "Invalid input."
+msgstr "입력자료가 옳지 않습니다."
+
+msgid "This field may not be null."
+msgstr "이 항목은 비워둘수 없습니다."
+
+msgid "This field may not be blank."
+msgstr "이 항목은 비워둘수 없습니다."
+
+msgid "Not found."
+msgstr "찾을수 없습니다."
+
+msgid "Malformed request."
+msgstr "요청형식이 옳지 않습니다."
+
+msgid "Incorrect authentication credentials."
+msgstr "인증정보가 옳지 않습니다."
+
+msgid "Authentication credentials were not provided."
+msgstr "인증정보가 제공되지 않았습니다."
+
+msgid "You do not have permission to perform this action."
+msgstr "이 조작을 할 권한이 없습니다."
+
+#, python-brace-format
+msgid "Method \"{method}\" not allowed."
+msgstr "\"{method}\" 방식은 허용되지 않습니다."
+
+#, python-brace-format
+msgid "Unsupported media type \"{media_type}\" in request."
+msgstr "요청의 자료형식 \"{media_type}\"은 지원되지 않습니다."
+
+msgid "Request was throttled."
+msgstr "요청이 너무 많습니다."
+
+msgid "A server error occurred."
+msgstr "봉사기오유가 발생하였습니다."
+
+msgid "A valid integer is required."
+msgstr "옳은 옹근수를 입력하십시오."
+
+msgid "A valid number is required."
+msgstr "옳은 수를 입력하십시오."
+
+msgid "Must be a valid boolean."
+msgstr "옳은 론리값이여야 합니다."
+
+msgid "Not a valid string."
+msgstr "옳은 문자렬이 아닙니다."
+
+msgid "Enter a valid email address."
+msgstr "옳은 전자우편주소를 입력하십시오."
+
+#, python-brace-format
+msgid "Ensure this field has no more than {max_length} characters."
+msgstr "이 항목은 {max_length}자를 넘을수 없습니다."
+
+#, python-brace-format
+msgid "Ensure this field has at least {min_length} characters."
+msgstr "이 항목은 적어도 {min_length}자이여야 합니다."
+
+#, python-brace-format
+msgid "Ensure this value is less than or equal to {max_value}."
+msgstr "이 값은 {max_value}보다 작거나 같아야 합니다."
+
+#, python-brace-format
+msgid "Ensure this value is greater than or equal to {min_value}."
+msgstr "이 값은 {min_value}보다 크거나 같아야 합니다."
+
+#, python-brace-format
+msgid "Ensure that there are no more than {max_digits} digits in total."
+msgstr "전체 자리수는 {max_digits}자리를 넘을수 없습니다."
+
+#, python-brace-format
+msgid "Ensure that there are no more than {max_decimal_places} decimal places."
+msgstr "소수점아래 자리수는 {max_decimal_places}자리를 넘을수 없습니다."
+
+#, python-brace-format
+msgid "Ensure that there are no more than {max_whole_digits} digits before the decimal point."
+msgstr "소수점앞 자리수는 {max_whole_digits}자리를 넘을수 없습니다."
+
+#, python-brace-format
+msgid "Date has wrong format. Use one of these formats instead: {format}."
+msgstr "날자형식이 틀립니다. 다음 형식중 하나를 리용하십시오: {format}."
+
+#, python-brace-format
+msgid "Datetime has wrong format. Use one of these formats instead: {format}."
+msgstr "날자시간형식이 틀립니다. 다음 형식중 하나를 리용하십시오: {format}."
+
+#, python-brace-format
+msgid "Time has wrong format. Use one of these formats instead: {format}."
+msgstr "시간형식이 틀립니다. 다음 형식중 하나를 리용하십시오: {format}."
+
+#, python-brace-format
+msgid "\"{input}\" is not a valid choice."
+msgstr "\"{input}\"은 선택할수 있는 값이 아닙니다."
+
+#, python-brace-format
+msgid "Expected a list of items but got type \"{input_type}\"."
+msgstr "목록이 있어야 하는데 \"{input_type}\" 형이 들어왔습니다."
+
+msgid "This list may not be empty."
+msgstr "이 목록은 비워둘수 없습니다."
+
+#, python-brace-format
+msgid "Invalid pk \"{pk_value}\" - object does not exist."
+msgstr "\"{pk_value}\"에 해당한 대상이 없습니다."
+
+#, python-brace-format
+msgid "Incorrect type. Expected pk value, received {data_type}."
+msgstr "형이 틀립니다. 식별번호가 있어야 하는데 {data_type}이 들어왔습니다."
+
+msgid "This field must be unique."
+msgstr "이 항목의 값은 중복될수 없습니다."
+
+msgid "No file was submitted."
+msgstr "파일이 제출되지 않았습니다."
+
+msgid "The submitted file is empty."
+msgstr "제출된 파일이 비여있습니다."
+
+msgid "Upload a valid image. The file you uploaded was either not an image or a corrupted image."
+msgstr "옳은 화상을 올리십시오. 올린 파일이 화상이 아니거나 손상되였습니다."
+
+msgid "Invalid page."
+msgstr "옳지 않은 페지입니다."
+
+msgid "No active account found with the given credentials"
+msgstr "입력한 정보에 맞는 활성계정이 없습니다"
+
+msgid "Token is invalid or expired"
+msgstr "토큰이 옳지 않거나 기한이 지났습니다"
+
+msgid "Token is invalid"
+msgstr "토큰이 옳지 않습니다"
+
+msgid "Token is expired"
+msgstr "토큰의 기한이 지났습니다"
+
+msgid "Token is blacklisted"
+msgstr "토큰이 차단되였습니다"
+
+msgid "Given token not valid for any token type"
+msgstr "주어진 토큰은 어떤 토큰형에도 맞지 않습니다"
+
+msgid "User not found"
+msgstr "리용자를 찾을수 없습니다"
+
+msgid "User is inactive"
+msgstr "리용자가 비활성상태입니다"
+
+msgid "Authorization header must contain two space-delimited values"
+msgstr "Authorization 머리부는 공백으로 구분된 두개의 값을 가져야 합니다"
+
+#, python-format
+msgid "This password is too short. It must contain at least %(min_length)d character."
+msgid_plural "This password is too short. It must contain at least %(min_length)d characters."
+msgstr[0] "암호가 너무 짧습니다. 적어도 %(min_length)d자이여야 합니다."
+
+msgid "This password is too common."
+msgstr "너무 흔한 암호입니다."
+
+msgid "This password is entirely numeric."
+msgstr "암호가 수자로만 되여있습니다."
+
+#, python-format
+msgid "The password is too similar to the %(verbose_name)s."
+msgstr "암호가 %(verbose_name)s와 너무 비슷합니다."
+
+msgid "Required header: 8-64 characters (letters, digits, _ . : -); use a UUID."
+msgstr "필수머리부입니다: 8~64자 (문자, 수자, _ . : -). UUID를 리용하십시오."
+
+msgid "No active door with this code."
+msgstr "이 코드를 가진 활성출입문이 없습니다."
+
+msgid "No such purchase."
+msgstr "그런 구입이 없습니다."
+
+msgid "Only draft purchases can be paid."
+msgstr "작성중인 구입만 지불할수 있습니다."
+
+msgid "This developer has no active card; send a `uid` instead."
+msgstr "이 개발자에게는 활성카드가 없습니다. 대신 `uid`를 보내십시오."

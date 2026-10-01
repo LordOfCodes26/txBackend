@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.cache import cache
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
@@ -46,10 +47,10 @@ class DeviceAuthentication(BaseAuthentication):
         if not parts or parts[0].lower() != self.keyword.lower().encode():
             return None
         if len(parts) != 2:
-            raise AuthenticationFailed("Invalid device credentials.")
+            raise AuthenticationFailed(_("Invalid device credentials."))
         device = device_for_key(parts[1].decode(errors="ignore"))
         if device is None:
-            raise AuthenticationFailed("Invalid device credentials.")
+            raise AuthenticationFailed(_("Invalid device credentials."))
         return DevicePrincipal(device), device
 
     def authenticate_header(self, request):
@@ -84,7 +85,7 @@ class DeviceIPAuthentication(BaseAuthentication):
             else None
         )
         if device is None:
-            raise AuthenticationFailed("No door device with this ID is registered for this IP.")
+            raise AuthenticationFailed(_("No door device with this ID is registered for this IP."))
         return DevicePrincipal(device), device
 
     def authenticate_header(self, request):
@@ -161,9 +162,9 @@ class DeviceSNAuthentication(BaseAuthentication):
         try:
             device = till_for_sn(code, sn, client_ip(request))
         except SNLockedOut as exc:
-            raise AuthenticationFailed("Too many failed attempts; try again later.") from exc
+            raise AuthenticationFailed(_("Too many failed attempts; try again later.")) from exc
         if device is None:
-            raise AuthenticationFailed("Unknown till reader ID or serial number.")
+            raise AuthenticationFailed(_("Unknown till reader ID or serial number."))
         return DevicePrincipal(device), device
 
     def authenticate_header(self, request):

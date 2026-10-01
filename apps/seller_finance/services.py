@@ -29,7 +29,7 @@ ZERO = Decimal("0.00")
 
 
 def open_seller_account(seller: Seller) -> SellerAccount:
-    account, _ = SellerAccount.objects.get_or_create(seller=seller)
+    account, _created = SellerAccount.objects.get_or_create(seller=seller)
     return account
 
 

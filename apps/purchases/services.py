@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import DeveloperStatus
@@ -44,7 +45,7 @@ def _lock_draft(purchase: Purchase) -> Purchase:
 def _ensure_sellable(good: Good, purchase: Purchase) -> None:
     if good.kind == GoodKind.RENTAL:
         raise GoodNotAvailable(
-            "Rentals are booked by developers, not sold at the till.", details={"good": good.pk}
+            _("Rentals are booked by developers, not sold at the till."), details={"good": good.pk}
         )
     if (
         good.deleted_at is not None
@@ -223,16 +224,20 @@ def _card_holder(uid: str):
     """(card, developer, account) for a card presented at the till, or a clear error."""
     card = RFIDCard.objects.filter(uid=uid).first()
     if card is None:
-        raise CardNotUsable("Unknown card.")
+        raise CardNotUsable(_("Unknown card."))
     if card.status != CardStatus.ACTIVE:
-        raise CardNotUsable(f"This card is {card.status.lower()}.")
+        raise CardNotUsable(
+            _("This card is blocked.")
+            if card.status == CardStatus.BLOCKED
+            else _("This card is retired.")
+        )
     assignment = (
         RFIDCardAssignment.objects.select_related("developer")
         .filter(card=card, unassigned_at__isnull=True)
         .first()
     )
     if assignment is None:
-        raise CardNotUsable("This card is not assigned to anyone.")
+        raise CardNotUsable(_("This card is not assigned to anyone."))
     developer = assignment.developer
     if developer.deleted_at or developer.status in INACTIVE_DEVELOPER:
         raise DeveloperNotActive()
@@ -280,13 +285,13 @@ def confirm_purchase(
                 return purchase, False
             raise PurchaseNotDraft()
         if presented and _presented_uid(purchase) != card_uid:
-            raise CardNotUsable("A different card was tapped meanwhile; ask for the PIN again.")
+            raise CardNotUsable(_("A different card was tapped meanwhile; ask for the PIN again."))
 
         # Re-validate under locks: the card may have been blocked since step 1.
         card = RFIDCard.objects.select_for_update().get(pk=card.pk)
-        locked_card, locked_developer, _ = _card_holder(card.uid)
+        locked_card, locked_developer, _assignment = _card_holder(card.uid)
         if locked_developer.pk != developer.pk:
-            raise CardNotUsable("The card changed owner; scan it again.")
+            raise CardNotUsable(_("The card changed owner; scan it again."))
         account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
 
         position = ServicePosition.all_objects.select_related("seller").get(
@@ -313,7 +318,7 @@ def confirm_purchase(
             item.line_total = finance.money(good.price * item.quantity)
             total += item.line_total
         if total <= 0:
-            raise PurchaseEmpty("The purchase total must be greater than zero.")
+            raise PurchaseEmpty(_("The purchase total must be greater than zero."))
 
         reference = f"purchase:{purchase.pk}"
         for item in items:

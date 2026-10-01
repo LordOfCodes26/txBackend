@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from apps.attendance.services import record_from_scan
 from apps.audit.services import diff, record_audit, snapshot
@@ -163,7 +164,7 @@ def change_card_status(*, actor, card: RFIDCard, transition: str, reason: str = 
     if card.status not in allowed_from:
         raise InvalidCardTransition()
     if target == CardStatus.RETIRED and _active_assignment(card):
-        raise InvalidCardTransition("Unassign or replace the card before retiring it.")
+        raise InvalidCardTransition(_("Unassign or replace the card before retiring it."))
     old_status = card.status
     card.status = target
     card.status_reason = reason

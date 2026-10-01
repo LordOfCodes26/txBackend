@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.sellers.models import ServicePosition
@@ -16,7 +17,9 @@ class GoodImageSerializer(serializers.ModelSerializer):
     def validate_image(self, value):
         if value.size > settings.GOOD_IMAGE_MAX_BYTES:
             limit = settings.GOOD_IMAGE_MAX_BYTES // (1024 * 1024)
-            raise serializers.ValidationError(f"Images must be at most {limit} MB.")
+            raise serializers.ValidationError(
+                _("Images must be at most %(limit)s MB.") % {"limit": limit}
+            )
         return value
 
 
@@ -48,7 +51,7 @@ class RentalSettingsSerializer(serializers.ModelSerializer):
         closing = attrs.get("closing_time", getattr(self.instance, "closing_time", None))
         if opening and closing and closing <= opening:
             raise serializers.ValidationError(
-                {"closing_time": ["Must be after the opening time (same day)."]}
+                {"closing_time": [_("Must be after the opening time (same day).")]}
             )
         return attrs
 
@@ -110,46 +113,48 @@ class GoodSerializer(serializers.ModelSerializer):
     def validate_service_position(self, position):
         own = self.context.get("own_seller")
         if own is not None and position.seller_id != own.pk:
-            raise serializers.ValidationError("You can only use your own service positions.")
+            raise serializers.ValidationError(_("You can only use your own service positions."))
         if self.instance is not None and position.seller_id != self.instance.seller_id:
-            raise serializers.ValidationError("A good cannot move to another seller.")
+            raise serializers.ValidationError(_("A good cannot move to another seller."))
         return position
 
     def validate(self, attrs):
         errors = {}
         if self.instance is not None:
             if "initial_quantity" in attrs:
-                errors["initial_quantity"] = ["Only allowed when creating; use the stock endpoint."]
+                errors["initial_quantity"] = [
+                    _("Only allowed when creating; use the stock endpoint.")
+                ]
             if "kind" in attrs and attrs["kind"] != self.instance.kind:
-                errors["kind"] = ["The kind of a good cannot be changed; create a new good."]
+                errors["kind"] = [_("The kind of a good cannot be changed; create a new good.")]
             kind = self.instance.kind
         else:
             kind = attrs.get("kind", GoodKind.PRODUCT)
 
         if kind == GoodKind.PRODUCT:
             if attrs.get("rental"):
-                errors["rental"] = ["Only RENTAL goods have rental settings."]
+                errors["rental"] = [_("Only RENTAL goods have rental settings.")]
         else:
             if attrs.get("track_stock"):
-                errors["track_stock"] = [f"{kind} goods have no stock."]
+                errors["track_stock"] = [_("%(kind)s goods have no stock.") % {"kind": kind}]
             if self.instance is None:
                 attrs["track_stock"] = False
             if attrs.get("initial_quantity"):
-                errors["initial_quantity"] = [f"{kind} goods have no stock."]
+                errors["initial_quantity"] = [_("%(kind)s goods have no stock.") % {"kind": kind}]
             if kind == GoodKind.SERVICE and attrs.get("rental"):
-                errors["rental"] = ["Only RENTAL goods have rental settings."]
+                errors["rental"] = [_("Only RENTAL goods have rental settings.")]
             if kind == GoodKind.RENTAL and self.instance is None and not attrs.get("rental"):
-                errors["rental"] = ["Rental settings are required for RENTAL goods."]
+                errors["rental"] = [_("Rental settings are required for RENTAL goods.")]
         price = attrs.get("price", getattr(self.instance, "price", None))
         if kind == GoodKind.RENTAL and price is not None and price <= 0:
-            errors["price"] = ["Rentals need a price above 0 (charged per slot)."]
+            errors["price"] = [_("Rentals need a price above 0 (charged per slot).")]
         if errors:
             raise serializers.ValidationError(errors)
 
         track = attrs.get("track_stock", self.instance.track_stock if self.instance else True)
         if attrs.get("initial_quantity") and not track:
             raise serializers.ValidationError(
-                {"initial_quantity": ["Goods that don't track stock have no quantity."]}
+                {"initial_quantity": [_("Goods that don't track stock have no quantity.")]}
             )
         sku = attrs.get("sku", "").strip()
         if sku:
@@ -158,7 +163,9 @@ class GoodSerializer(serializers.ModelSerializer):
             if self.instance is not None:
                 clash = clash.exclude(pk=self.instance.pk)
             if clash.exists():
-                raise serializers.ValidationError({"sku": ["This seller already uses this SKU."]})
+                raise serializers.ValidationError(
+                    {"sku": [_("This seller already uses this SKU.")]}
+                )
             attrs["sku"] = sku
         return attrs
 
@@ -180,15 +187,19 @@ class StockChangeSerializer(serializers.Serializer):
         if kind == MovementKind.ADJUSTMENT:
             if attrs.get("counted_quantity") is None:
                 raise serializers.ValidationError(
-                    {"counted_quantity": ["Required for ADJUSTMENT."]}
+                    {"counted_quantity": [_("Required for ADJUSTMENT.")]}
                 )
             attrs.pop("quantity", None)
         else:
             if attrs.get("quantity") is None:
-                raise serializers.ValidationError({"quantity": [f"Required for {kind}."]})
+                raise serializers.ValidationError(
+                    {"quantity": [_("Required for %(kind)s.") % {"kind": kind}]}
+                )
             attrs.pop("counted_quantity", None)
         if kind in (MovementKind.DAMAGE, MovementKind.ADJUSTMENT) and not attrs["reason"].strip():
-            raise serializers.ValidationError({"reason": [f"A reason is required for {kind}."]})
+            raise serializers.ValidationError(
+                {"reason": [_("A reason is required for %(kind)s.") % {"kind": kind}]}
+            )
         return attrs
 
 

@@ -1,4 +1,7 @@
+from django.conf import settings
 from django.db import transaction
+from django.utils import translation
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -175,6 +178,7 @@ class RFIDCardAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = RFIDCardAssignmentSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
+    device_actions = ("create", "batch")
     filterset_class = RFIDCardAssignmentFilter
     ordering_fields = ["assigned_at", "unassigned_at"]
 
@@ -225,7 +229,21 @@ class RFIDDeviceViewSet(
         return Response(RFIDDeviceWithKeySerializer(device, context={"api_key": key}).data)
 
 
+class DeviceLanguageMixin:
+    """Reader requests get their texts (display messages, errors) in DEVICE_LANGUAGE:
+    readers can't choose a language themselves."""
+
+    device_actions: tuple[str, ...] | None = None  # None: every request comes from a device
+
+    def initial(self, request, *args, **kwargs):
+        if self.device_actions is None or getattr(self, "action", None) in self.device_actions:
+            translation.activate(settings.DEVICE_LANGUAGE)
+            request.LANGUAGE_CODE = settings.DEVICE_LANGUAGE
+        super().initial(request, *args, **kwargs)
+
+
 class RFIDEventViewSet(
+    DeviceLanguageMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -283,7 +301,7 @@ class RFIDEventViewSet(
         device = request.auth
         if device.purpose != DevicePurpose.ATTENDANCE:
             raise ValidationError(
-                {"events": ["Only attendance readers may upload buffered scans."]}
+                {"events": [_("Only attendance readers may upload buffered scans.")]}
             )
         serializer = BatchScanSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -300,7 +318,7 @@ class RFIDEventViewSet(
         return Response(BatchResultSerializer(data, many=True).data)
 
 
-class DeviceHeartbeatView(APIView):
+class DeviceHeartbeatView(DeviceLanguageMixin, APIView):
     """Devices call this every RFID_HEARTBEAT_SECONDS with `Authorization: Device <key>`."""
 
     authentication_classes = [DeviceAuthentication, DeviceSNAuthentication, DeviceIPAuthentication]

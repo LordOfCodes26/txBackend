@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.sellers.models import Seller
@@ -101,11 +102,11 @@ class PayoutRequestSerializer(serializers.Serializer):
         if own is not None:
             if attrs.get("seller") not in (None, own):
                 raise serializers.ValidationError(
-                    {"seller": ["You can only request payouts for your own seller."]}
+                    {"seller": [_("You can only request payouts for your own seller.")]}
                 )
             attrs["seller"] = own
         elif attrs.get("seller") is None:
-            raise serializers.ValidationError({"seller": ["This field is required."]})
+            raise serializers.ValidationError({"seller": [_("This field is required.")]})
         return attrs
 
 
@@ -126,5 +127,5 @@ class SellerAdjustmentSerializer(serializers.Serializer):
 
     def validate_amount(self, value):
         if value == 0:
-            raise serializers.ValidationError("Amount cannot be zero.")
+            raise serializers.ValidationError(_("Amount cannot be zero."))
         return value

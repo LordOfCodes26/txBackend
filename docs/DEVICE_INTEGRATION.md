@@ -103,6 +103,7 @@ ${"ID":"Door1","Type":"in","UID":"04A2B3C4"}$
 | Body | JSON, `Content-Type: application/json` |
 | Times | ISO 8601 **with timezone**, e.g. `2026-10-01T08:59:58Z` or `...+09:00` |
 | Timeout | Use 5 seconds per request |
+| Language | `message` / `display_message` / `error` texts use the server setting `DEVICE_LANGUAGE`: `en` (default) or `ko-kp` (Korean, UTF-8). Use Korean only if the reader's screen has a Hangul font |
 
 **TLS:** the server may use a certificate from your company's internal certificate
 authority (it's an offline network). Install that CA certificate on the device or

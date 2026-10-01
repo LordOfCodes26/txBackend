@@ -50,6 +50,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "common.middleware.RequestContextMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -182,7 +183,13 @@ SPECTACULAR_SETTINGS = {
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 
 # --- I18N / time ------------------------------------------------------------
-LANGUAGE_CODE = "en-us"
+# Clients pick the language per request with `Accept-Language` (en, ko). Korean texts follow
+# DPRK (조선어) usage; any Korean request (ko, ko-KR, ko-KP) gets them.
+LANGUAGES = [("en", "English"), ("ko-kp", "조선어")]
+LANGUAGE_CODE = env("LANGUAGE_CODE", default="en")  # when the client sends no preference
+LOCALE_PATHS = [BASE_DIR / "locale"]
+# Door and till readers can't send a language: their screen texts use this one.
+DEVICE_LANGUAGE = env("DEVICE_LANGUAGE", default="en")
 TIME_ZONE = env("TIME_ZONE", default="UTC")
 USE_I18N = True
 USE_TZ = True

@@ -27,6 +27,8 @@ from collections import Counter
 
 from channels.db import database_sync_to_async
 from django.conf import settings
+from django.utils import translation
+from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +77,18 @@ def encode(payload: dict) -> bytes:
 
 
 def _error(message: str) -> dict:
-    return {"result": "ERROR", "accepted": False, "error": message}
+    with translation.override(settings.DEVICE_LANGUAGE):
+        return {"result": "ERROR", "accepted": False, "error": str(message)}
 
 
 def handle_frame(frame: bytes, peer_ip: str) -> dict:
-    """Authenticate, validate and record one frame. Returns the reply payload."""
+    """Authenticate, validate and record one frame. Returns the reply payload, with texts
+    in DEVICE_LANGUAGE."""
+    with translation.override(settings.DEVICE_LANGUAGE):
+        return _handle_frame(frame, peer_ip)
+
+
+def _handle_frame(frame: bytes, peer_ip: str) -> dict:
     from rest_framework.exceptions import ValidationError
 
     from . import services
@@ -90,24 +99,24 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
     try:
         data = json.loads(frame.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return _error("Frame is not valid JSON.")
+        return _error(_("Frame is not valid JSON."))
     if not isinstance(data, dict):
-        return _error("Frame must be a JSON object.")
+        return _error(_("Frame must be a JSON object."))
 
     fields = {str(k).lower(): v for k, v in data.items()}
     code = str(fields.get("id") or fields.get("device_id") or "").strip()
     if not code:
-        return _error("Missing ID.")
+        return _error(_("Missing ID."))
     sn = str(fields.get("sn") or "").strip()
     if sn:
         # Till readers: serial number + ID.
         try:
             device = till_for_sn(code, sn, peer_ip)
         except SNLockedOut:
-            return _error("Too many failed attempts; try again later.")
+            return _error(_("Too many failed attempts; try again later."))
         if device is None:
             logger.warning("RFID TCP: rejected till ID=%r from %s (wrong SN)", code, peer_ip)
-            return _error("Unknown till reader ID or serial number.")
+            return _error(_("Unknown till reader ID or serial number."))
     else:
         # Doors: fixed IP + ID.
         device = RFIDDevice.objects.filter(
@@ -118,14 +127,14 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
         ).first()
         if device is None:
             logger.warning("RFID TCP: rejected ID=%r from %s (no matching door/IP)", code, peer_ip)
-            return _error("No door device with this ID is registered for this IP.")
+            return _error(_("No door device with this ID is registered for this IP."))
 
     serializer = ScanSerializer(data=data, context={"device": device})
     try:
         serializer.is_valid(raise_exception=True)
     except ValidationError as exc:
         return _error(json.dumps(exc.detail, default=str))
-    event, _ = services.record_scan(
+    event, _created = services.record_scan(
         device=device,
         uid=serializer.validated_data["uid"],
         event_time=serializer.validated_data.get("event_time"),
@@ -175,7 +184,7 @@ class DoorTCPServer:
             or self.connections[peer_ip] >= settings.RFID_TCP_MAX_CONNECTIONS_PER_IP
         ):
             logger.warning("RFID TCP: too many connections, refusing %s", peer_ip)
-            writer.write(encode(_error("Too many connections.")))
+            writer.write(encode(_error(_("Too many connections."))))
             await self._close(writer)
             return
         self.connections[peer_ip] += 1
@@ -193,14 +202,14 @@ class DoorTCPServer:
                 try:
                     frames = decoder.feed(data)
                 except FrameTooLarge:
-                    writer.write(encode(_error("Frame too large.")))
+                    writer.write(encode(_error(_("Frame too large."))))
                     break
                 for frame in frames:
                     try:
                         reply = await self._handle_frame(frame, peer_ip)
                     except Exception:
                         logger.exception("RFID TCP: error handling frame from %s", peer_ip)
-                        reply = _error("Server error.")
+                        reply = _error(_("Server error."))
                     writer.write(encode(reply))
                     await writer.drain()
         except (ConnectionResetError, BrokenPipeError):

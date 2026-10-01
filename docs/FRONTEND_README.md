@@ -322,6 +322,24 @@ backend team can use it to find the exact request in the server logs.
 
 ---
 
+### Language (English / Korean)
+
+Every API message (`error.message`, validation `details`, the till's `display_message`) is
+available in **English** and **Korean in DPRK usage (조선어)**. Send the user's language on
+every request, from the Next.js server actions too:
+
+```ts
+headers: { "Accept-Language": locale }   // "ko" or "en"
+```
+
+- `ko`, `ko-KP` and `ko-KR` all get the DPRK texts. No header (or another language) → English.
+- The response carries `Content-Language: ko-kp` or `en`.
+- **Only texts change.** `error.code`, enum values (`ACTIVE`, `PRODUCT`, `IN`…), field names
+  and `details` keys stay English. Keep switching on `code`, and translate enum values to
+  labels in the frontend.
+- Data people typed (names, goods, descriptions) is returned as stored, not translated.
+- Reader texts on the reader itself use the server's `DEVICE_LANGUAGE`, not the header.
+
 ## 6. Endpoint reference (current modules)
 
 `{id}` is a numeric id unless noted. Full request/response shapes are in Swagger.
