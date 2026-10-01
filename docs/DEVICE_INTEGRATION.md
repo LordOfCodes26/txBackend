@@ -266,8 +266,12 @@ or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Rea
   share device lists). An API key (`Authorization: Device <key>`) is still accepted as a
   stronger alternative.
 
+- **Run the till program on the seller's PC itself, and send a heartbeat every 30 s.** The
+  server links the reader to that PC by network address: the seller's browser on the same
+  PC sees the reader as "connected" (heard from in the last 2 minutes from its address).
 - The server attaches an accepted tap to the **newest open (DRAFT) purchase that uses this
-  reader** (the seller's PC chose it), and returns its id in `purchase`. If none is open,
+  reader**, or else the newest open purchase created from the **same address** as the tap,
+  and returns its id in `purchase`. If none is open,
   `purchase` is `null` and the message says "No open purchase for this reader". The seller
   should start the purchase first, then let the developer tap. Moving the reader to another
   PC needs no change here; that PC simply selects the reader.

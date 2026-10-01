@@ -153,6 +153,13 @@ class TillReaderSerializer(serializers.Serializer):
     code = serializers.CharField()
     name = serializers.CharField()
     online = serializers.BooleanField(source="is_online")
+    last_seen_at = serializers.DateTimeField()
+
+
+class DetectedReaderSerializer(serializers.Serializer):
+    ip = serializers.IPAddressField(allow_null=True)
+    reader = TillReaderSerializer(allow_null=True)
+    candidates = TillReaderSerializer(many=True)
 
 
 class ItemAddSerializer(serializers.Serializer):

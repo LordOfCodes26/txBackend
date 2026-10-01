@@ -527,8 +527,9 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/purchases/readers/` | own seller, or `purchase.create` | Till readers to choose from: `[{code, name, online}]` |
-| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position, reader}`: opens a DRAFT bucket; `reader` = code of the reader plugged into this PC |
+| GET | `/purchases/detected-reader/` | own seller, or `purchase.create` | Readers connected to this PC: `{ip, reader, candidates}` (empty when none) |
+| GET | `/purchases/readers/` | own seller, or `purchase.create` | All till readers: `[{code, name, online, last_seen_at}]` |
+| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position, reader?}`: opens a DRAFT bucket. Without `reader`, the reader connected to this PC is used (detected by address) |
 | POST | `/purchases/{id}/reader/` | same | `{reader}`: switch the draft to another reader (a tap on the old one no longer counts) |
 | POST | `/purchases/{id}/items/` | same | `{good, quantity?}`; adding a good already in the bucket increases its quantity |
 | PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
@@ -543,20 +544,32 @@ Every item/confirm/cancel call returns the **whole purchase**, so re-render the 
 the response.
 
 **Which till reader?** A till reader is plugged into the **seller's PC** and can be moved to
-another PC at any time, so it isn't tied to a counter. Instead the **PC says which reader it
-uses**: show a setting "Reader on this PC" (list from `GET /purchases/readers/`), remember
-it on that PC (`localStorage`), and send it with every new purchase. A tap on a reader goes
-to the **newest open purchase using that reader**; the purchase keeps `reader` afterwards,
-so you can always see which till was used. If the reader is moved, the other PC just picks
-it in its setting.
+another PC, so it isn't tied to a counter. The server finds the reader **by the PC's network
+address**: the reader program and the seller's browser run on the same PC, so they reach the
+server from the same IP.
+
+- `GET /purchases/detected-reader/` → `{ip, reader, candidates}`: the readers **connected to
+  this PC** (same address, heard from in the last 2 minutes). Show them as the reader
+  choice. **If none is connected, show an empty choice** ("No till reader connected to this
+  PC") and don't offer taps. Refresh it when the till screen opens and every ~30 s.
+- `POST /purchases/` without `reader`: if exactly one reader is connected, the purchase uses
+  it. If none is connected yet, the **first tap from this PC's address** links the reader to
+  the purchase. You may still send `reader` explicitly (e.g. two readers on one PC).
+- A tap goes to the newest open purchase that names the reader, else to the newest open
+  purchase created from the same address. The purchase keeps `reader` afterwards, as the
+  record of which till was used.
+- **Limitation:** this needs each PC to reach the server with its own address, which is
+  true on the company LAN (production). It isn't true when many PCs share one router
+  address (e.g. reaching the staging server over the internet): there, with several sellers
+  active at once, a tap goes to the newer purchase. The PIN still prevents a wrong payment.
 
 **Till flow:**
-1. Seller picks their service position → `POST /purchases/` with `{service_position, reader}`
-   (keep the returned `id`).
+1. Seller picks their service position → `POST /purchases/` with `{service_position}` (plus
+   `reader` if the screen chose one); keep the returned `id`.
 2. Seller adds goods → `POST /purchases/{id}/items/`. `total` and `unit_price` show current prices.
 3. The developer taps their card on the **till reader** of this PC. The reader sends the tap
-   straight to the server (see `DEVICE_INTEGRATION.md`), which attaches it to the newest open
-   purchase using that reader, i.e. this one. **The web app never reads or sends card numbers.**
+   straight to the server (see `DEVICE_INTEGRATION.md`), which attaches it to this purchase
+   (matched by reader or by this PC's address). **The web app never reads or sends card numbers.**
 4. Wait for the tap: listen on the counter's WebSocket (section *Realtime* below) for
    `card_tapped`, or as a fallback poll `GET /purchases/{id}/` every ~1 s until
    `presented_card` is set:

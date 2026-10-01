@@ -248,6 +248,10 @@ PURCHASE_CARD_PRESENTATION_SECONDS = env.int("PURCHASE_CARD_PRESENTATION_SECONDS
 # Allow the browser to send a typed card UID at checkout. Off: the card must come from the
 # counter's TILL device, so a seller cannot charge an arbitrary card number.
 PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", default=False)
+# Match a till reader to the seller's PC by network address (the reader and the browser run
+# on the same PC). Needs each PC to have its own address as seen by the server (true on a
+# LAN; not when many PCs share one router/NAT address).
+TILL_MATCH_READER_BY_IP = env.bool("TILL_MATCH_READER_BY_IP", default=True)
 
 # --- Test console -------------------------------------------------------------
 # A staging-only page (/test-console/) to exercise doors and tills end to end.

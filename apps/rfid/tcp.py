@@ -131,6 +131,7 @@ def handle_frame(frame: bytes, peer_ip: str) -> dict:
         event_time=serializer.validated_data.get("event_time"),
         client_event_id=serializer.validated_data["client_event_id"],
         direction=serializer.validated_data["direction"],
+        source_ip=peer_ip,
     )
     body = ScanResponseSerializer(event).data
     reply = {

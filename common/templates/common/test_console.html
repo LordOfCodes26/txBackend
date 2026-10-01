@@ -101,9 +101,14 @@
     <h2>Till <span><span id="tillDot" class="dot"></span><small id="tillState" class="muted">no counter</small></span></h2>
     <div class="row">
       <div><label>Counter</label><select id="counter"></select></div>
-      <div><label>Reader plugged into this PC</label><select id="readerSel"></select></div>
+      <div><label>Till reader connected to this PC</label><select id="readerSel"></select></div>
     </div>
     <small class="muted" id="readerInfo"></small>
+    <div class="row" style="margin-top:6px">
+      <div><label>Test tool: plug a reader into this PC</label><select id="simReader"></select></div>
+      <button class="secondary" id="simConnect">Simulate connecting it</button>
+      <button class="secondary" id="refreshReader">Refresh</button>
+    </div>
     <div class="row" style="margin-top:10px">
       <button id="newPurchase">New purchase</button>
       <button class="danger" id="cancelPurchase" disabled>Cancel</button>
@@ -249,8 +254,7 @@ async function loadData() {
   $("door").innerHTML = state.doors.map(d => `<option value="${esc(d.code)}">${esc(d.code)}${d.location ? " · " + esc(d.location) : ""}</option>`).join("");
   const cardOpts = state.cards.map(c => `<option value="${esc(c.uid)}">${esc(c.current_assignment.developer.full_name)} (${esc(c.current_assignment.developer.employee_number)}) · ${esc(c.uid)}</option>`).join("");
   $("doorCard").innerHTML = cardOpts; $("tillCard").innerHTML = cardOpts;
-  $("readerSel").innerHTML = state.readers.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.name ? " · " + esc(r.name) : ""}</option>`).join("");
-  try { const saved = localStorage.getItem("tillReader"); if (saved) $("readerSel").value = saved; } catch {}
+  $("simReader").innerHTML = state.readers.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.name ? " · " + esc(r.name) : ""}</option>`).join("");
   showReader();
   $("counter").innerHTML = `<option value="">— choose —</option>` + state.positions
     .map(p => `<option value="${p.id}">${esc(p.seller_detail.name)} / ${esc(p.name)}</option>`).join("");
@@ -304,19 +308,35 @@ $("loadInside").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- till
-const reader = () => state.readers.find(r => r.code === $("readerSel").value);
-function showReader() {
-  const rd = reader();
-  $("readerInfo").textContent = rd ? `${rd.code} sends SN ${rd.sn || "(none)"} — remembered on this PC` : "No till readers registered";
+// Only readers connected to this PC (same address, heard from recently) can be used.
+const reader = () => state.readers.find(r => r.code === $("readerSel").value) || null;
+async function showReader() {
+  const d = await api("/purchases/detected-reader/");
+  const list = d.ok ? d.data.candidates : [];
+  const keep = $("readerSel").value;
+  $("readerSel").innerHTML = list.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.online ? "" : " (offline)"}</option>`).join("");
+  if (list.some(r => r.code === keep)) $("readerSel").value = keep;
+  const ip = d.ok ? d.data.ip : "?";
+  $("readerInfo").textContent = list.length
+    ? `Connected to this PC (${ip}): ${list.map(r => r.code).join(", ")}`
+    : `No till reader connected to this PC (${ip}).`;
+  renderBucket();
 }
 $("readerSel").onchange = async () => {
-  try { localStorage.setItem("tillReader", $("readerSel").value); } catch {}
-  showReader();
   // An open purchase follows the reader change.
-  if (state.purchase && state.purchase.status === "DRAFT") {
+  if ($("readerSel").value && state.purchase && state.purchase.status === "DRAFT") {
     const r = await api(`/purchases/${state.purchase.id}/reader/`, { method: "POST", body: { reader: $("readerSel").value } });
     if (r.ok) { state.purchase = r.data; renderBucket(); }
   }
+};
+$("refreshReader").onclick = showReader;
+$("simConnect").onclick = async () => {
+  // What the reader program on this PC does: a heartbeat with its SN + ID, no key.
+  const rd = state.readers.find(r => r.code === $("simReader").value);
+  const r = await fetch(`${API}/rfid/device/heartbeat/`, { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ SN: rd.sn, ID: rd.code, app_version: "test-console" }) });
+  log(r.ok ? "reader" : "error", `${rd.code} heartbeat from this PC → ${r.status}`);
+  await showReader();
 };
 $("counter").onchange = async () => {
   state.purchase = null; renderBucket();
@@ -361,7 +381,9 @@ function renderBucket() {
 }
 $("newPurchase").onclick = async () => {
   if (!$("counter").value) return alert("Choose a counter first");
-  const r = await api("/purchases/", { method: "POST", body: { service_position: Number($("counter").value), reader: $("readerSel").value || null } });
+  const body = { service_position: Number($("counter").value) };
+  if ($("readerSel").value) body.reader = $("readerSel").value;
+  const r = await api("/purchases/", { method: "POST", body });
   if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
   state.purchase = r.data; renderBucket();
   ["presented", "payStatus", "pinBox"].forEach(id => $(id).classList.add("hidden"));

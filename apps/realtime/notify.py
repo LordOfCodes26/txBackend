@@ -85,13 +85,11 @@ def notify_card_tapped(event) -> None:
         # was attached to, or (e.g. a blocked card, which is never attached) on the counter
         # of the newest open purchase using this reader. With no such purchase, only the
         # device's own reply reports the tap.
-        from apps.purchases.models import Purchase, PurchaseStatus
+        from apps.purchases.models import Purchase
+        from apps.purchases.services import draft_for_reader
 
-        purchase = (
-            Purchase.objects.filter(presented_event=event).first()
-            or Purchase.objects.filter(reader_id=event.device_id, status=PurchaseStatus.DRAFT)
-            .order_by("-created_at", "-id")
-            .first()
+        purchase = Purchase.objects.filter(presented_event=event).first() or draft_for_reader(
+            event.device_id, event.source_ip
         )
         if purchase is None:
             return

@@ -8,6 +8,7 @@ from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
 from common.context import get_request_context
+from common.middleware import client_ip
 from common.permissions import HasPermissions
 
 from . import services
@@ -264,6 +265,7 @@ class RFIDEventViewSet(
             event_time=data.get("event_time"),
             client_event_id=data["client_event_id"],
             direction=data["direction"],
+            source_ip=client_ip(request),
         )
         return Response(
             ScanResponseSerializer(event).data,

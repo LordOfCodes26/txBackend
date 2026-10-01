@@ -178,7 +178,8 @@ def test_tap_without_open_purchase(shop):
 
 
 @pytest.mark.django_db
-def test_tap_only_reaches_purchases_using_that_reader(shop):
+def test_tap_only_reaches_purchases_using_that_reader(shop, settings):
+    settings.TILL_MATCH_READER_BY_IP = False  # address matching is covered elsewhere
     _, card = make_developer(1)
     rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
     other = ServicePosition.objects.create(seller=shop["seller"], name="Counter 2")

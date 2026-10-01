@@ -8,12 +8,14 @@ from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from common.idempotency import HEADER, require_idempotency_key
+from common.middleware import client_ip
 
 from . import services
 from .filters import PurchaseFilter
 from .models import Purchase
 from .serializers import (
     ConfirmSerializer,
+    DetectedReaderSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
     PurchaseCreateSerializer,
@@ -30,6 +32,7 @@ SELLER_ACTIONS = (
     "item",
     "set_reader",
     "readers",
+    "detected_reader",
     "confirm",
     "cancel",
 )
@@ -67,6 +70,7 @@ class PurchaseViewSet(
         "item": ["purchase.create"],
         "set_reader": ["purchase.create"],
         "readers": ["purchase.create"],
+        "detected_reader": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
         "me": [],
@@ -99,8 +103,28 @@ class PurchaseViewSet(
             data=request.data, context=self.get_serializer_context()
         )
         serializer.is_valid(raise_exception=True)
-        purchase = services.create_purchase(actor=request.user, **serializer.validated_data)
+        purchase = services.create_purchase(
+            actor=request.user, client_ip=client_ip(request), **serializer.validated_data
+        )
         return self._respond(purchase, status.HTTP_201_CREATED)
+
+    @extend_schema(responses=DetectedReaderSerializer)
+    @action(detail=False, methods=["get"], url_path="detected-reader")
+    def detected_reader(self, request):
+        """Till readers connected to the caller's PC (same network address, heard from in the
+        last 2 minutes). `reader` is set when exactly one is connected; `candidates` is empty
+        when none is."""
+        ip = client_ip(request)
+        candidates = list(services.readers_at(ip)[:5])
+        return Response(
+            DetectedReaderSerializer(
+                {
+                    "ip": ip,
+                    "reader": candidates[0] if len(candidates) == 1 else None,
+                    "candidates": candidates,
+                }
+            ).data
+        )
 
     @extend_schema(responses=TillReaderSerializer(many=True))
     @action(detail=False, methods=["get"])

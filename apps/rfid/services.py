@@ -248,6 +248,7 @@ def record_scan(
     event_time=None,
     client_event_id: str = "",
     direction: str = "",
+    source_ip: str | None = None,
 ) -> tuple[RFIDEvent, bool]:
     """Store and classify one scan. Returns (event, created).
 
@@ -269,6 +270,7 @@ def record_scan(
                 received_at=now,
                 client_event_id=client_event_id,
                 direction=direction,
+                source_ip=source_ip,
             )
     except IntegrityError:
         if not client_event_id:
@@ -279,6 +281,9 @@ def record_scan(
     RFIDDevice.objects.filter(pk=device.pk).filter(
         Q(last_seen_at__isnull=True) | Q(last_seen_at__lt=now - timedelta(seconds=60))
     ).update(last_seen_at=now)
+    if source_ip and device.last_ip != source_ip:
+        # Till readers are matched to sellers' PCs by address, so keep it current.
+        RFIDDevice.objects.filter(pk=device.pk).update(last_ip=source_ip, last_seen_at=now)
     if device.purpose == DevicePurpose.TILL and event.result == ScanResult.ACCEPTED:
         # Separate transaction, after the card lock is released: checkout locks the
         # purchase before the card, so locking them in the other order here could deadlock.
@@ -293,7 +298,7 @@ def record_scan(
 
 
 def _classify_and_store(
-    *, device, uid, event_time, received_at, client_event_id, direction=""
+    *, device, uid, event_time, received_at, client_event_id, direction="", source_ip=None
 ) -> RFIDEvent:
     card = RFIDCard.objects.select_for_update().filter(uid=uid).first()
     assignment = _active_assignment(card) if card else None
@@ -323,6 +328,7 @@ def _classify_and_store(
         developer=developer,
         event_time=event_time,
         received_at=received_at,
+        source_ip=source_ip,
         direction=direction if device.purpose == DevicePurpose.ATTENDANCE else "",
         result=result,
     )

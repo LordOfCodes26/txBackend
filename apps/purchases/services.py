@@ -66,14 +66,36 @@ def _ensure_seller_active(position: ServicePosition) -> None:
 # --- Draft bucket -------------------------------------------------------------------
 
 
+def readers_at(ip: str | None):
+    """Till readers connected to the PC at `ip`: active, last heard from that address, and
+    heard from recently (within RFID_DEVICE_OFFLINE_AFTER_SECONDS). Most recent first."""
+    from apps.rfid.models import DevicePurpose, RFIDDevice
+
+    if not ip:
+        return RFIDDevice.objects.none()
+    since = timezone.now() - timedelta(seconds=settings.RFID_DEVICE_OFFLINE_AFTER_SECONDS)
+    return RFIDDevice.objects.filter(
+        purpose=DevicePurpose.TILL, is_active=True, last_ip=ip, last_seen_at__gte=since
+    ).order_by("-last_seen_at")
+
+
 @transaction.atomic
-def create_purchase(*, actor, service_position: ServicePosition, reader=None) -> Purchase:
+def create_purchase(
+    *, actor, service_position: ServicePosition, reader=None, client_ip: str | None = None
+) -> Purchase:
+    """`reader` may be given explicitly. Otherwise, if exactly one till reader was last heard
+    from the seller's PC address, it's used; else the first tap from that address decides."""
     _ensure_seller_active(service_position)
+    if reader is None and settings.TILL_MATCH_READER_BY_IP and client_ip:
+        detected = list(readers_at(client_ip)[:2])
+        if len(detected) == 1:
+            reader = detected[0]
     return Purchase.objects.create(
         seller=service_position.seller,
         service_position=service_position,
         created_by=actor,
         reader=reader,
+        client_ip=client_ip,
     )
 
 
@@ -157,17 +179,29 @@ def present_card(event) -> Purchase | None:
     if event.event_time < timezone.now() - window:
         return None
     with transaction.atomic():
-        purchase = (
-            Purchase.objects.select_for_update()
-            .filter(reader_id=event.device_id, status=PurchaseStatus.DRAFT)
-            .order_by("-created_at", "-id")
-            .first()
-        )
+        purchase = draft_for_reader(event.device_id, event.source_ip, lock=True)
         if purchase is None:
             return None
         purchase.presented_event = event
         purchase.presented_at = timezone.now()
-        purchase.save(update_fields=["presented_event", "presented_at", "updated_at"])
+        fields = ["presented_event", "presented_at", "updated_at"]
+        if purchase.reader_id is None:
+            purchase.reader_id = event.device_id  # matched by address: remember the reader
+            fields.append("reader")
+        purchase.save(update_fields=fields)
+    return purchase
+
+
+def draft_for_reader(reader_id: int, source_ip: str | None, lock: bool = False):
+    """The open purchase a tap on this reader belongs to:
+    1. the newest draft that names this reader, else
+    2. the newest draft without a reader created from the same address as the tap
+       (the reader and the seller's browser are on the same PC)."""
+    qs = Purchase.objects.select_for_update() if lock else Purchase.objects.all()
+    drafts = qs.filter(status=PurchaseStatus.DRAFT).order_by("-created_at", "-id")
+    purchase = drafts.filter(reader_id=reader_id).first()
+    if purchase is None and source_ip and settings.TILL_MATCH_READER_BY_IP:
+        purchase = drafts.filter(reader__isnull=True, client_ip=source_ip).first()
     return purchase
 
 

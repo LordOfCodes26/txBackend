@@ -263,6 +263,9 @@ class RFIDEvent(AppendOnlyModel):
     )
     event_time = models.DateTimeField()
     received_at = models.DateTimeField(default=timezone.now)
+    source_ip = models.GenericIPAddressField(
+        null=True, blank=True, help_text="Network address the scan came from."
+    )
     direction = models.CharField(
         max_length=3,
         choices=ScanDirection.choices,
