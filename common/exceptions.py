@@ -3,6 +3,7 @@ import logging
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
+from django.db.models import ProtectedError, RestrictedError
 from django.http import Http404
 from psycopg import errors as pg_errors
 from rest_framework import exceptions, status
@@ -40,6 +41,12 @@ class Conflict(DomainError):
     default_detail = "The request conflicts with existing data."
 
 
+class InUse(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "IN_USE"
+    default_detail = "This item is still in use and can't be deleted."
+
+
 def _error_body(code: str, message: str, details=None) -> dict:
     body = {"code": code, "message": message}
     if details:
@@ -52,6 +59,9 @@ def _normalize(exc):
         return exceptions.NotFound()
     if isinstance(exc, DjangoPermissionDenied):
         return exceptions.PermissionDenied()
+    if isinstance(exc, ProtectedError | RestrictedError):
+        # Deleting something other rows still point to (e.g. a building with doors).
+        return InUse()
     if isinstance(exc, IntegrityError) and isinstance(exc.__cause__, pg_errors.UniqueViolation):
         # Serializers validate uniqueness first; this covers the race between two requests.
         return Conflict(details={"constraint": exc.__cause__.diag.constraint_name})

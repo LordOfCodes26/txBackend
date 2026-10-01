@@ -45,6 +45,26 @@ def _send(position_id: int, event_type: str, data: dict) -> None:
     )
 
 
+def notify_attendance_scan(event) -> None:
+    """A card was scanned at a building door (accepted or not)."""
+    from apps.rfid.serializers import ScanResponseSerializer
+
+    def send():
+        data = dict(ScanResponseSerializer(event).data)
+        data.pop("client_event_id", None)
+        data.pop("purchase", None)
+        building = event.device.building
+        data["device_code"] = event.device.code
+        data["building"] = (
+            None
+            if building is None
+            else {"id": building.pk, "code": building.code, "name": building.name}
+        )
+        _group_send(OCCUPANCY_GROUP, {"type": "attendance", "data": data})
+
+    transaction.on_commit(send)
+
+
 def notify_occupancy() -> None:
     """Push the current building counts after an attendance change."""
 

@@ -158,7 +158,8 @@ Authorization: Device <api_key of Door1>
 
 The reply's `display_message` is "Welcome, <name>" for `in` and "Goodbye, <name>" for `out`.
 An `in` followed quickly by an `out` is two real movements; only the *same* direction
-repeated within 10 seconds is marked `DUPLICATE`. These scans also drive **occupancy** (who is inside which
+repeated within 10 seconds is marked `DUPLICATE`. Every door scan is also pushed live to the dashboards
+(see the frontend guide, *Realtime attendance*). These scans also drive **occupancy** (who is inside which
 building right now): a developer's latest scan decides where they are, so every door must
 report `in`/`out` correctly. Each door device is linked to its building (`Door1` → Building 1,
 `Door2` → Building 2) in the device settings.

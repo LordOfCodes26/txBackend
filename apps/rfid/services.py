@@ -326,6 +326,12 @@ def _classify_and_store(
         direction=direction if device.purpose == DevicePurpose.ATTENDANCE else "",
         result=result,
     )
+    if device.purpose == DevicePurpose.ATTENDANCE:
+        # Queued before attendance processing, so listeners get "who scanned" before the
+        # occupancy counts that scan changes (both are sent when the transaction commits).
+        from apps.realtime.notify import notify_attendance_scan
+
+        notify_attendance_scan(event)
     record_from_scan(event)
     return event
 

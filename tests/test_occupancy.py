@@ -239,7 +239,10 @@ def test_live_occupancy_socket(site, make_user):
         assert (snapshot["type"], snapshot["data"]["total"]) == ("occupancy", 0)
 
         await sync_to_async(site["scan"])("Ada", "Door2", "in")
+        announced = await comm.receive_json_from(timeout=3)
+        assert announced["type"] == "attendance"
         update = await comm.receive_json_from(timeout=3)
+        assert update["type"] == "occupancy"
         assert update["data"]["total"] == 1
         assert {b["code"]: b["count"] for b in update["data"]["buildings"]} == {"B1": 0, "B2": 1}
         await comm.disconnect()
@@ -248,5 +251,51 @@ def test_live_occupancy_socket(site, make_user):
         await denied.connect()
         closed = await denied.receive_output(timeout=3)
         assert (closed["type"], closed["code"]) == ("websocket.close", 4403)
+
+    async_to_sync(scenario)()
+
+
+@pytest.mark.django_db
+def test_building_with_doors_cannot_be_deleted(site, auth_client, make_user):
+    client = auth_client(make_user(Roles.MANAGER))
+    r = client.delete(f"/api/v1/rfid/buildings/{site['b1'].pk}/")
+    assert (r.status_code, r.json()["error"]["code"]) == (409, "IN_USE")
+    empty = Building.objects.create(code="B9", name="Annex")
+    assert client.delete(f"/api/v1/rfid/buildings/{empty.pk}/").status_code == 204
+
+
+@pytest.mark.django_db(transaction=True)
+def test_live_feed_announces_each_door_scan(site, make_user):
+    ticket = issue_ticket(make_user(Roles.MANAGER))
+
+    async def scenario():
+        comm = WebsocketCommunicator(application, f"/ws/occupancy/?ticket={ticket}")
+        assert (await comm.connect())[0]
+        await comm.receive_json_from(timeout=3)  # snapshot
+
+        await sync_to_async(site["scan"])("Ada", "Door1", "in")
+        scan = await comm.receive_json_from(timeout=3)
+        assert scan["type"] == "attendance"
+        d = scan["data"]
+        assert (d["developer"]["full_name"], d["direction"], d["result"]) == (
+            "Ada",
+            "IN",
+            "ACCEPTED",
+        )
+        assert (d["device_code"], d["building"]["code"], d["display_message"]) == (
+            "Door1",
+            "B1",
+            "Welcome, Ada",
+        )
+        counts = await comm.receive_json_from(timeout=3)
+        assert (counts["type"], counts["data"]["total"]) == ("occupancy", 1)
+
+        # Rejected cards are announced too (no occupancy change follows).
+        door1 = await sync_to_async(RFIDDevice.objects.get)(code="Door1")
+        await sync_to_async(rfid.record_scan)(device=door1, uid="04FFFFFFFF", direction="IN")
+        rejected = await comm.receive_json_from(timeout=3)
+        assert (rejected["data"]["result"], rejected["data"]["accepted"]) == ("UNKNOWN_CARD", False)
+        assert await comm.receive_nothing(timeout=0.5)
+        await comm.disconnect()
 
     async_to_sync(scenario)()

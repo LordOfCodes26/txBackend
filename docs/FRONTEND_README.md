@@ -9,7 +9,9 @@ Django + Django REST Framework; the frontend only talks to it over HTTP.
 - **Staging server:** `https://<staging-host>:8443` (self-signed certificate) or `http://<staging-host>:8088`; ask the backend team for the address
 
 The OpenAPI schema is the source of truth. If this guide and the schema ever disagree,
-the schema wins, and please report the mismatch.
+the schema wins, and please report the mismatch. How the RFID hardware talks to the
+server (doors, till readers) is in `docs/DEVICE_INTEGRATION.md`; the web app only manages
+devices and shows their results.
 
 ---
 
@@ -23,7 +25,8 @@ the schema wins, and please report the mismatch.
    convenience; every request is checked again on the server. Don't build business
    rules (balances, card state, attendance rules) into the frontend.
 3. **All times are UTC ISO 8601** (`2026-09-21T09:00:00Z`). Convert to local time for
-   display only. Date-only fields such as `work_date` are plain `YYYY-MM-DD` strings;
+   display only. (The server's company timezone is still UTC; it decides where attendance
+   days and rental opening hours start.) Date-only fields such as `work_date` are plain `YYYY-MM-DD` strings;
    don't parse them as datetimes, or they shift by a day in some timezones.
 
 ---
@@ -171,11 +174,11 @@ const can = (code: string) => me.permissions.includes(code);
 | `role.view` / `role.assign` | Role list / add or remove roles on users |
 | `audit.view` | Audit log |
 | `developer.view` / `.create` / `.update` / `.delete` | Developer pages |
-| `rfid.view` | Cards, assignments, readers, scan history |
+| `rfid.view` | Cards, assignments, devices, buildings, scan history |
 | `rfid.assign` | Register, assign, unassign, replace, retire cards |
 | `rfid.block` | Block / unblock cards |
-| `rfid.device.manage` | Register readers, rotate reader keys |
-| `attendance.view` / `attendance.correct` | Attendance pages / add or void records |
+| `rfid.device.manage` | Register devices (doors and till readers), rotate keys, set door IPs, manage buildings |
+| `attendance.view` / `attendance.correct` | Occupancy and attendance pages / add or void records |
 | `seller.view` / `.create` / `.update` | Sellers and all service positions / create sellers / edit sellers and positions |
 | `good.view` / `.create` / `.update` / `.delete` | All goods and stock history / create / edit and images / delete |
 | `good.stock` | Restock, write off and adjust stock |
@@ -262,7 +265,7 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
 `INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
-`CONFLICT`.
+`IN_USE` (deleting something still referenced, e.g. a building that has doors), `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -368,13 +371,16 @@ edit pages, not in list tables.
 | POST | `/rfid/cards/{id}/block/`, `/unblock/` | `rfid.block` | `{reason?}` |
 | POST | `/rfid/cards/{id}/retire/` | `rfid.assign` | Card must be unassigned |
 | GET | `/rfid/assignments/` | `rfid.view` | Card ownership history. Filters: `card`, `developer`, `active`, `end_reason` |
-| GET/POST/PATCH | `/rfid/devices/` | view / `rfid.device.manage` | Readers. Filters: `is_active`, `purpose` |
-| POST | `/rfid/devices/{id}/rotate-key/` | `rfid.device.manage` | Returns a new `api_key` |
+| GET | `/rfid/devices/` | `rfid.view` | Doors and till readers. Filters: `purpose`, `building`, `service_position`, `is_active`, `online` |
+| POST / PATCH | `/rfid/devices/`, `/rfid/devices/{id}/` | `rfid.device.manage` | Register or edit a device (see *Devices* below). No DELETE: deactivate with `{"is_active": false}` |
+| POST | `/rfid/devices/{id}/rotate-key/` | `rfid.device.manage` | Returns a new `api_key`; the old one stops working at once |
+| GET | `/rfid/buildings/` | `rfid.view` | Buildings, e.g. `{"code": "B1", "name": "Building 1"}`. Plain array, not paginated |
+| POST / PATCH / DELETE | `/rfid/buildings/`, `/rfid/buildings/{id}/` | `rfid.device.manage` | `{code, name}`. A building with doors can't be deleted |
 | GET | `/rfid/events/` | `rfid.view` | Raw scan log. Filters: `device`, `card`, `developer`, `result`, `uid`, `event_after`, `event_before` |
 
 - Card `status`: `ACTIVE`, `BLOCKED` (keeps its owner, scans rejected), `RETIRED` (permanent).
   `current_assignment` is `null` when the card is unassigned.
-- **Reader API keys are shown only once** (in the create and rotate-key responses). Show
+- **Device API keys are shown only once** (in the create and rotate-key responses). Show
   them in a dialog with a copy button and a clear "you won't see this again" warning.
 - Scan `result`: `ACCEPTED`, `DUPLICATE`, `UNKNOWN_CARD`, `UNASSIGNED_CARD`, `BLOCKED_CARD`,
   `RETIRED_CARD`, `INACTIVE_DEVELOPER`.
@@ -383,9 +389,30 @@ edit pages, not in list tables.
 - `POST /rfid/events/`, `/rfid/events/batch/` and `/rfid/device/heartbeat/` are for devices
   only (they use a device key, not a user login). The frontend never calls them. Device
   protocol: `docs/DEVICE_INTEGRATION.md`.
-- Device `purpose`: `ATTENDANCE` (entrance reader) or `TILL` (card-reader program on a
-  seller's computer; has a `service_position`). Devices show `online`, `last_seen_at`,
-  `last_ip` and `app_version` from their heartbeats.
+- Raw scans have `direction` (`IN` / `OUT` from doors, empty for till taps) and the
+  `device_code`, so a live scan monitor can show "Door2 · in · Ada Lovelace".
+
+**Devices.** There are two kinds; the registration form depends on `purpose`:
+
+| `purpose` | Examples | Required / allowed fields | Authentication |
+|---|---|---|---|
+| `ATTENDANCE` | `Door1` (Building 1), `Door2` (Building 2) | `code`, `building`; optional `allowed_ip`, `name`, `location` | Fixed IP (`allowed_ip`) or API key |
+| `TILL` | `Reader1`, `Reader2`, … | `code`, `service_position` (the counter); no `building`, no `allowed_ip` | **API key only** |
+
+```json
+POST /rfid/devices/  {"code": "Door1", "purpose": "ATTENDANCE", "building": 1, "allowed_ip": "10.20.0.11"}
+POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "service_position": 3}
+```
+
+- `code` must be exactly what the hardware sends as `ID` (`Door1`, `Reader2`, …).
+- Validation errors to show next to the fields: a till with a `building` or `allowed_ip`, an
+  attendance device with a `service_position`, or a till without one.
+- Doors that authenticate by IP don't need their key, but registration still returns one.
+  Show it anyway (the door may support it later).
+- Device list columns: `code`, `purpose`, building or counter, `online` (heard from in the
+  last 2 minutes), `last_seen_at`, `last_ip`, `app_version`, `allowed_ip`, `is_active`.
+  `?online=false` lists devices needing attention.
+- Changes to devices (including `allowed_ip`) are recorded in the audit log.
 
 ### Attendance
 
@@ -396,10 +423,12 @@ edit pages, not in list tables.
 | POST | `/attendance/records/` | `attendance.correct` | Manual record: `{developer, event_time, note, direction?}` (note required; `direction` `IN`/`OUT`, e.g. `OUT` to mark someone as gone who never scanned out) |
 | GET | `/attendance/occupancy/` | `attendance.view` | **Who is inside right now**: `{as_of, total, buildings: [{id, code, name, count}], unknown_building}` |
 | GET | `/attendance/occupancy/people/` | `attendance.view` | Everyone inside: `{developer, building, since, device_code}`. Filters: `building=<id>` (or `none`), `department`, `search` |
-| GET | `/rfid/buildings/` | `rfid.view` | Buildings (`B1` Building 1, `B2` Building 2); door devices have a `building` |
 | POST | `/attendance/records/{id}/void/` | `attendance.correct` | `{reason}` (required) |
 | GET | `/attendance/daily/me/`, `/attendance/records/me/` | logged in | Own attendance; same filters |
 
+- **Occupancy is the main attendance view:** how many developers are inside each building
+  and in total, and who they are. Worked hours (`/attendance/daily/`) still exist but are
+  secondary.
 - **Occupancy rule:** a developer is inside building X when their **latest** scan (on any
   day) is an `in` at X's door. **No scan out means still inside**, even on later days, until
   they scan again or a manager adds a manual `OUT` record. Everyone is counted once, so
@@ -408,10 +437,12 @@ edit pages, not in list tables.
 - Daily `status`: `PRESENT` or `INCOMPLETE` (a single scan, or an IN without an OUT).
   **No row means no scans that day**; absence and lateness aren't calculated yet.
 - `worked_hours` is a ready-to-display number; `worked_seconds` is exact.
-- `event_type` is `IN`/`OUT` as reported by the building doors (`Door1` = Building 1,
-  `Door2` = Building 2; see the record's `device_code`). It can be recalculated if the rule
-  changes, so always display the value from the API; never derive it.
-- Raw scans (`/rfid/events/`) carry `direction` (`IN`, `OUT` or empty).
+- Records have `direction` (what the door reported, or what a manager entered on a manual
+  record) and `event_type` (the value used for attendance, normally the same). Display
+  `event_type`; it can be recalculated if the rule changes, so never derive it yourself.
+  `device_code` says which door (`Door1` = Building 1, `Door2` = Building 2).
+- **Forgotten scan-out:** the correction form needs a `direction` choice (IN/OUT). An `OUT`
+  record removes the developer from occupancy.
 - Show voided records struck through, with `void_reason`, rather than hiding them.
 
 ### Sellers and service positions
@@ -598,15 +629,37 @@ tapped, with no polling.
 - With the BFF setup, the browser connects to the WebSocket directly (only `/ws/` needs to
   be reachable). Getting the ticket goes through your normal API path.
 
-### Realtime occupancy (live building counts)
+### Realtime attendance: live scans and building counts
 
-For a dashboard that always shows the exact current numbers:
+**How it fits together:** door devices send scans to the server over plain HTTP. The
+browser never talks to the doors. The server then **pushes** to every open dashboard
+over this WebSocket, so the frontend learns about each scan instantly, without polling.
 
 1. `POST /api/v1/realtime/ticket/` → `{"ticket": ...}` (user needs `attendance.view`).
 2. Open `wss://<host>/ws/occupancy/?ticket=<ticket>`.
-3. You immediately receive `{"type": "occupancy", "data": {...}}` with the same shape as
-   `GET /attendance/occupancy/`, and the same message again after **every** door scan or
-   attendance correction. Just re-render `data`.
+3. Messages:
+
+| `type` | When | `data` |
+|---|---|---|
+| `occupancy` | Right after connecting, then after every scan or correction that changes who is inside | Same shape as `GET /attendance/occupancy/`: `{as_of, total, buildings: [{id, code, name, count}], unknown_building}` |
+| `attendance` | **Every door scan**, accepted or not | `{id, result, accepted, direction, display_message, developer, device_code, building, event_time}` |
+
+Example `attendance` message:
+
+```json
+{"type": "attendance", "data": {
+  "id": 4711, "result": "ACCEPTED", "accepted": true, "direction": "IN",
+  "display_message": "Welcome, Ada Lovelace",
+  "developer": {"id": 1, "employee_number": "E0001", "full_name": "Ada Lovelace", "department": "Eng"},
+  "device_code": "Door1", "building": {"id": 1, "code": "B1", "name": "Building 1"},
+  "event_time": "2026-10-01T09:01:12Z"}}
+```
+
+- For an accepted scan, the `attendance` message arrives **first**, followed by the new
+  `occupancy` counts. Rejected cards (`UNKNOWN_CARD`, `BLOCKED_CARD`, …) produce only the
+  `attendance` message, with `developer` set to `null` for unknown cards. Show them in red.
+- Use `attendance` for a live "who just came in or out" feed, and `occupancy` for the counters.
+  Never compute counts yourself from the feed: just render the latest `occupancy` message.
 
 Close codes: `4401` (bad or used ticket), `4403` (no `attendance.view`). Reconnect with
 backoff; the first message after reconnecting is a fresh snapshot.
@@ -664,10 +717,11 @@ before → after table.
 | My profile, my attendance | `developers/me/`, `attendance/*/me/` | anyone with a developer profile |
 | Developers (list, detail, edit) | `developers/`, `rfid/cards/?developer=`, `attendance/daily/?developer=` | `developer.view` |
 | Cards (list, detail with history and actions) | `rfid/cards/`, `rfid/assignments/?card=` | `rfid.view` |
-| Devices (attendance readers and till programs; online status, last seen, version) | `rfid/devices/`, `rfid/devices/?online=false` | `rfid.view` |
-| Live scan monitor | poll `rfid/events/?ordering=-event_time&page_size=20` every few seconds | `rfid.view` |
-| **Occupancy dashboard** (live count per building and total; click a building for who is inside) | `ws/occupancy/`, `attendance/occupancy/people/?building=` | `attendance.view` |
-| Attendance (daily table by date/department, corrections) | `attendance/daily/`, `attendance/records/` | `attendance.view` |
+| Devices (doors and till readers; register, key dialog, door IP, online status) | `rfid/devices/`, `rfid/devices/?online=false`, `rfid/devices/{id}/rotate-key/` | `rfid.view` (edit: `rfid.device.manage`) |
+| Buildings | `rfid/buildings/` | `rfid.view` (edit: `rfid.device.manage`) |
+| Live door feed | `attendance` messages on `ws/occupancy/` (or poll `rfid/events/?ordering=-event_time`) | `attendance.view` |
+| **Occupancy dashboard** (live count per building and total, live scan feed; click a building for who is inside) | `ws/occupancy/`, `attendance/occupancy/people/?building=` | `attendance.view` |
+| Attendance records and corrections (incl. "mark as left") | `attendance/records/`, `attendance/daily/` | `attendance.view` (corrections: `attendance.correct`) |
 | Users and roles | `users/`, `roles/` | `user.view` |
 | Sellers (list, detail with positions) | `sellers/`, `service-positions/?seller=` | `seller.view` |
 | Goods catalogue (list, edit, images, stock dialog, stock history) | `goods/`, `inventory/movements/?good=` | `good.view` |
@@ -710,8 +764,10 @@ The frontend will run on the same offline server as the backend:
 - Build on a machine with internet, then copy `.next/standalone`, `.next/static` and
   `public/` to the server along with a matching Node.js runtime. The server has no
   internet, so it can't download Node.
-- nginx serves one hostname: `/api/`, `/admin/`, `/static/`, `/health/` go to Django, and
-  everything else goes to Next.js. Same origin means no CORS.
+- nginx serves one hostname: `/api/`, `/admin/`, `/static/`, `/media/`, `/health/` go to
+  Django, **`/ws/` goes to the backend's WebSocket service** (with the HTTP upgrade
+  headers), and everything else goes to Next.js. Same origin means no CORS. Without the
+  `/ws/` route the till screen and occupancy dashboard lose their live updates.
 - Coordinate with the backend team to add the Next.js service to the offline install
   bundle.
 
