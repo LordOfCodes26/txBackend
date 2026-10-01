@@ -35,7 +35,9 @@ class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     DELETE is a soft delete. Stock changes only through `POST /goods/{id}/stock/`.
     """
 
-    queryset = Good.objects.select_related("service_position__seller").prefetch_related("images")
+    queryset = Good.objects.select_related("service_position__seller", "rental").prefetch_related(
+        "images"
+    )
     serializer_class = GoodSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {

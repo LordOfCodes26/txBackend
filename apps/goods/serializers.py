@@ -4,7 +4,7 @@ from rest_framework import serializers
 from apps.sellers.models import ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
 
-from .models import Good, GoodImage, InventoryMovement, MovementKind
+from .models import Good, GoodImage, GoodKind, InventoryMovement, MovementKind, RentalSettings
 
 
 class GoodImageSerializer(serializers.ModelSerializer):
@@ -20,6 +20,38 @@ class GoodImageSerializer(serializers.ModelSerializer):
         return value
 
 
+class RentalSettingsSerializer(serializers.ModelSerializer):
+    weekdays = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        allow_empty=False,
+        required=False,
+        help_text="Open days: 0 = Monday ... 6 = Sunday. Default: every day.",
+    )
+
+    class Meta:
+        model = RentalSettings
+        fields = [
+            "slot_minutes",
+            "opening_time",
+            "closing_time",
+            "weekdays",
+            "max_slots_per_booking",
+            "max_days_ahead",
+        ]
+
+    def validate_weekdays(self, value):
+        return sorted(set(value))
+
+    def validate(self, attrs):
+        opening = attrs.get("opening_time", getattr(self.instance, "opening_time", None))
+        closing = attrs.get("closing_time", getattr(self.instance, "closing_time", None))
+        if opening and closing and closing <= opening:
+            raise serializers.ValidationError(
+                {"closing_time": ["Must be after the opening time (same day)."]}
+            )
+        return attrs
+
+
 class PositionSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = ServicePosition
@@ -33,6 +65,13 @@ class GoodSerializer(serializers.ModelSerializer):
     price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
     currency = serializers.SerializerMethodField()
     images = GoodImageSerializer(many=True, read_only=True)
+    kind = serializers.ChoiceField(choices=GoodKind.choices, default=GoodKind.PRODUCT)
+    rental = RentalSettingsSerializer(
+        required=False, allow_null=True, help_text="Required for RENTAL goods, else omit."
+    )
+    track_stock = serializers.BooleanField(
+        required=False, help_text="PRODUCT only (default true). Always false otherwise."
+    )
     initial_quantity = serializers.IntegerField(
         min_value=0,
         required=False,
@@ -48,6 +87,7 @@ class GoodSerializer(serializers.ModelSerializer):
             "position_detail",
             "seller",
             "name",
+            "kind",
             "description",
             "sku",
             "price",
@@ -56,6 +96,7 @@ class GoodSerializer(serializers.ModelSerializer):
             "track_stock",
             "quantity",
             "initial_quantity",
+            "rental",
             "images",
             "created_at",
             "updated_at",
@@ -74,10 +115,33 @@ class GoodSerializer(serializers.ModelSerializer):
         return position
 
     def validate(self, attrs):
-        if self.instance is not None and "initial_quantity" in attrs:
-            raise serializers.ValidationError(
-                {"initial_quantity": ["Only allowed when creating; use the stock endpoint."]}
-            )
+        errors = {}
+        if self.instance is not None:
+            if "initial_quantity" in attrs:
+                errors["initial_quantity"] = ["Only allowed when creating; use the stock endpoint."]
+            if "kind" in attrs and attrs["kind"] != self.instance.kind:
+                errors["kind"] = ["The kind of a good cannot be changed; create a new good."]
+            kind = self.instance.kind
+        else:
+            kind = attrs.get("kind", GoodKind.PRODUCT)
+
+        if kind == GoodKind.PRODUCT:
+            if attrs.get("rental"):
+                errors["rental"] = ["Only RENTAL goods have rental settings."]
+        else:
+            if attrs.get("track_stock"):
+                errors["track_stock"] = [f"{kind} goods have no stock."]
+            if self.instance is None:
+                attrs["track_stock"] = False
+            if attrs.get("initial_quantity"):
+                errors["initial_quantity"] = [f"{kind} goods have no stock."]
+            if kind == GoodKind.SERVICE and attrs.get("rental"):
+                errors["rental"] = ["Only RENTAL goods have rental settings."]
+            if kind == GoodKind.RENTAL and self.instance is None and not attrs.get("rental"):
+                errors["rental"] = ["Rental settings are required for RENTAL goods."]
+        if errors:
+            raise serializers.ValidationError(errors)
+
         track = attrs.get("track_stock", self.instance.track_stock if self.instance else True)
         if attrs.get("initial_quantity") and not track:
             raise serializers.ValidationError(

@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     # Third party
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
@@ -39,6 +40,7 @@ INSTALLED_APPS = [
     "apps.finance",
     "apps.purchases",
     "apps.seller_finance",
+    "apps.bookings",
 ]
 
 MIDDLEWARE = [
@@ -151,6 +153,7 @@ SPECTACULAR_SETTINGS = {
         "SellerStatusEnum": "apps.sellers.models.SellerStatus",
         "AccountStatusEnum": "apps.finance.models.AccountStatus",
         "PayoutStatusEnum": "apps.seller_finance.models.PayoutStatus",
+        "GoodKindEnum": "apps.goods.models.GoodKind",
     },
     # Serve Swagger UI assets locally: the server may run without internet access.
     "SWAGGER_UI_DIST": "SIDECAR",

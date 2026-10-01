@@ -260,7 +260,9 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
 `PIN_NOT_SET`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
 `details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
-`INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`, `CONFLICT`.
+`INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
+`RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
+`CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
 
@@ -293,7 +295,7 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
 
 ### Money-moving requests need an `Idempotency-Key`
 
-Deposits, adjustments, purchase confirmation and payout requests require an
+Deposits, adjustments, purchase confirmation, bookings and payout requests require an
 `Idempotency-Key` header:
 
 ```ts
@@ -423,6 +425,18 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 | DELETE | `/goods/{id}/images/{image_id}/` | same | |
 | GET | `/inventory/movements/` | `good.view`, or own seller | Stock history. Filters: `good`, `seller`, `kind`, `created_after`, `created_before` |
 
+- **`kind`** (set on create, can't be changed later):
+  - `PRODUCT`: tangible; optional stock (`track_stock`, `initial_quantity`, `/stock/`)
+  - `SERVICE`: intangible and sold at the till (made-to-order coffee, haircut); no stock
+  - `RENTAL`: booked by time slot (playground, pool); `price` is **per slot**. Requires a
+    `rental` object; rentals can't be added to a till purchase (`GOOD_NOT_AVAILABLE`).
+    ```json
+    "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00",
+               "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3, "max_days_ahead": 14}
+    ```
+    `weekdays`: 0 = Monday … 6 = Sunday. Times are company-local. Rental goods are created
+    and edited with JSON (not multipart) because of the nested object.
+- Filter the catalogue by `kind` (e.g. the till shows `kind=PRODUCT` and `kind=SERVICE`).
 - **Money is a string**, e.g. `"price": "3.20"`, never a float. Send prices as strings
   too. Display it with the `currency` field (ISO code, e.g. `"USD"`) via `Intl.NumberFormat`,
   and never do price arithmetic with JavaScript floats.
@@ -507,6 +521,33 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
 - `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
 
+### Rentals and bookings
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| GET | `/rentals/` | logged in | Bookable rentals with price per slot, `rental` rules, seller, location and images |
+| GET | `/rentals/{id}/availability/?date=YYYY-MM-DD` | logged in | Every slot of that day: `{start, end, available}` |
+| POST | `/bookings/` | logged in, with a developer profile | `{good, start, slots, pin}` + `Idempotency-Key`. Pays from the balance |
+| GET | `/bookings/me/` | logged in | Own bookings |
+| GET | `/bookings/` | own seller, or `purchase.view` | Bookings of the seller's rentals. Filters: `good`, `seller`, `developer`, `date`, `start_after`, `start_before` |
+
+**Booking flow (developer app):**
+1. List `/rentals/`, then pick a rental and a date → `/availability/`.
+2. Show the slots; only those with `available: true` are selectable. Consecutive slots can be
+   combined, up to `rental.max_slots_per_booking`.
+3. Show the total (`price × slots`), ask for the PIN, and `POST /bookings/` with the first
+   slot's `start` exactly as returned by availability, plus the number of `slots`.
+4. On `201`, show the booking with `total` and `balance_after`.
+
+- **Bookings are exclusive and final.** Nobody else can book an overlapping time, and a
+  booking can't be cancelled or refunded.
+- `SLOT_UNAVAILABLE` (409): someone booked it first, so reload availability.
+  `INVALID_SLOT` (400): off the slot grid, outside opening hours, a closed day, in the
+  past, too far ahead, or too many slots (`details` says which limit).
+- A booking appears in the developer's statement and purchases (`/purchases/me/`) like a
+  till purchase, and in the seller's earnings.
+- Sellers see who booked what at `/bookings/?date=…`, e.g. for a daily schedule screen.
+
 ### Seller finance and payouts
 
 | Method | Path | Permission | Notes |
@@ -574,6 +615,8 @@ before → after table.
 | My earnings and payouts (seller) | `seller-finance/accounts/me/`, `seller-finance/transactions/`, `seller-finance/payouts/` | active seller |
 | Seller balances and payout queue (finance) | `seller-finance/accounts/`, `seller-finance/payouts/?status=REQUESTED` | `seller_finance.view` |
 | My purchases | `purchases/me/` | anyone with a developer profile |
+| Book a rental (list, day view of slots, PIN confirm) and my bookings | `rentals/`, `rentals/{id}/availability/`, `bookings/`, `bookings/me/` | anyone with a developer profile |
+| Rental schedule (seller) | `bookings/?date=` | active seller, or `purchase.view` |
 | Audit log | `audit-logs/` | `audit.view` |
 
 Build the navigation from `me.permissions` so each user only sees their pages.

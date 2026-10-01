@@ -10,7 +10,7 @@ from apps.finance.exceptions import IdempotencyKeyReused
 from apps.finance.models import DeveloperAccount, TransactionKind
 from apps.goods import services as goods
 from apps.goods.exceptions import InsufficientStock
-from apps.goods.models import Good, MovementKind
+from apps.goods.models import Good, GoodKind, MovementKind
 from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
 from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus, ServicePosition
@@ -37,6 +37,10 @@ def _lock_draft(purchase: Purchase) -> Purchase:
 
 
 def _ensure_sellable(good: Good, purchase: Purchase) -> None:
+    if good.kind == GoodKind.RENTAL:
+        raise GoodNotAvailable(
+            "Rentals are booked by developers, not sold at the till.", details={"good": good.pk}
+        )
     if (
         good.deleted_at is not None
         or not good.is_active

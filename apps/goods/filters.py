@@ -11,7 +11,7 @@ class GoodFilter(django_filters.FilterSet):
 
     class Meta:
         model = Good
-        fields = ["seller", "service_position", "is_active", "track_stock", "in_stock"]
+        fields = ["seller", "service_position", "kind", "is_active", "track_stock", "in_stock"]
 
     def filter_in_stock(self, queryset, name, value):
         # Untracked goods are always available.

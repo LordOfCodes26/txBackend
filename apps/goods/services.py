@@ -6,11 +6,12 @@ from django.utils import timezone
 from apps.audit.services import diff, record_audit, snapshot
 
 from .exceptions import InsufficientStock, NoStockChange, StockNotTracked, TooManyImages
-from .models import Good, GoodImage, InventoryMovement, MovementKind
+from .models import Good, GoodImage, GoodKind, InventoryMovement, MovementKind, RentalSettings
 
 GOOD_FIELDS = [
     "service_position",
     "name",
+    "kind",
     "description",
     "sku",
     "price",
@@ -65,10 +66,32 @@ def move_stock(
     return movement
 
 
+RENTAL_FIELDS = [
+    "slot_minutes",
+    "opening_time",
+    "closing_time",
+    "weekdays",
+    "max_slots_per_booking",
+    "max_days_ahead",
+]
+
+
+def _good_snapshot(good: Good) -> dict:
+    values = snapshot(good, GOOD_FIELDS)
+    rental = RentalSettings.objects.filter(good=good).first()
+    if rental is not None:
+        values["rental"] = snapshot(rental, RENTAL_FIELDS)
+    return values
+
+
 @transaction.atomic
-def create_good(*, actor, initial_quantity: int = 0, **data) -> Good:
+def create_good(*, actor, initial_quantity: int = 0, rental: dict | None = None, **data) -> Good:
+    if data.get("kind", GoodKind.PRODUCT) != GoodKind.PRODUCT:
+        data["track_stock"] = False
     good = Good.objects.create(**data)
-    record_audit("good.created", actor=actor, entity=good, new_values=snapshot(good, GOOD_FIELDS))
+    if rental:
+        RentalSettings.objects.create(good=good, **rental)
+    record_audit("good.created", actor=actor, entity=good, new_values=_good_snapshot(good))
     if initial_quantity:
         move_stock(
             good=good,
@@ -82,13 +105,18 @@ def create_good(*, actor, initial_quantity: int = 0, **data) -> Good:
 
 
 @transaction.atomic
-def update_good(*, actor, good: Good, **changes) -> Good:
+def update_good(*, actor, good: Good, rental: dict | None = None, **changes) -> Good:
     good = Good.objects.select_for_update().get(pk=good.pk)
-    before = snapshot(good, GOOD_FIELDS)
+    before = _good_snapshot(good)
     for field, value in changes.items():
         setattr(good, field, value)
     good.save()
-    old, new = diff(before, snapshot(good, GOOD_FIELDS))
+    if rental and good.kind == GoodKind.RENTAL:
+        settings_row = RentalSettings.objects.select_for_update().get(good=good)
+        for field, value in rental.items():
+            setattr(settings_row, field, value)
+        settings_row.save()
+    old, new = diff(before, _good_snapshot(good))
     if new:
         record_audit("good.updated", actor=actor, entity=good, old_values=old, new_values=new)
     return good
@@ -100,7 +128,7 @@ def delete_good(*, actor, good: Good) -> None:
     good.deleted_at = timezone.now()
     good.is_active = False
     good.save(update_fields=["deleted_at", "is_active", "updated_at"])
-    record_audit("good.deleted", actor=actor, entity=good, old_values=snapshot(good, GOOD_FIELDS))
+    record_audit("good.deleted", actor=actor, entity=good, old_values=_good_snapshot(good))
 
 
 @transaction.atomic

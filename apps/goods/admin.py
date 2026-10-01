@@ -14,8 +14,16 @@ class GoodImageInline(admin.TabularInline):
 class GoodAdmin(admin.ModelAdmin):
     """Read-only: prices and stock change through the API so they are audited."""
 
-    list_display = ["name", "service_position", "price", "quantity", "is_active", "deleted_at"]
-    list_filter = ["is_active", "track_stock"]
+    list_display = [
+        "name",
+        "kind",
+        "service_position",
+        "price",
+        "quantity",
+        "is_active",
+        "deleted_at",
+    ]
+    list_filter = ["kind", "is_active", "track_stock"]
     search_fields = ["name", "sku", "service_position__seller__name"]
     inlines = [GoodImageInline]
 
