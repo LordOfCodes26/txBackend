@@ -187,7 +187,7 @@ class RFIDDeviceViewSet(
 ):
     """Deactivate a reader with `PATCH {"is_active": false}`; its key stops working."""
 
-    queryset = RFIDDevice.objects.select_related("service_position__seller", "building")
+    queryset = RFIDDevice.objects.select_related("building")
     serializer_class = RFIDDeviceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {

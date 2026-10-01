@@ -198,16 +198,13 @@ def test_occupancy_permissions(site, auth_client, make_user, role, expected):
 
 @pytest.mark.django_db
 def test_only_attendance_devices_have_buildings(site, auth_client, make_user):
-    from apps.sellers.models import Seller, ServicePosition
 
     client = auth_client(make_user(Roles.MANAGER))
-    position = ServicePosition.objects.create(seller=Seller.objects.create(name="S"), name="P")
     r = client.post(
         "/api/v1/rfid/devices/",
         {
             "code": "TILL-9",
             "purpose": "TILL",
-            "service_position": position.pk,
             "building": site["b1"].pk,
         },
     )
@@ -216,7 +213,6 @@ def test_only_attendance_devices_have_buildings(site, auth_client, make_user):
         RFIDDevice.objects.create(
             code="T",
             purpose="TILL",
-            service_position=position,
             building=site["b1"],
             api_key_hash="x",
             api_key_prefix="x",

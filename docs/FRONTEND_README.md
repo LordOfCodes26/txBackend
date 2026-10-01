@@ -397,21 +397,20 @@ edit pages, not in list tables.
 | `purpose` | Examples | Required / allowed fields | Authentication |
 |---|---|---|---|
 | `ATTENDANCE` | `Door1` (Building 1), `Door2` (Building 2) | `code`, `building`; optional `allowed_ip`, `name`, `location` | Fixed IP (`allowed_ip`) or API key |
-| `TILL` | `Reader1`, `Reader2`, … | `code`, `service_position` (the counter), `sn` (the reader's serial number); no `building`, no `allowed_ip` | **Serial number + ID** (`sn`), or API key |
+| `TILL` | `Reader1`, `Reader2`, … | `code`, `sn` (the reader's serial number); no `building`, no `allowed_ip`. **Not tied to a counter or seller** | **Serial number + ID** (`sn`), or API key |
 
 ```json
 POST /rfid/devices/  {"code": "Door1", "purpose": "ATTENDANCE", "building": 1, "allowed_ip": "10.20.0.11"}
-POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "service_position": 3, "sn": "ZK2024A0001234"}
+POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "sn": "ZK2024A0001234"}
 ```
 
 - `code` must be exactly what the hardware sends as `ID` (`Door1`, `Reader2`, …).
 - Validation errors to show next to the fields: a till with a `building` or `allowed_ip`, an
-  attendance device with a `service_position` or `sn`, a till without a `service_position`,
-  or a serial number already used by another device.
+  attendance device with an `sn`, or a serial number already used by another device.
 - `sn` is shown in full (upper-case) and can be edited; changes are audited.
 - Doors that authenticate by IP don't need their key, but registration still returns one.
   Show it anyway (the door may support it later).
-- Device list columns: `code`, `purpose`, building or counter, `sn` (tills), `allowed_ip`
+- Device list columns: `code`, `purpose`, building (doors), `sn` (tills), `allowed_ip`
   (doors), `online` (heard from in the last 2 minutes), `last_seen_at`, `last_ip`,
   `app_version`, `is_active`.
   `?online=false` lists devices needing attention.
@@ -528,7 +527,9 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position}`: opens a DRAFT bucket |
+| GET | `/purchases/readers/` | own seller, or `purchase.create` | Till readers to choose from: `[{code, name, online}]` |
+| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position, reader}`: opens a DRAFT bucket; `reader` = code of the reader plugged into this PC |
+| POST | `/purchases/{id}/reader/` | same | `{reader}`: switch the draft to another reader (a tap on the old one no longer counts) |
 | POST | `/purchases/{id}/items/` | same | `{good, quantity?}`; adding a good already in the bucket increases its quantity |
 | PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
 | POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the card tapped on the counter's reader |
@@ -541,12 +542,21 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 Every item/confirm/cancel call returns the **whole purchase**, so re-render the bucket from
 the response.
 
+**Which till reader?** A till reader is plugged into the **seller's PC** and can be moved to
+another PC at any time, so it isn't tied to a counter. Instead the **PC says which reader it
+uses**: show a setting "Reader on this PC" (list from `GET /purchases/readers/`), remember
+it on that PC (`localStorage`), and send it with every new purchase. A tap on a reader goes
+to the **newest open purchase using that reader**; the purchase keeps `reader` afterwards,
+so you can always see which till was used. If the reader is moved, the other PC just picks
+it in its setting.
+
 **Till flow:**
-1. Seller picks their service position → `POST /purchases/` (keep the returned `id`).
+1. Seller picks their service position → `POST /purchases/` with `{service_position, reader}`
+   (keep the returned `id`).
 2. Seller adds goods → `POST /purchases/{id}/items/`. `total` and `unit_price` show current prices.
-3. The developer taps their card on the counter's **till reader**. The card-reader program on
-   the seller's computer sends the tap straight to the server (see `DEVICE_INTEGRATION.md`),
-   which attaches it to this purchase. **The web app never reads or sends card numbers.**
+3. The developer taps their card on the **till reader** of this PC. The reader sends the tap
+   straight to the server (see `DEVICE_INTEGRATION.md`), which attaches it to the newest open
+   purchase using that reader, i.e. this one. **The web app never reads or sends card numbers.**
 4. Wait for the tap: listen on the counter's WebSocket (section *Realtime* below) for
    `card_tapped`, or as a fallback poll `GET /purchases/{id}/` every ~1 s until
    `presented_card` is set:
@@ -620,7 +630,7 @@ tapped, with no polling.
 
 | `type` | `data` | Screen action |
 |---|---|---|
-| `card_tapped` | `result`, `accepted`, `display_message`, `developer`, `purchase` (id or null) | Accepted with a purchase: show the name and ask for the PIN. Otherwise show `display_message` in red |
+| `card_tapped` | `result`, `accepted`, `display_message`, `developer`, `purchase` (id or null) | Sent to the counter of the open purchase using the tapped reader. Accepted with a purchase: show the name and ask for the PIN. Otherwise (e.g. blocked card) show `display_message` in red |
 | `purchase_updated` | the full purchase (as `GET /purchases/{id}/`) | Re-render the bucket (useful for a second, customer-facing screen) |
 | `purchase_confirmed` | the full purchase, incl. `total`, `balance_after`, `developer` | Show "Paid" and start a new purchase |
 | `purchase_cancelled` | the full purchase | Clear the bucket |

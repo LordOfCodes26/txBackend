@@ -3,7 +3,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -52,9 +51,7 @@ def shop(db, make_user):
     tea = Good.objects.create(
         service_position=counter, name="Tea", price="2.50", kind="SERVICE", track_stock=False
     )
-    till, till_key = rfid.register_device(
-        actor=None, code="TILL-CAFE-1", purpose="TILL", service_position=counter
-    )
+    till, till_key = rfid.register_device(actor=None, code="TILL-CAFE-1", purpose="TILL")
     seller_client = APIClient()
     seller_client.force_authenticate(seller_user)
     return {
@@ -69,7 +66,9 @@ def shop(db, make_user):
 
 def open_purchase(shop, qty=2):
     client = shop["seller_client"]
-    pid = client.post(PURCHASES, {"service_position": shop["counter"].pk}).json()["id"]
+    pid = client.post(
+        PURCHASES, {"service_position": shop["counter"].pk, "reader": "TILL-CAFE-1"}
+    ).json()["id"]
     client.post(f"{PURCHASES}{pid}/items/", {"good": shop["tea"].pk, "quantity": qty})
     return pid
 
@@ -88,22 +87,23 @@ def confirm(shop, pid, **body):
 
 
 @pytest.mark.django_db
-def test_till_devices_need_a_counter(auth_client, make_user, shop):
+def test_till_devices_have_no_counter(auth_client, make_user, shop):
     client = auth_client(make_user(Roles.MANAGER))
     r = client.post("/api/v1/rfid/devices/", {"code": "TILL-2", "purpose": "TILL"})
-    assert "service_position" in r.json()["error"]["details"]
-    r = client.post(
-        "/api/v1/rfid/devices/",
-        {"code": "READER-9", "purpose": "ATTENDANCE", "service_position": shop["counter"].pk},
-    )
-    assert "service_position" in r.json()["error"]["details"]
-    r = client.post(
-        "/api/v1/rfid/devices/",
-        {"code": "TILL-2", "purpose": "TILL", "service_position": shop["counter"].pk},
-    )
     assert r.status_code == 201 and r.json()["api_key"]
-    with pytest.raises(IntegrityError), transaction.atomic():
-        RFIDDevice.objects.filter(code="TILL-2").update(service_position=None)
+    assert "service_position" not in r.json()
+
+
+@pytest.mark.django_db
+def test_sellers_list_readers_and_switch_them(shop):
+    client = shop["seller_client"]
+    codes = [r["code"] for r in client.get(f"{PURCHASES}readers/").json()]
+    assert codes == ["TILL-CAFE-1"]
+    rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
+    pid = open_purchase(shop)
+    r = client.post(f"{PURCHASES}{pid}/reader/", {"reader": "TILL-2"})
+    assert r.json()["reader"] == "TILL-2"
+    assert client.post(f"{PURCHASES}{pid}/reader/", {"reader": "Door9"}).status_code == 400
 
 
 # --- Till flow -------------------------------------------------------------------------
@@ -174,15 +174,35 @@ def test_newest_tap_wins(shop):
 def test_tap_without_open_purchase(shop):
     _, card = make_developer(1)
     body = tap(shop, card).json()
-    assert (body["purchase"], body["display_message"]) == (None, "No open purchase at this counter")
+    assert (body["purchase"], body["display_message"]) == (None, "No open purchase for this reader")
 
 
 @pytest.mark.django_db
-def test_tap_only_reaches_its_own_counter(shop):
+def test_tap_only_reaches_purchases_using_that_reader(shop):
     _, card = make_developer(1)
+    rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
     other = ServicePosition.objects.create(seller=shop["seller"], name="Counter 2")
-    shop["seller_client"].post(PURCHASES, {"service_position": other.pk})
+    shop["seller_client"].post(PURCHASES, {"service_position": other.pk, "reader": "TILL-2"})
+    shop["seller_client"].post(PURCHASES, {"service_position": other.pk})  # no reader
     assert tap(shop, card).json()["purchase"] is None
+
+
+@pytest.mark.django_db
+def test_reader_moved_to_another_pc(shop):
+    """The reader is plugged into another PC: that PC's purchase now gets the taps."""
+    _, card = make_developer(1)
+    first = open_purchase(shop)
+    other = ServicePosition.objects.create(seller=shop["seller"], name="Counter 2")
+    second = (
+        shop["seller_client"]
+        .post(PURCHASES, {"service_position": other.pk, "reader": "TILL-CAFE-1"})
+        .json()["id"]
+    )
+    assert tap(shop, card).json()["purchase"] == second
+    # Moved back: the first PC selects the reader again for its open purchase.
+    shop["seller_client"].post(f"{PURCHASES}{second}/cancel/")
+    shop["seller_client"].post(f"{PURCHASES}{first}/reader/", {"reader": "TILL-CAFE-1"})
+    assert tap(shop, card).json()["purchase"] == first
 
 
 @pytest.mark.django_db
@@ -221,8 +241,8 @@ def test_heartbeat_reports_config_and_marks_online(auth_client, make_user, shop)
     )
     assert r.status_code == 200
     body = r.json()
-    assert (body["code"], body["purpose"], body["seller_name"]) == ("TILL-CAFE-1", "TILL", "Cafe")
-    assert body["service_position_name"] == "Counter 1"
+    assert (body["code"], body["purpose"]) == ("TILL-CAFE-1", "TILL")
+    assert "service_position" not in body
     assert abs(timezone.datetime.fromisoformat(body["server_time"]) - timezone.now()) < timedelta(
         seconds=5
     )

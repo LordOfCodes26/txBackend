@@ -124,7 +124,6 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "location",
             "purpose",
             "building",
-            "service_position",
             "direction",
             "allowed_ip",
             "sn",
@@ -148,15 +147,6 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         purpose = attrs.get("purpose", getattr(self.instance, "purpose", DevicePurpose.ATTENDANCE))
-        position = attrs.get("service_position", getattr(self.instance, "service_position", None))
-        if purpose == DevicePurpose.TILL and position is None:
-            raise serializers.ValidationError(
-                {"service_position": ["TILL devices must belong to a service position."]}
-            )
-        if purpose != DevicePurpose.TILL and position is not None:
-            raise serializers.ValidationError(
-                {"service_position": ["Only TILL devices belong to a service position."]}
-            )
         building = attrs.get("building", getattr(self.instance, "building", None))
         if purpose != DevicePurpose.ATTENDANCE and building is not None:
             raise serializers.ValidationError(
@@ -346,7 +336,7 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         if obj.result in ("ACCEPTED", "DUPLICATE") and obj.developer is not None:
             if obj.device.purpose == DevicePurpose.TILL:
                 if self.get_purchase(obj) is None:
-                    return "No open purchase at this counter"
+                    return "No open purchase for this reader"
                 return f"{obj.developer.full_name} - enter PIN"
             if obj.direction == "OUT":
                 return f"Goodbye, {obj.developer.full_name}"
@@ -431,12 +421,6 @@ class DeviceConfigSerializer(serializers.ModelSerializer):
     heartbeat_seconds = serializers.SerializerMethodField()
     debounce_seconds = serializers.SerializerMethodField()
     max_future_skew_seconds = serializers.SerializerMethodField()
-    service_position_name = serializers.CharField(
-        source="service_position.name", read_only=True, default=None
-    )
-    seller_name = serializers.CharField(
-        source="service_position.seller.name", read_only=True, default=None
-    )
 
     class Meta:
         model = RFIDDevice
@@ -446,9 +430,6 @@ class DeviceConfigSerializer(serializers.ModelSerializer):
             "location",
             "purpose",
             "direction",
-            "service_position",
-            "service_position_name",
-            "seller_name",
             "server_time",
             "heartbeat_seconds",
             "debounce_seconds",

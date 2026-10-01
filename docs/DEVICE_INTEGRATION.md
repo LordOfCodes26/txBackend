@@ -5,7 +5,7 @@ How RFID devices talk to the backend. Two kinds of devices connect over the netw
 | Purpose | What it is | A scan means |
 |---|---|---|
 | `ATTENDANCE` | Door device of a building (`Door1` = Building 1, `Door2` = Building 2) | The developer came in or went out (attendance) |
-| `TILL` | The card-reader **program on a seller's computer** | The developer is paying at this counter |
+| `TILL` | Till reader **plugged into a seller's PC** (can be moved to another PC) | The developer is paying for the purchase that uses this reader |
 
 Both use the same authentication, scan endpoint and heartbeat. Differences are called out
 below.
@@ -22,13 +22,14 @@ POST /api/v1/rfid/devices/
  "direction": "IN"}
 
 POST /api/v1/rfid/devices/
-{"code": "Reader1", "name": "Cafe counter 1", "purpose": "TILL", "service_position": 3}
+{"code": "Reader1", "name": "Till reader 1", "purpose": "TILL", "sn": "ZK2024A0001234"}
 ```
 
 - The response contains `api_key` **once**. Store it in the device's or program's
   configuration file, readable only by the program's user account.
-- A `TILL` device belongs to exactly one **service position** (the seller's counter). Taps
-  on it go to purchases at that counter.
+- A `TILL` reader is **not tied to a counter or seller**: it's plugged into a seller's PC
+  and may be moved. The seller's screen chooses which reader it uses, and each purchase
+  records that reader.
 - A lost or leaked key: `POST /api/v1/rfid/devices/{id}/rotate-key/` returns a new key, and
   the old one stops working immediately.
 - To retire a device: `PATCH /api/v1/rfid/devices/{id}/ {"is_active": false}`.
@@ -139,9 +140,8 @@ Response:
 
 ```json
 {
-  "code": "Reader1", "name": "Cafe counter 1", "location": "", "purpose": "TILL",
-  "direction": "BOTH", "service_position": 3, "service_position_name": "Counter 1",
-  "seller_name": "Demo Cafe",
+  "code": "Reader1", "name": "Till reader 1", "location": "", "purpose": "TILL",
+  "direction": "BOTH",
   "server_time": "2026-10-01T09:00:00.123456+00:00",
   "heartbeat_seconds": 30, "debounce_seconds": 10, "max_future_skew_seconds": 300
 }
@@ -153,8 +153,8 @@ Response:
   seconds, correct the time you send with scans by that offset, or better, sync the device
   to a local time server (NTP). Scans timestamped more than `max_future_skew_seconds` in the
   future are rejected.
-- Use the response to display the configuration, e.g. "Demo Cafe / Counter 1", so staff can
-  see the program is set up for the right counter.
+- Use the response to display the configuration (e.g. "Reader1"), so staff can see the
+  device is set up correctly.
 
 ---
 
@@ -253,7 +253,7 @@ or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Rea
 | `UID` | Card UID |
 
 - Register each reader with its serial number: `POST /api/v1/rfid/devices/
-  {"code": "Reader1", "purpose": "TILL", "service_position": 3, "sn": "ZK2024A0001234"}`.
+  {"code": "Reader1", "purpose": "TILL", "sn": "ZK2024A0001234"}`.
   Each serial number can belong to only one device.
 - Both `SN` and `ID` must match an active till reader, otherwise the reply is `401`
   ("Unknown till reader ID or serial number"). After **10 failed attempts from one
@@ -266,10 +266,11 @@ or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Rea
   share device lists). An API key (`Authorization: Device <key>`) is still accepted as a
   stronger alternative.
 
-- The server attaches an accepted tap to the **newest open (DRAFT) purchase at the
-  device's counter**, and returns its id in `purchase`. If no purchase is open,
-  `purchase` is `null` and the message says "No open purchase at this counter". The seller
-  should start the purchase first, then let the developer tap.
+- The server attaches an accepted tap to the **newest open (DRAFT) purchase that uses this
+  reader** (the seller's PC chose it), and returns its id in `purchase`. If none is open,
+  `purchase` is `null` and the message says "No open purchase for this reader". The seller
+  should start the purchase first, then let the developer tap. Moving the reader to another
+  PC needs no change here; that PC simply selects the reader.
 - The seller's browser shows who tapped (`presented_card` on the purchase) and asks the
   developer for their PIN. **The browser never sends the card number**, so it must come
   from this program.
@@ -278,22 +279,11 @@ or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Rea
 - **Never buffer till taps.** If the server can't be reached, show "Offline - cannot pay
   right now" and discard the tap. A late tap would be ignored anyway.
 
-### Live counter events for the till program (optional)
+### Live events for till programs
 
-Besides the immediate reply to each tap, a TILL program can listen to its counter's live
-events, e.g. to show "Paid ✓ Ada Lovelace" when the seller confirms:
-
-```
-wss://<server>/ws/counters/<service_position_id>/
-Authorization: Device <api_key>          (sent as a header on the WebSocket handshake)
-```
-
-The `service_position` id is in the heartbeat response. Messages are JSON
-`{"type", "service_position", "sent_at", "data"}` with types `card_tapped`,
-`purchase_updated`, `purchase_confirmed` (data includes `total`, `balance_after`,
-`developer`) and `purchase_cancelled`. The connection is closed with code `4401` for a bad
-key and `4403` if the key belongs to another counter. Reconnect with backoff if it drops;
-events missed while disconnected are not replayed.
+Till readers aren't tied to a counter, so they don't subscribe to a counter's live channel.
+The result of every tap comes back in the reply to the program's own request (above). The
+seller's screen receives the live events.
 
 ---
 

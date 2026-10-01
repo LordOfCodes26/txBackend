@@ -58,20 +58,15 @@ class Command(BaseCommand):
                 self.stdout.write(f"Door device {code} API key (shown only now): {door_key}")
             created = True
         if not rfid.RFIDDevice.objects.filter(purpose="TILL").exists():
-            counter = ServicePosition.objects.filter(
-                seller__name="Demo Cafe", name="Counter 1"
-            ).first()
-            if counter is not None:
-                _, till_key = rfid.register_device(
-                    actor=None,
-                    code="Reader1",
-                    name="Cafe counter 1 reader",
-                    purpose="TILL",
-                    service_position=counter,
-                )
-                self.stdout.write(self.style.SUCCESS("Demo till device created."))
-                self.stdout.write(f"Till Reader1 API key (shown only now): {till_key}")
-                created = True
+            _, till_key = rfid.register_device(
+                actor=None,
+                code="Reader1",
+                name="Till reader 1",
+                purpose="TILL",
+                sn="SN-DEMO-0001",
+            )
+            self.stdout.write(self.style.SUCCESS("Demo till reader Reader1 (SN-DEMO-0001)."))
+            created = True
         if not AccountTransaction.objects.filter(idempotency_key__startswith="demo-").exists():
             self._deposits()
             self.stdout.write(self.style.SUCCESS("Demo deposits created."))

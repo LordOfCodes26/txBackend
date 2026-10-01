@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
@@ -50,6 +52,7 @@ class PresentedCardSerializer(serializers.Serializer):
 class PurchaseSerializer(serializers.ModelSerializer):
     seller = SellerSummarySerializer(read_only=True)
     service_position_name = serializers.CharField(source="service_position.name", read_only=True)
+    reader = serializers.SlugRelatedField(slug_field="code", read_only=True)
     developer = DeveloperSummarySerializer(read_only=True)
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
     items = PurchaseItemSerializer(many=True, read_only=True)
@@ -72,6 +75,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "seller",
             "service_position",
             "service_position_name",
+            "reader",
             "items",
             "total",
             "currency",
@@ -106,9 +110,32 @@ class PurchaseSerializer(serializers.ModelSerializer):
         return settings.CURRENCY
 
 
+def _readers():
+    from apps.rfid.models import DevicePurpose, RFIDDevice
+
+    return RFIDDevice.objects.filter(purpose=DevicePurpose.TILL, is_active=True)
+
+
+@extend_schema_field(OpenApiTypes.STR)
+class ReaderField(serializers.SlugRelatedField):
+    """A till reader by its code, e.g. "Reader2"."""
+
+    def __init__(self, **kwargs):
+        super().__init__(slug_field="code", **kwargs)
+
+    def get_queryset(self):
+        return _readers()
+
+
 class PurchaseCreateSerializer(serializers.Serializer):
     service_position = serializers.PrimaryKeyRelatedField(
         queryset=ServicePosition.objects.select_related("seller")
+    )
+    reader = ReaderField(
+        required=False,
+        allow_null=True,
+        help_text="Code of the till reader plugged into this PC (e.g. Reader2); taps on it "
+        "pay this purchase.",
     )
 
     def validate_service_position(self, position):
@@ -116,6 +143,16 @@ class PurchaseCreateSerializer(serializers.Serializer):
         if own is not None and position.seller_id != own.pk:
             raise serializers.ValidationError("You can only sell at your own service positions.")
         return position
+
+
+class SetReaderSerializer(serializers.Serializer):
+    reader = ReaderField(allow_null=True)
+
+
+class TillReaderSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    name = serializers.CharField()
+    online = serializers.BooleanField(source="is_online")
 
 
 class ItemAddSerializer(serializers.Serializer):

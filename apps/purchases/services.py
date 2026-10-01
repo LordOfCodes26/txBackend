@@ -67,11 +67,28 @@ def _ensure_seller_active(position: ServicePosition) -> None:
 
 
 @transaction.atomic
-def create_purchase(*, actor, service_position: ServicePosition) -> Purchase:
+def create_purchase(*, actor, service_position: ServicePosition, reader=None) -> Purchase:
     _ensure_seller_active(service_position)
     return Purchase.objects.create(
-        seller=service_position.seller, service_position=service_position, created_by=actor
+        seller=service_position.seller,
+        service_position=service_position,
+        created_by=actor,
+        reader=reader,
     )
+
+
+@transaction.atomic
+def set_reader(*, purchase: Purchase, reader) -> Purchase:
+    """Switch the till reader of a draft (e.g. the reader was plugged into another PC).
+    A card tapped on the previous reader no longer counts."""
+    purchase = _lock_draft(purchase)
+    if purchase.reader_id != getattr(reader, "pk", None):
+        purchase.reader = reader
+        purchase.presented_event = None
+        purchase.presented_at = None
+        purchase.save(update_fields=["reader", "presented_event", "presented_at", "updated_at"])
+        notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
+    return purchase
 
 
 @transaction.atomic
@@ -130,11 +147,11 @@ def cancel_purchase(*, actor, purchase: Purchase) -> Purchase:
 
 
 def present_card(event) -> Purchase | None:
-    """Attach an accepted TILL scan to the newest draft purchase at that device's counter.
+    """Attach an accepted TILL scan to the newest draft purchase using that reader.
 
     The seller's screen polls the purchase and shows who tapped; checkout then charges
     that card. A newer tap replaces an older one. Stale scans (e.g. replayed late) are
-    ignored. Returns the purchase, or None when the counter has no open draft.
+    ignored. Returns the purchase, or None when no open draft uses this reader.
     """
     window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
     if event.event_time < timezone.now() - window:
@@ -142,9 +159,7 @@ def present_card(event) -> Purchase | None:
     with transaction.atomic():
         purchase = (
             Purchase.objects.select_for_update()
-            .filter(
-                service_position_id=event.device.service_position_id, status=PurchaseStatus.DRAFT
-            )
+            .filter(reader_id=event.device_id, status=PurchaseStatus.DRAFT)
             .order_by("-created_at", "-id")
             .first()
         )

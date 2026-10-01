@@ -151,14 +151,6 @@ class RFIDDevice(TimeStampedModel):
         related_name="devices",
         help_text="ATTENDANCE devices: the building whose door this is (for occupancy).",
     )
-    service_position = models.ForeignKey(
-        "sellers.ServicePosition",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="till_devices",
-        help_text="TILL devices only: the counter whose purchases receive this reader's taps.",
-    )
     sn = models.CharField(
         max_length=100,
         blank=True,
@@ -194,13 +186,6 @@ class RFIDDevice(TimeStampedModel):
                 name="rfid_only_till_devices_have_sn",
             ),
             models.UniqueConstraint("sn", condition=~Q(sn=""), name="rfid_device_sn_unique"),
-            models.CheckConstraint(
-                condition=(
-                    Q(purpose=DevicePurpose.TILL, service_position__isnull=False)
-                    | (~Q(purpose=DevicePurpose.TILL) & Q(service_position__isnull=True))
-                ),
-                name="rfid_till_device_has_position",
-            ),
         ]
         verbose_name = "RFID device"
 

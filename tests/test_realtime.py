@@ -30,9 +30,7 @@ def shop(make_user):
     tea = Good.objects.create(
         service_position=counter, name="Tea", price="2.50", kind="SERVICE", track_stock=False
     )
-    till, till_key = rfid.register_device(
-        actor=None, code="TILL-1", purpose="TILL", service_position=counter
-    )
+    till, till_key = rfid.register_device(actor=None, code="TILL-1", purpose="TILL")
     dev = Developer.objects.create(employee_number="E1", full_name="Ada Lovelace")
     card = RFIDCard.objects.create(uid="04AA000001")
     RFIDCardAssignment.objects.create(card=card, developer=dev)
@@ -84,7 +82,7 @@ def test_seller_screen_receives_tap_update_and_confirmation(shop):
         assert '"connected"' in hello["text"]
 
         purchase = await sync_to_async(purchases.create_purchase)(
-            actor=shop["seller_user"], service_position=shop["counter"]
+            actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
         )
         await sync_to_async(purchases.add_item)(purchase=purchase, good=shop["tea"], quantity=2)
         updated = await comm.receive_json_from(timeout=3)
@@ -115,6 +113,9 @@ def test_seller_screen_receives_tap_update_and_confirmation(shop):
 
 def test_rejected_tap_is_pushed_too(shop):
     RFIDCard.objects.filter(pk=shop["card"].pk).update(status="BLOCKED")
+    purchases.create_purchase(
+        actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
+    )
     ticket = issue_ticket(shop["seller_user"])
 
     async def scenario():
@@ -131,19 +132,13 @@ def test_rejected_tap_is_pushed_too(shop):
     run(scenario)
 
 
-def test_till_program_can_listen_with_its_device_key(shop):
+def test_till_devices_cannot_listen_on_counters(shop):
+    # Readers aren't tied to a counter; a till program learns each tap's result from the
+    # reply to its own request.
     headers = [(b"authorization", f"Device {shop['till_key']}".encode())]
 
     async def scenario():
-        comm, hello = await open_ws(path(shop["counter"]), headers)
-        assert '"device:TILL-1"' in hello["text"]
-        purchase = await sync_to_async(purchases.create_purchase)(
-            actor=shop["seller_user"], service_position=shop["counter"]
-        )
-        await sync_to_async(purchases.cancel_purchase)(actor=shop["seller_user"], purchase=purchase)
-        event = await comm.receive_json_from(timeout=3)
-        assert (event["type"], event["data"]["status"]) == ("purchase_cancelled", "CANCELLED")
-        await comm.disconnect()
+        assert await expect_close(path(shop["counter"]), headers) == 4403
 
     run(scenario)
 
@@ -167,12 +162,7 @@ def test_other_counters_do_not_receive_events(shop):
 def test_connection_rules(shop, make_user):
     other_seller_user = make_user(Roles.SELLER)
     Seller.objects.create(name="Other", user=other_seller_user)
-    other_counter = ServicePosition.objects.create(
-        seller=Seller.objects.get(name="Other"), name="P"
-    )
-    _, other_till_key = rfid.register_device(
-        actor=None, code="TILL-2", purpose="TILL", service_position=other_counter
-    )
+    _, other_till_key = rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
     staff = make_user(Roles.SELLER_MANAGER)  # has purchase.view
     used = issue_ticket(shop["seller_user"])
 
@@ -215,7 +205,7 @@ def test_purchase_succeeds_when_realtime_is_down(shop, monkeypatch):
 
     monkeypatch.setattr("apps.realtime.notify.get_channel_layer", lambda: BrokenLayer())
     purchase = purchases.create_purchase(
-        actor=shop["seller_user"], service_position=shop["counter"]
+        actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
     )
     purchases.add_item(purchase=purchase, good=shop["tea"], quantity=1)
     rfid.record_scan(device=shop["till"], uid=shop["card"].uid)

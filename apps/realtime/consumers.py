@@ -18,7 +18,6 @@ def _authorize(position_id: int, ticket: str, device_key: str):
     - the counter's own active seller, or users with purchase.view (ticket)."""
     from apps.accounts.models import User
     from apps.rfid.authentication import device_for_key
-    from apps.rfid.models import DevicePurpose
     from apps.sellers.access import acting_seller
     from apps.sellers.models import ServicePosition
 
@@ -28,9 +27,9 @@ def _authorize(position_id: int, ticket: str, device_key: str):
         device = device_for_key(device_key)
         if device is None:
             return False, CLOSE_UNAUTHENTICATED, None
-        if device.purpose != DevicePurpose.TILL or device.service_position_id != position_id:
-            return False, CLOSE_FORBIDDEN, None
-        return True, None, f"device:{device.code}"
+        # Readers aren't tied to a counter, so devices can't follow a counter's channel;
+        # a till program gets the result of each tap in the reply to its request.
+        return False, CLOSE_FORBIDDEN, None
 
     user_id = redeem_ticket(ticket)
     user = User.objects.filter(pk=user_id, is_active=True).first() if user_id else None

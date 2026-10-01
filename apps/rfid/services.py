@@ -35,7 +35,6 @@ DEVICE_FIELDS = [
     "purpose",
     "direction",
     "building",
-    "service_position",
     "allowed_ip",
     "sn",
     "is_active",

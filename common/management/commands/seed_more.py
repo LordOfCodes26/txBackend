@@ -192,27 +192,19 @@ class Command(BaseCommand):
         self.stdout.write("Created Demo Bakery with 6 goods.")
 
     def _readers(self):
-        with_reader = set(
-            RFIDDevice.objects.filter(purpose=DevicePurpose.TILL).values_list(
-                "service_position_id", flat=True
-            )
-        )
-        n = RFIDDevice.objects.filter(purpose=DevicePurpose.TILL).count()
-        for position in ServicePosition.objects.filter(is_active=True).exclude(pk__in=with_reader):
-            sellable = position.goods.exclude(kind=GoodKind.RENTAL).exists()
-            if not sellable:
-                continue
-            n += 1
-            rfid.register_device(
-                actor=None,
-                code=f"Reader{n}",
-                name=f"{position.seller.name} / {position.name}",
-                purpose=DevicePurpose.TILL,
-                service_position=position,
-                sn=f"SN-DEMO-{n:04d}",
-            )
-            self.stdout.write(f"Till reader Reader{n} (SN-DEMO-{n:04d}) → {position}")
-        # Make sure the original demo reader has a serial number too.
+        """Till readers aren't tied to counters (they're plugged into sellers' PCs, which
+        choose their reader); just make sure Reader1-4 exist with serial numbers."""
+        for n in range(1, 5):
+            code, sn = f"Reader{n}", f"SN-DEMO-{n:04d}"
+            if not RFIDDevice.objects.filter(code=code).exists():
+                rfid.register_device(
+                    actor=None,
+                    code=code,
+                    name=f"Till reader {n}",
+                    purpose=DevicePurpose.TILL,
+                    sn=sn,
+                )
+                self.stdout.write(f"Till reader {code} ({sn})")
         RFIDDevice.objects.filter(code="Reader1", sn="").update(sn="SN-DEMO-0001")
 
     # -- activity ------------------------------------------------------------------------

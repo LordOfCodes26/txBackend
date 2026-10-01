@@ -18,6 +18,8 @@ from .serializers import (
     ItemUpdateSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
+    SetReaderSerializer,
+    TillReaderSerializer,
 )
 
 SELLER_ACTIONS = (
@@ -26,6 +28,8 @@ SELLER_ACTIONS = (
     "create",
     "add_item",
     "item",
+    "set_reader",
+    "readers",
     "confirm",
     "cancel",
 )
@@ -51,6 +55,7 @@ class PurchaseViewSet(
         "card",
         "account_transaction",
         "presented_event__developer",
+        "reader",
     ).prefetch_related("items__good")
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]
@@ -60,6 +65,8 @@ class PurchaseViewSet(
         "create": ["purchase.create"],
         "add_item": ["purchase.create"],
         "item": ["purchase.create"],
+        "set_reader": ["purchase.create"],
+        "readers": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
         "me": [],
@@ -94,6 +101,24 @@ class PurchaseViewSet(
         serializer.is_valid(raise_exception=True)
         purchase = services.create_purchase(actor=request.user, **serializer.validated_data)
         return self._respond(purchase, status.HTTP_201_CREATED)
+
+    @extend_schema(responses=TillReaderSerializer(many=True))
+    @action(detail=False, methods=["get"])
+    def readers(self, request):
+        """Till readers to choose from ("which reader is plugged into this PC?")."""
+        from .serializers import _readers
+
+        return Response(TillReaderSerializer(_readers().order_by("code"), many=True).data)
+
+    @extend_schema(request=SetReaderSerializer, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="reader")
+    def set_reader(self, request, pk=None):
+        """Use another till reader for this draft (the reader moved to another PC)."""
+        purchase = self.get_object()
+        serializer = SetReaderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.set_reader(purchase=purchase, reader=serializer.validated_data["reader"])
+        return self._respond(purchase)
 
     @extend_schema(request=ItemAddSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="items")

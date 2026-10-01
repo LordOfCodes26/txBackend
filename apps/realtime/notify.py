@@ -80,12 +80,24 @@ def notify_card_tapped(event) -> None:
     """A card was tapped on a counter's TILL reader (accepted or not)."""
     from apps.rfid.serializers import ScanResponseSerializer
 
-    position_id = event.device.service_position_id
-
     def send():
+        # Readers aren't tied to a counter: show the tap on the counter of the purchase it
+        # was attached to, or (e.g. a blocked card, which is never attached) on the counter
+        # of the newest open purchase using this reader. With no such purchase, only the
+        # device's own reply reports the tap.
+        from apps.purchases.models import Purchase, PurchaseStatus
+
+        purchase = (
+            Purchase.objects.filter(presented_event=event).first()
+            or Purchase.objects.filter(reader_id=event.device_id, status=PurchaseStatus.DRAFT)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if purchase is None:
+            return
         data = dict(ScanResponseSerializer(event).data)
         data.pop("client_event_id", None)
-        _send(position_id, "card_tapped", data)
+        _send(purchase.service_position_id, "card_tapped", data)
 
     transaction.on_commit(send)
 

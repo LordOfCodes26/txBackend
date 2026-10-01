@@ -101,10 +101,8 @@ def test_invalid_fields_are_reported(setup):
 
 @pytest.mark.django_db
 def test_till_devices_cannot_use_tcp(setup):
-    from apps.sellers.models import Seller, ServicePosition
 
-    position = ServicePosition.objects.create(seller=Seller.objects.create(name="S"), name="P")
-    rfid.register_device(actor=None, code="Reader1", purpose="TILL", service_position=position)
+    rfid.register_device(actor=None, code="Reader1", purpose="TILL")
     reply = handle_frame(frame(ID="Reader1", Type="pay", UID="04A2B3C4"), DOOR_IP)
     assert reply["result"] == "ERROR"
 

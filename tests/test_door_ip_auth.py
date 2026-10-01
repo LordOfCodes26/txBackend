@@ -141,16 +141,13 @@ def test_heartbeat_and_batch_by_ip(doors):
 
 
 def test_only_attendance_devices_may_use_ip(auth_client, make_user, doors):
-    from apps.sellers.models import Seller, ServicePosition
 
-    position = ServicePosition.objects.create(seller=Seller.objects.create(name="S"), name="P")
     client = auth_client(make_user(Roles.MANAGER))
     r = client.post(
         "/api/v1/rfid/devices/",
         {
             "code": "TILL-9",
             "purpose": "TILL",
-            "service_position": position.pk,
             "allowed_ip": "10.20.0.50",
         },
     )
@@ -159,7 +156,6 @@ def test_only_attendance_devices_may_use_ip(auth_client, make_user, doors):
         RFIDDevice.objects.create(
             code="T",
             purpose="TILL",
-            service_position=position,
             allowed_ip="10.20.0.51",
             api_key_hash="x",
             api_key_prefix="x",

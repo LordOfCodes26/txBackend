@@ -9,6 +9,9 @@ from .base import REST_FRAMEWORK  # noqa: E402
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+# Independent of whatever a developer's .env says; tests opt into other values.
+ATTENDANCE_DIRECTION_RULE = "none"
+TEST_CONSOLE_ENABLED = False
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"auth": "1000/min"}

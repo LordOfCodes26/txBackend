@@ -101,8 +101,9 @@
     <h2>Till <span><span id="tillDot" class="dot"></span><small id="tillState" class="muted">no counter</small></span></h2>
     <div class="row">
       <div><label>Counter</label><select id="counter"></select></div>
-      <div><label>Reader (ID / SN)</label><input id="reader" readonly></div>
+      <div><label>Reader plugged into this PC</label><select id="readerSel"></select></div>
     </div>
+    <small class="muted" id="readerInfo"></small>
     <div class="row" style="margin-top:10px">
       <button id="newPurchase">New purchase</button>
       <button class="danger" id="cancelPurchase" disabled>Cancel</button>
@@ -248,6 +249,9 @@ async function loadData() {
   $("door").innerHTML = state.doors.map(d => `<option value="${esc(d.code)}">${esc(d.code)}${d.location ? " · " + esc(d.location) : ""}</option>`).join("");
   const cardOpts = state.cards.map(c => `<option value="${esc(c.uid)}">${esc(c.current_assignment.developer.full_name)} (${esc(c.current_assignment.developer.employee_number)}) · ${esc(c.uid)}</option>`).join("");
   $("doorCard").innerHTML = cardOpts; $("tillCard").innerHTML = cardOpts;
+  $("readerSel").innerHTML = state.readers.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.name ? " · " + esc(r.name) : ""}</option>`).join("");
+  try { const saved = localStorage.getItem("tillReader"); if (saved) $("readerSel").value = saved; } catch {}
+  showReader();
   $("counter").innerHTML = `<option value="">— choose —</option>` + state.positions
     .map(p => `<option value="${p.id}">${esc(p.seller_detail.name)} / ${esc(p.name)}</option>`).join("");
   log("info", `${state.doors.length} doors, ${state.readers.length} till readers, ${state.cards.length} cards, ${state.positions.length} counters`);
@@ -300,11 +304,22 @@ $("loadInside").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- till
-const reader = () => state.readers.find(r => String(r.service_position) === $("counter").value);
+const reader = () => state.readers.find(r => r.code === $("readerSel").value);
+function showReader() {
+  const rd = reader();
+  $("readerInfo").textContent = rd ? `${rd.code} sends SN ${rd.sn || "(none)"} — remembered on this PC` : "No till readers registered";
+}
+$("readerSel").onchange = async () => {
+  try { localStorage.setItem("tillReader", $("readerSel").value); } catch {}
+  showReader();
+  // An open purchase follows the reader change.
+  if (state.purchase && state.purchase.status === "DRAFT") {
+    const r = await api(`/purchases/${state.purchase.id}/reader/`, { method: "POST", body: { reader: $("readerSel").value } });
+    if (r.ok) { state.purchase = r.data; renderBucket(); }
+  }
+};
 $("counter").onchange = async () => {
   state.purchase = null; renderBucket();
-  const rd = reader();
-  $("reader").value = rd ? `${rd.code} / ${rd.sn || "(no SN)"}` : "no till reader at this counter";
   const goods = $("counter").value ? await getAll(`/goods/?service_position=${$("counter").value}&is_active=true&page_size=200`) : [];
   $("goods").innerHTML = goods.filter(g => g.kind !== "RENTAL").map(g =>
     `<button data-id="${g.id}" title="${g.track_stock ? "stock " + g.quantity : "no stock tracking"}">${esc(g.name)} · ${esc(g.price)}</button>`).join("")
@@ -341,12 +356,12 @@ function renderBucket() {
   $("cancelPurchase").disabled = !p || p.status !== "DRAFT";
   if (!p) { tbody.innerHTML = `<tr><td class="muted">No purchase yet</td></tr>`; return; }
   const rows = p.items.map(i => `<tr><td>${esc(i.good_name)}</td><td>× ${i.quantity}</td><td>${esc(i.unit_price)}</td><td>${esc(i.line_total)}</td></tr>`);
-  rows.push(`<tr><td><b>#${p.id} · ${esc(p.status)}</b></td><td></td><td>Total</td><td><b>${esc(p.total)} ${esc(p.currency)}</b></td></tr>`);
+  rows.push(`<tr><td><b>#${p.id} · ${esc(p.status)}</b></td><td>${esc(p.reader || "no reader")}</td><td>Total</td><td><b>${esc(p.total)} ${esc(p.currency)}</b></td></tr>`);
   tbody.innerHTML = rows.join("");
 }
 $("newPurchase").onclick = async () => {
   if (!$("counter").value) return alert("Choose a counter first");
-  const r = await api("/purchases/", { method: "POST", body: { service_position: Number($("counter").value) } });
+  const r = await api("/purchases/", { method: "POST", body: { service_position: Number($("counter").value), reader: $("readerSel").value || null } });
   if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
   state.purchase = r.data; renderBucket();
   ["presented", "payStatus", "pinBox"].forEach(id => $(id).classList.add("hidden"));

@@ -34,9 +34,7 @@ def shop(make_user):
     tea = Good.objects.create(
         service_position=counter, name="Tea", price="2.50", kind="SERVICE", track_stock=False
     )
-    reader, _ = rfid.register_device(
-        actor=None, code="Reader1", purpose="TILL", service_position=counter, sn=SN
-    )
+    reader, _ = rfid.register_device(actor=None, code="Reader1", purpose="TILL", sn=SN)
     dev = Developer.objects.create(employee_number="E1", full_name="Ada Lovelace")
     RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04A2B3C4"), developer=dev)
     account = finance.open_account(dev)
@@ -66,7 +64,6 @@ def test_sn_is_normalised_and_unique(shop, auth_client, make_user):
         {
             "code": "Reader2",
             "purpose": "TILL",
-            "service_position": shop["counter"].pk,
             "sn": f" {SN.lower()} ",
         },
     )
@@ -79,7 +76,6 @@ def test_sn_is_normalised_and_unique(shop, auth_client, make_user):
         {
             "code": "Reader2",
             "purpose": "TILL",
-            "service_position": shop["counter"].pk,
             "sn": " zk2024b0009999 ",
         },
     )
@@ -90,7 +86,9 @@ def test_sn_is_normalised_and_unique(shop, auth_client, make_user):
 
 def test_till_pays_with_sn_and_no_key(shop):
     seller = shop["seller"]
-    pid = seller.post("/api/v1/purchases/", {"service_position": shop["counter"].pk}).json()["id"]
+    pid = seller.post(
+        "/api/v1/purchases/", {"service_position": shop["counter"].pk, "reader": "Reader1"}
+    ).json()["id"]
     seller.post(f"/api/v1/purchases/{pid}/items/", {"good": shop["tea"].pk, "quantity": 2})
 
     r = tap()
@@ -139,7 +137,7 @@ def test_till_over_tcp_with_sn(shop):
     reply = handle_frame(frame, "10.0.5.20")
     assert (reply["result"], reply["message"], reply["purchase"]) == (
         "ACCEPTED",
-        "No open purchase at this counter",
+        "No open purchase for this reader",
         None,
     )
     bad = handle_frame(frame.replace(SN.encode(), b"NOPE"), "10.0.5.20")
