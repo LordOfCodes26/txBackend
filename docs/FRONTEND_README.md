@@ -627,8 +627,8 @@ So your screen reacts as it will in production. Then confirm with the PIN as usu
 - Good test cases: enough balance; too little balance (`INSUFFICIENT_BALANCE`); wrong PIN
   five times (`PIN_LOCKED`); `uid` of an unknown card (`UNKNOWN_CARD`); a blocked card;
   tapping a second card (the newest tap wins).
-- Add a "Simulate tap" button to your till screen **only in development builds**, e.g.
-  behind `process.env.NEXT_PUBLIC_ENABLE_TAP_SIMULATOR === "true"`.
+- To add a "Simulate tap" button to the till screen (development/staging only), follow
+  `FRONTEND_TAP_SIMULATOR.md`: ready-to-paste server actions and component for this app.
 
 ### Rentals and bookings
 
