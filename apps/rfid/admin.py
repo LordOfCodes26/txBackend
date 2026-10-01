@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent
+from .models import Building, RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -40,3 +40,8 @@ class RFIDEventAdmin(ReadOnlyAdmin):
     list_display = ["event_time", "device", "uid", "developer", "result"]
     list_filter = ["result", "device"]
     search_fields = ["uid", "developer__full_name"]
+
+
+@admin.register(Building)
+class BuildingAdmin(admin.ModelAdmin):
+    list_display = ["code", "name"]

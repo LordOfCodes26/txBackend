@@ -18,11 +18,19 @@ from .filters import (
     RFIDDeviceFilter,
     RFIDEventFilter,
 )
-from .models import DevicePurpose, RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent
+from .models import (
+    Building,
+    DevicePurpose,
+    RFIDCard,
+    RFIDCardAssignment,
+    RFIDDevice,
+    RFIDEvent,
+)
 from .permissions import IsRFIDDevice
 from .serializers import (
     BatchResultSerializer,
     BatchScanSerializer,
+    BuildingSerializer,
     CardAssignSerializer,
     CardReasonSerializer,
     CardReplaceSerializer,
@@ -175,7 +183,7 @@ class RFIDDeviceViewSet(
 ):
     """Deactivate a reader with `PATCH {"is_active": false}`; its key stops working."""
 
-    queryset = RFIDDevice.objects.select_related("service_position__seller")
+    queryset = RFIDDevice.objects.select_related("service_position__seller", "building")
     serializer_class = RFIDDeviceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
@@ -298,3 +306,19 @@ class DeviceHeartbeatView(APIView):
             app_version=serializer.validated_data.get("app_version", ""),
         )
         return Response(DeviceConfigSerializer(device).data)
+
+
+class BuildingViewSet(viewsets.ModelViewSet):
+    queryset = Building.objects.all()
+    serializer_class = BuildingSerializer
+    permission_classes = [HasPermissions]
+    required_permissions = {
+        "list": ["rfid.view"],
+        "retrieve": ["rfid.view"],
+        "create": ["rfid.device.manage"],
+        "partial_update": ["rfid.device.manage"],
+        "destroy": ["rfid.device.manage"],
+    }
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    pagination_class = None
+    filter_backends = []

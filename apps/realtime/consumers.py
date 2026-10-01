@@ -3,7 +3,7 @@ from urllib.parse import parse_qs
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
-from .notify import counter_group
+from .notify import OCCUPANCY_GROUP, counter_group
 from .tickets import redeem_ticket
 
 CLOSE_UNAUTHENTICATED = 4401
@@ -81,5 +81,55 @@ class CounterConsumer(AsyncJsonWebsocketConsumer):
         if content.get("type") == "ping":
             await self.send_json({"type": "pong"})
 
-    async def counter_event(self, event):
+    async def push_event(self, event):
+        await self.send_json(event["payload"])
+
+
+@database_sync_to_async
+def _authorize_occupancy(ticket: str):
+    from apps.accounts.models import User
+
+    user_id = redeem_ticket(ticket)
+    user = User.objects.filter(pk=user_id, is_active=True).first() if user_id else None
+    if user is None:
+        return False, CLOSE_UNAUTHENTICATED
+    if not user.has_rbac_perm("attendance.view"):
+        return False, CLOSE_FORBIDDEN
+    return True, None
+
+
+@database_sync_to_async
+def _occupancy_snapshot():
+    from apps.attendance.occupancy import occupancy
+
+    return occupancy()
+
+
+class OccupancyConsumer(AsyncJsonWebsocketConsumer):
+    """Live building counts: ws(s)://<host>/ws/occupancy/?ticket=<ticket>.
+
+    Sends the current counts on connect, then again after every attendance change.
+    Requires `attendance.view`.
+    """
+
+    async def connect(self):
+        query = parse_qs(self.scope.get("query_string", b"").decode())
+        allowed, code = await _authorize_occupancy((query.get("ticket") or [""])[0])
+        await self.accept()
+        if not allowed:
+            await self.close(code=code)
+            return
+        self.joined = True
+        await self.channel_layer.group_add(OCCUPANCY_GROUP, self.channel_name)
+        await self.send_json({"type": "occupancy", "data": await _occupancy_snapshot()})
+
+    async def disconnect(self, code):
+        if getattr(self, "joined", False):
+            await self.channel_layer.group_discard(OCCUPANCY_GROUP, self.channel_name)
+
+    async def receive_json(self, content, **kwargs):
+        if content.get("type") == "ping":
+            await self.send_json({"type": "pong"})
+
+    async def push_event(self, event):
         await self.send_json(event["payload"])

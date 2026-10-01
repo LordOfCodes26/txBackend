@@ -102,6 +102,19 @@ class DevicePurpose(models.TextChoices):
     TILL = "TILL", "Till card reader (program on a seller's computer)"
 
 
+class Building(TimeStampedModel):
+    """A company building. Its attendance door devices tell who is inside."""
+
+    code = models.CharField(max_length=20, unique=True, help_text="e.g. B1")
+    name = models.CharField(max_length=100, unique=True, help_text="e.g. Building 1")
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+
+
 class DeviceDirection(models.TextChoices):
     IN = "IN", "Entrance"
     OUT = "OUT", "Exit"
@@ -130,6 +143,14 @@ class RFIDDevice(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     api_key_prefix = models.CharField(max_length=8, db_index=True, editable=False)
     api_key_hash = models.CharField(max_length=64, editable=False)
+    building = models.ForeignKey(
+        Building,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="devices",
+        help_text="ATTENDANCE devices: the building whose door this is (for occupancy).",
+    )
     service_position = models.ForeignKey(
         "sellers.ServicePosition",
         on_delete=models.PROTECT,
@@ -147,6 +168,10 @@ class RFIDDevice(TimeStampedModel):
     class Meta:
         ordering = ["code"]
         constraints = [
+            models.CheckConstraint(
+                condition=Q(purpose=DevicePurpose.ATTENDANCE) | Q(building__isnull=True),
+                name="rfid_only_attendance_devices_have_building",
+            ),
             models.CheckConstraint(
                 condition=(
                     Q(purpose=DevicePurpose.TILL, service_position__isnull=False)

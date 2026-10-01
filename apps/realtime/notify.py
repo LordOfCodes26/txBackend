@@ -1,4 +1,4 @@
-"""Push events to everyone watching a counter (service position).
+"""Push events to WebSocket listeners: a counter (service position) or building occupancy.
 
 Best effort: events are sent after the database transaction commits, and a failure to
 reach Redis is logged, never raised. Clients should still refetch on reconnect.
@@ -18,25 +18,42 @@ def counter_group(position_id: int) -> str:
     return f"counter.{position_id}"
 
 
-def _send(position_id: int, event_type: str, data: dict) -> None:
+OCCUPANCY_GROUP = "occupancy"
+
+
+def _group_send(group: str, payload: dict) -> None:
     layer = get_channel_layer()
     if layer is None:
         return
-    message = {
-        "type": "counter.event",
-        "payload": {
+    try:
+        async_to_sync(layer.group_send)(group, {"type": "push.event", "payload": payload})
+    except Exception:
+        logger.warning(
+            "Realtime %s event for %s not delivered", payload.get("type"), group, exc_info=True
+        )
+
+
+def _send(position_id: int, event_type: str, data: dict) -> None:
+    _group_send(
+        counter_group(position_id),
+        {
             "type": event_type,
             "service_position": position_id,
             "sent_at": timezone.now().isoformat(),
             "data": data,
         },
-    }
-    try:
-        async_to_sync(layer.group_send)(counter_group(position_id), message)
-    except Exception:
-        logger.warning(
-            "Realtime event %s for counter %s not delivered", event_type, position_id, exc_info=True
-        )
+    )
+
+
+def notify_occupancy() -> None:
+    """Push the current building counts after an attendance change."""
+
+    def send():
+        from apps.attendance.occupancy import occupancy
+
+        _group_send(OCCUPANCY_GROUP, {"type": "occupancy", "data": occupancy()})
+
+    transaction.on_commit(send)
 
 
 def notify_card_tapped(event) -> None:

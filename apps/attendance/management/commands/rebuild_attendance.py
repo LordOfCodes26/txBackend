@@ -8,7 +8,8 @@ from apps.attendance.services import rebuild
 class Command(BaseCommand):
     help = (
         "Create attendance for accepted scans that have none and recompute daily summaries. "
-        "Run after changing ATTENDANCE_DIRECTION_RULE or ATTENDANCE_DAY_START_HOUR."
+        "Run after changing ATTENDANCE_DIRECTION_RULE or ATTENDANCE_DAY_START_HOUR. "
+        "Also rebuilds who is inside which building."
     )
 
     def add_arguments(self, parser):

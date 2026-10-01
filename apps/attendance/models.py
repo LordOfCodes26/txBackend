@@ -3,7 +3,7 @@ from django.db import models
 from django.db.models import Q
 
 from apps.developers.models import Developer
-from apps.rfid.models import RFIDDevice, RFIDEvent
+from apps.rfid.models import Building, RFIDDevice, RFIDEvent
 from common.models import TimeStampedModel
 
 
@@ -32,6 +32,12 @@ class AttendanceRecord(TimeStampedModel):
     work_date = models.DateField(help_text="Company-local working day this record counts for.")
     event_time = models.DateTimeField()
     event_type = models.CharField(max_length=4, choices=EventType.choices, default=EventType.SCAN)
+    direction = models.CharField(
+        max_length=3,
+        choices=[("IN", "In"), ("OUT", "Out")],
+        blank=True,
+        help_text="In/out as reported by the door, or as entered on a manual correction.",
+    )
     source = models.CharField(max_length=6, choices=RecordSource.choices)
     rfid_event = models.OneToOneField(
         RFIDEvent,
@@ -56,7 +62,11 @@ class AttendanceRecord(TimeStampedModel):
 
     class Meta:
         ordering = ["event_time", "id"]
-        indexes = [models.Index(fields=["developer", "work_date"])]
+        indexes = [
+            models.Index(fields=["developer", "work_date"]),
+            # Occupancy looks up each developer's latest record.
+            models.Index(fields=["developer", "-event_time", "-id"], name="attendance_latest_idx"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(source=RecordSource.MANUAL) | Q(rfid_event__isnull=False),
@@ -111,3 +121,31 @@ class DailyAttendance(models.Model):
 
     def __str__(self):
         return f"{self.developer} {self.work_date} {self.status}"
+
+
+class DeveloperPresence(models.Model):
+    """Where each developer is right now, derived from their latest attendance record.
+
+    Refreshed (for one developer) whenever that developer's records change, so occupancy
+    counts are a cheap query however much history accumulates. Not the source of truth:
+    `attendance.occupancy.refresh_presence` rebuilds it from the records at any time.
+    """
+
+    developer = models.OneToOneField(
+        Developer, on_delete=models.CASCADE, primary_key=True, related_name="presence"
+    )
+    is_inside = models.BooleanField(default=False)
+    building = models.ForeignKey(
+        Building, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    since = models.DateTimeField(null=True, blank=True, help_text="Time of the latest record.")
+    record = models.ForeignKey(
+        AttendanceRecord, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["is_inside", "building"])]
+
+    def __str__(self):
+        return f"{self.developer} {'inside' if self.is_inside else 'outside'}"

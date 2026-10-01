@@ -13,6 +13,15 @@ from .models import AttendanceRecord, DailyAttendance, DayStatus, RecordSource
 from .rules import RULES, worked_time
 
 
+def _presence_changed(developer_id: int) -> None:
+    from apps.realtime.notify import notify_occupancy
+
+    from .occupancy import refresh_presence
+
+    refresh_presence(developer_id)
+    notify_occupancy()
+
+
 def work_date_for(moment: datetime) -> date:
     """Company-local working day. Scans before ATTENDANCE_DAY_START_HOUR count for the
     previous day, so a night shift ending at 02:00 stays on the day it started."""
@@ -31,13 +40,19 @@ def record_from_scan(event: RFIDEvent) -> AttendanceRecord | None:
         source=RecordSource.RFID,
         rfid_event=event,
         device_id=event.device_id,
+        direction=event.direction,
     )
     recompute_day(event.developer_id, record.work_date)
+    _presence_changed(event.developer_id)
     return record
 
 
 @transaction.atomic
-def add_manual_record(*, actor, developer: Developer, event_time: datetime, note: str):
+def add_manual_record(
+    *, actor, developer: Developer, event_time: datetime, note: str, direction: str = ""
+):
+    """A correction, e.g. a forgotten scan. Set `direction` (IN/OUT) explicitly when it
+    matters, e.g. to mark someone as gone who never scanned out."""
     record = AttendanceRecord.objects.create(
         developer=developer,
         work_date=work_date_for(event_time),
@@ -45,13 +60,20 @@ def add_manual_record(*, actor, developer: Developer, event_time: datetime, note
         source=RecordSource.MANUAL,
         note=note,
         created_by=actor,
+        direction=direction,
     )
     recompute_day(developer.pk, record.work_date)
+    _presence_changed(developer.pk)
     record_audit(
         "attendance.record_added",
         actor=actor,
         entity=record,
-        new_values={"developer": developer.pk, "event_time": event_time, "note": note},
+        new_values={
+            "developer": developer.pk,
+            "event_time": event_time,
+            "note": note,
+            "direction": direction,
+        },
     )
     record.refresh_from_db()
     return record
@@ -68,6 +90,7 @@ def void_record(*, actor, record: AttendanceRecord, reason: str) -> AttendanceRe
     record.voided_at = timezone.now()
     record.save(update_fields=["is_void", "void_reason", "voided_by", "voided_at", "updated_at"])
     recompute_day(record.developer_id, record.work_date)
+    _presence_changed(record.developer_id)
     record_audit(
         "attendance.record_voided",
         actor=actor,
@@ -136,6 +159,7 @@ def rebuild(*, date_from: date | None = None, date_to: date | None = None) -> di
                 source=RecordSource.RFID,
                 rfid_event=event,
                 device_id=event.device_id,
+                direction=event.direction,
             )
         created += 1
 
@@ -159,4 +183,13 @@ def rebuild(*, date_from: date | None = None, date_to: date | None = None) -> di
     for developer_id, day in sorted(days):
         with transaction.atomic():
             recompute_day(developer_id, day)
-    return {"records_created": created, "records_moved": moved, "days_recomputed": len(days)}
+    from .occupancy import refresh_all
+
+    with transaction.atomic():
+        refreshed = refresh_all()
+    return {
+        "records_created": created,
+        "records_moved": moved,
+        "days_recomputed": len(days),
+        "presence_refreshed": refreshed,
+    }

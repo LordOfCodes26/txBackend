@@ -393,10 +393,18 @@ edit pages, not in list tables.
 |---|---|---|---|
 | GET | `/attendance/daily/` | `attendance.view` | One row per developer per day. Filters: `developer`, `work_date`, `date_from`, `date_to`, `status`, `department` |
 | GET | `/attendance/records/` | `attendance.view` | Individual moments. Filters: `developer`, `work_date`, `date_from`, `date_to`, `source`, `event_type`, `is_void`, `device` |
-| POST | `/attendance/records/` | `attendance.correct` | Manual record: `{developer, event_time, note}` (note required) |
+| POST | `/attendance/records/` | `attendance.correct` | Manual record: `{developer, event_time, note, direction?}` (note required; `direction` `IN`/`OUT`, e.g. `OUT` to mark someone as gone who never scanned out) |
+| GET | `/attendance/occupancy/` | `attendance.view` | **Who is inside right now**: `{as_of, total, buildings: [{id, code, name, count}], unknown_building}` |
+| GET | `/attendance/occupancy/people/` | `attendance.view` | Everyone inside: `{developer, building, since, device_code}`. Filters: `building=<id>` (or `none`), `department`, `search` |
+| GET | `/rfid/buildings/` | `rfid.view` | Buildings (`B1` Building 1, `B2` Building 2); door devices have a `building` |
 | POST | `/attendance/records/{id}/void/` | `attendance.correct` | `{reason}` (required) |
 | GET | `/attendance/daily/me/`, `/attendance/records/me/` | logged in | Own attendance; same filters |
 
+- **Occupancy rule:** a developer is inside building X when their **latest** scan (on any
+  day) is an `in` at X's door. **No scan out means still inside**, even on later days, until
+  they scan again or a manager adds a manual `OUT` record. Everyone is counted once, so
+  `total` = sum of the buildings + `unknown_building` (inside after a manual `IN` without a
+  door). Deleted and terminated developers are never counted.
 - Daily `status`: `PRESENT` or `INCOMPLETE` (a single scan, or an IN without an OUT).
   **No row means no scans that day**; absence and lateness aren't calculated yet.
 - `worked_hours` is a ready-to-display number; `worked_seconds` is exact.
@@ -590,6 +598,19 @@ tapped, with no polling.
 - With the BFF setup, the browser connects to the WebSocket directly (only `/ws/` needs to
   be reachable). Getting the ticket goes through your normal API path.
 
+### Realtime occupancy (live building counts)
+
+For a dashboard that always shows the exact current numbers:
+
+1. `POST /api/v1/realtime/ticket/` → `{"ticket": ...}` (user needs `attendance.view`).
+2. Open `wss://<host>/ws/occupancy/?ticket=<ticket>`.
+3. You immediately receive `{"type": "occupancy", "data": {...}}` with the same shape as
+   `GET /attendance/occupancy/`, and the same message again after **every** door scan or
+   attendance correction. Just re-render `data`.
+
+Close codes: `4401` (bad or used ticket), `4403` (no `attendance.view`). Reconnect with
+backoff; the first message after reconnecting is a fresh snapshot.
+
 ### Seller finance and payouts
 
 | Method | Path | Permission | Notes |
@@ -645,6 +666,7 @@ before → after table.
 | Cards (list, detail with history and actions) | `rfid/cards/`, `rfid/assignments/?card=` | `rfid.view` |
 | Devices (attendance readers and till programs; online status, last seen, version) | `rfid/devices/`, `rfid/devices/?online=false` | `rfid.view` |
 | Live scan monitor | poll `rfid/events/?ordering=-event_time&page_size=20` every few seconds | `rfid.view` |
+| **Occupancy dashboard** (live count per building and total; click a building for who is inside) | `ws/occupancy/`, `attendance/occupancy/people/?building=` | `attendance.view` |
 | Attendance (daily table by date/department, corrections) | `attendance/daily/`, `attendance/records/` | `attendance.view` |
 | Users and roles | `users/`, `roles/` | `user.view` |
 | Sellers (list, detail with positions) | `sellers/`, `service-positions/?seller=` | `seller.view` |

@@ -45,9 +45,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("Demo rentals created."))
             created = True
         if not rfid.RFIDDevice.objects.filter(code__in=["Door1", "Door2"]).exists():
-            for code, building in (("Door1", "Building 1"), ("Door2", "Building 2")):
+            from apps.rfid.models import Building
+
+            for code, (bcode, building) in (
+                ("Door1", ("B1", "Building 1")),
+                ("Door2", ("B2", "Building 2")),
+            ):
+                b, _ = Building.objects.get_or_create(code=bcode, defaults={"name": building})
                 _, door_key = rfid.register_device(
-                    actor=None, code=code, name=f"{building} door", location=building
+                    actor=None, code=code, name=f"{building} door", location=building, building=b
                 )
                 self.stdout.write(f"Door device {code} API key (shown only now): {door_key}")
             created = True

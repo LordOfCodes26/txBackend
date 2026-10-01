@@ -1,19 +1,22 @@
 from drf_spectacular.utils import extend_schema
-from rest_framework import mixins, status, viewsets
+from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
 from common.permissions import HasPermissions
 
-from . import services
+from . import occupancy, services
 from .filters import AttendanceRecordFilter, DailyAttendanceFilter
 from .models import AttendanceRecord, DailyAttendance
 from .serializers import (
     AttendanceRecordSerializer,
     DailyAttendanceSerializer,
     ManualRecordSerializer,
+    OccupancySerializer,
+    PersonInsideSerializer,
     VoidSerializer,
 )
 
@@ -88,3 +91,40 @@ class DailyAttendanceViewSet(OwnDataMixin, viewsets.ReadOnlyModelViewSet):
     filterset_class = DailyAttendanceFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
     ordering_fields = ["work_date", "first_seen", "worked_seconds"]
+
+
+class OccupancyView(APIView):
+    """How many developers are inside each building right now, and in total."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["attendance.view"]}
+
+    @extend_schema(responses=OccupancySerializer)
+    def get(self, request):
+        return Response(occupancy.occupancy())
+
+
+class OccupancyPeopleView(generics.ListAPIView):
+    """Who is inside right now. `?building=<id>` (or `none`), `?department=`, `?search=`."""
+
+    serializer_class = PersonInsideSerializer
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["attendance.view"]}
+    filter_backends = []
+
+    def get_queryset(self):
+        qs = occupancy.inside().order_by("developer__full_name", "developer_id")
+        params = self.request.query_params
+        building = params.get("building")
+        if building == "none":
+            qs = qs.filter(building__isnull=True)
+        elif building:
+            qs = qs.filter(building_id=building)
+        if params.get("department"):
+            qs = qs.filter(developer__department__iexact=params["department"])
+        if params.get("search"):
+            term = params["search"]
+            qs = qs.filter(developer__full_name__icontains=term) | qs.filter(
+                developer__employee_number__icontains=term
+            )
+        return qs

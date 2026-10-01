@@ -34,6 +34,7 @@ DEVICE_FIELDS = [
     "location",
     "purpose",
     "direction",
+    "building",
     "service_position",
     "is_active",
 ]

@@ -8,6 +8,7 @@ from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
 
 from .models import (
+    Building,
     DevicePurpose,
     RFIDCard,
     RFIDCardAssignment,
@@ -116,6 +117,7 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "name",
             "location",
             "purpose",
+            "building",
             "service_position",
             "direction",
             "is_active",
@@ -147,7 +149,19 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"service_position": ["Only TILL devices belong to a service position."]}
             )
+        building = attrs.get("building", getattr(self.instance, "building", None))
+        if purpose != DevicePurpose.ATTENDANCE and building is not None:
+            raise serializers.ValidationError(
+                {"building": ["Only ATTENDANCE devices belong to a building."]}
+            )
         return attrs
+
+
+class BuildingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Building
+        fields = ["id", "code", "name", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
 class RFIDDeviceWithKeySerializer(RFIDDeviceSerializer):
