@@ -606,6 +606,30 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
 - `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
 
+### Simulating card taps while developing (staging only)
+
+You don't need a physical reader to build the till screen. On staging (these endpoints
+answer `404` in production):
+
+| Method | Path | Who | Purpose |
+|---|---|---|---|
+| GET | `/test-console/cards/?search=` | the purchase's seller, or `purchase.create` staff | Test developers: `{developer, full_name, card_uid, card_status, balance, account_status, has_pin}` (max 50) |
+| POST | `/test-console/simulate-tap/` | same | `{"purchase": id, "developer": id}`, or `{"purchase": id, "uid": "04…"}` to test unknown or blocked cards |
+
+The simulated tap goes through the **real** pipeline: it's recorded, attached to the
+purchase, `card_tapped` is pushed on the counter's WebSocket, and the response is exactly
+what a reader receives (`result`, `accepted`, `display_message`, `developer`, `purchase`).
+So your screen reacts as it will in production. Then confirm with the PIN as usual.
+
+- A purchase without a reader gets your **personal simulated reader** `SIM-<your user id>`,
+  so testers don't receive each other's taps. A purchase that already names a reader keeps it.
+- Demo developers' PIN on staging: ask the backend team (all demo developers share one).
+- Good test cases: enough balance; too little balance (`INSUFFICIENT_BALANCE`); wrong PIN
+  five times (`PIN_LOCKED`); `uid` of an unknown card (`UNKNOWN_CARD`); a blocked card;
+  tapping a second card (the newest tap wins).
+- Add a "Simulate tap" button to your till screen **only in development builds**, e.g.
+  behind `process.env.NEXT_PUBLIC_ENABLE_TAP_SIMULATOR === "true"`.
+
 ### Rentals and bookings
 
 | Method | Path | Permission | Notes |

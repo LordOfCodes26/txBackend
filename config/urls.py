@@ -32,4 +32,14 @@ urlpatterns += [
         test_console.SimulatedDoorScanView.as_view(),
         name="test-console-door-scan",
     ),
+    path(
+        "api/v1/test-console/simulate-tap/",
+        test_console.SimulateTapView.as_view(),
+        name="test-console-simulate-tap",
+    ),
+    path(
+        "api/v1/test-console/cards/",
+        test_console.TestCardsView.as_view(),
+        name="test-console-cards",
+    ),
 ]
