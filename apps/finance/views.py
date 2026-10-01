@@ -17,6 +17,7 @@ from .serializers import (
     AdjustmentSerializer,
     DepositSerializer,
     DeveloperAccountSerializer,
+    ResetPinSerializer,
     SetPinSerializer,
     StatusChangeSerializer,
 )
@@ -76,12 +77,17 @@ class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @extend_schema(request=None, responses=DeveloperAccountSerializer)
+    @extend_schema(request=ResetPinSerializer, responses=DeveloperAccountSerializer)
     @action(detail=True, methods=["post"], url_path="reset-pin")
     def reset_pin(self, request, pk=None):
-        """Clear a forgotten PIN and any lockout; the developer sets a new one."""
+        """Replace a forgotten PIN: the developer types the new one twice (`pin`,
+        `pin_confirm`). Without `pin`, the PIN is only cleared. Clears any lockout."""
+        serializer = ResetPinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         account = self.get_object()
-        services.reset_pin(actor=request.user, account=account)
+        services.reset_pin(
+            actor=request.user, account=account, pin=serializer.validated_data.get("pin")
+        )
         account.refresh_from_db()
         return Response(DeveloperAccountSerializer(account).data)
 

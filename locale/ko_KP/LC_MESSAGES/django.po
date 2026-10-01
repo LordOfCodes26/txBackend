@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 16:29+0000\n"
+"POT-Creation-Date: 2026-10-01 16:42+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -146,6 +146,9 @@ msgstr "암호번호를 너무 여러번 틀리게 입력하였습니다. 후에
 
 msgid "Amount cannot be zero."
 msgstr "금액은 0일수 없습니다."
+
+msgid "The PINs don't match."
+msgstr "두 암호번호가 서로 다릅니다."
 
 msgid "This account is closed."
 msgstr "이 계정은 페쇄되였습니다."

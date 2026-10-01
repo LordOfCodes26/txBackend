@@ -77,6 +77,33 @@ class StatusChangeSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
 
 
+class NewPinSerializer(serializers.Serializer):
+    """A PIN the developer types twice (4-6 digits, not trivial like 1111 or 1234)."""
+
+    pin = serializers.CharField(write_only=True, max_length=6)
+    pin_confirm = serializers.CharField(write_only=True, max_length=6)
+
+    def validate(self, attrs):
+        if attrs["pin"] != attrs["pin_confirm"]:
+            raise serializers.ValidationError({"pin_confirm": [_("The PINs don't match.")]})
+        return attrs
+
+
+class ResetPinSerializer(serializers.Serializer):
+    pin = serializers.CharField(
+        write_only=True,
+        max_length=6,
+        required=False,
+        help_text="New PIN typed by the developer; leave out to only clear the old one.",
+    )
+    pin_confirm = serializers.CharField(write_only=True, max_length=6, required=False)
+
+    def validate(self, attrs):
+        if attrs.get("pin") and attrs.get("pin") != attrs.get("pin_confirm"):
+            raise serializers.ValidationError({"pin_confirm": [_("The PINs don't match.")]})
+        return attrs
+
+
 class SetPinSerializer(serializers.Serializer):
     pin = serializers.CharField(write_only=True, max_length=6)
     current_pin = serializers.CharField(

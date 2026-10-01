@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
+from apps.finance.services import give_pin, open_account, validate_pin_format
 from common.context import get_request_context
 from common.middleware import client_ip
 from common.permissions import HasPermissions
@@ -124,7 +125,15 @@ class RFIDCardViewSet(
         card = self.get_object()
         developer = serializer.validated_data["developer"]
         ensure_in_scope(request.user, "rfid.assign", developer.building_id, field="developer")
-        services.assign_card(actor=request.user, card=card, developer=developer)
+        validate_pin_format(serializer.validated_data["pin"])
+        with transaction.atomic():
+            services.assign_card(actor=request.user, card=card, developer=developer)
+            give_pin(
+                actor=request.user,
+                account=open_account(developer),
+                pin=serializer.validated_data["pin"],
+                action="finance.pin_set_at_card_assignment",
+            )
         return self._card_response(card)
 
     @extend_schema(request=None, responses=RFIDCardSerializer)

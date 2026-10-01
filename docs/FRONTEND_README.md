@@ -434,7 +434,7 @@ edit pages, not in list tables.
 | GET | `/rfid/cards/` | `rfid.view` | Filters: `status`, `assigned` (true/false), `developer`. Search: UID, label, holder name |
 | POST | `/rfid/cards/` | `rfid.assign` | `{uid, label?, notes?}`; UID may contain `:`, `-` or spaces |
 | PATCH | `/rfid/cards/{id}/` | `rfid.assign` | `label`, `notes` only |
-| POST | `/rfid/cards/{id}/assign/` | `rfid.assign` | `{developer}` |
+| POST | `/rfid/cards/{id}/assign/` | `rfid.assign` | `{developer, pin, pin_confirm}`: assigning a card **also sets the developer's purchase PIN**. Show two masked PIN fields the developer fills in themselves (4–6 digits, not trivial like 1111 / 1234). A bad or mismatched PIN assigns nothing (`VALIDATION_ERROR` on `pin` / `pin_confirm`). A new PIN replaces an old one |
 | POST | `/rfid/cards/{id}/unassign/` | `rfid.assign` | |
 | POST | `/rfid/cards/{id}/replace/` | `rfid.assign` | `{new_card_uid, new_card_label?, reason?}`; returns the **new** card |
 | POST | `/rfid/cards/{id}/block/`, `/unblock/` | `rfid.block` | `{reason?}` |
@@ -611,7 +611,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 | GET | `/purchases/performance/` | own seller, or `purchase.view` | Sales per sell position (see *Building managers*) |
 | GET | `/purchases/me/` | logged in | The developer's own purchases |
 | POST | `/finance/accounts/me/pin/` | logged in | Developer sets `{pin}` or changes it with `{pin, current_pin}` |
-| POST | `/finance/accounts/{id}/reset-pin/` | `finance.adjust` | Clears a forgotten PIN and any lockout |
+| POST | `/finance/accounts/{id}/reset-pin/` | `finance.adjust` | Forgotten PIN: `{pin, pin_confirm}` typed by the developer replaces it; an empty body only clears it. Also clears any lockout |
 
 Every item/confirm/cancel call returns the **whole purchase**, so re-render the bucket from
 the response.
@@ -664,7 +664,7 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 | `CARD_NOT_PRESENTED` | "Please tap your card" (no tap yet, or it expired) |
 | `INVALID_PIN` | "Wrong PIN, N attempts left" (`details.attempts_remaining`) |
 | `PIN_LOCKED` (423) | "PIN locked until …" (`details.locked_until`); another payment is needed |
-| `PIN_NOT_SET` | "Set your PIN first" (developer: My account → PIN) |
+| `PIN_NOT_SET` | "No PIN yet": the PIN is set when a card is assigned, or by finance (reset PIN with a new one) |
 | `INSUFFICIENT_BALANCE` | Balance and amount needed (`details.balance`, `details.required`) |
 | `INSUFFICIENT_STOCK` | Which good ran out (`details.good`, `available`) |
 | `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `ACCOUNT_NOT_ACTIVE` | The `message` |

@@ -266,8 +266,27 @@ def set_pin(*, actor, account: DeveloperAccount, pin: str, current_pin: str | No
 
 
 @transaction.atomic
-def reset_pin(*, actor, account: DeveloperAccount) -> None:
-    """Clear a forgotten PIN (and any lockout); the developer then sets a new one."""
+def give_pin(*, actor, account: DeveloperAccount, pin: str, action: str) -> None:
+    """Staff store a PIN the developer typed in front of them (when a card is assigned,
+    or to replace a forgotten one). Clears any lockout. The PIN itself is never logged."""
+    validate_pin_format(pin)
+    account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
+    account.pin_hash = make_password(pin)
+    account.pin_failed_attempts = 0
+    account.pin_locked_until = None
+    account.save(
+        update_fields=["pin_hash", "pin_failed_attempts", "pin_locked_until", "updated_at"]
+    )
+    record_audit(action, actor=actor, entity=account)
+
+
+@transaction.atomic
+def reset_pin(*, actor, account: DeveloperAccount, pin: str | None = None) -> None:
+    """Replace a forgotten PIN with `pin` (typed by the developer), or clear it. Clears
+    any lockout."""
+    if pin:
+        give_pin(actor=actor, account=account, pin=pin, action="finance.pin_reset")
+        return
     account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
     account.pin_hash = ""
     account.pin_failed_attempts = 0

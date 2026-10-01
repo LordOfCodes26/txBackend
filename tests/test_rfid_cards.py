@@ -10,6 +10,8 @@ pytestmark = pytest.mark.django_db
 
 CARDS = "/api/v1/rfid/cards/"
 
+NEW_PIN = {"pin": "4826", "pin_confirm": "4826"}  # typed by the developer at assignment
+
 
 @pytest.fixture
 def make_developer():
@@ -55,7 +57,7 @@ def test_register_duplicate_or_invalid_uid(client, make_card):
 def test_assign_and_unassign(client, make_card, make_developer):
     card, dev = make_card(), make_developer()
 
-    response = client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk})
+    response = client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
     assert response.status_code == 200
     assert response.json()["current_assignment"]["developer"]["id"] == dev.pk
 
@@ -70,16 +72,18 @@ def test_assign_and_unassign(client, make_card, make_developer):
 
 def test_card_cannot_have_two_owners(client, make_card, make_developer):
     card = make_card()
-    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
-    response = client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
+    response = client.post(
+        f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN}
+    )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "CARD_ALREADY_ASSIGNED"
 
 
 def test_developer_cannot_have_two_cards(client, make_card, make_developer):
     dev = make_developer()
-    client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk})
-    response = client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk})
+    client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk, **NEW_PIN})
+    response = client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk, **NEW_PIN})
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "DEVELOPER_ALREADY_HAS_CARD"
 
@@ -95,14 +99,14 @@ def test_database_enforces_one_active_assignment(make_card, make_developer):
 
 def test_cannot_assign_to_terminated_developer(client, make_card, make_developer):
     dev = make_developer(status=DeveloperStatus.TERMINATED)
-    response = client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk})
+    response = client.post(f"{CARDS}{make_card().pk}/assign/", {"developer": dev.pk, **NEW_PIN})
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "DEVELOPER_NOT_ASSIGNABLE"
 
 
 def test_replace_card_keeps_history(client, make_card, make_developer):
     old, dev = make_card(), make_developer()
-    client.post(f"{CARDS}{old.pk}/assign/", {"developer": dev.pk})
+    client.post(f"{CARDS}{old.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
 
     response = client.post(
         f"{CARDS}{old.pk}/replace/", {"new_card_uid": "04 ff ee dd", "reason": "Lost"}
@@ -124,8 +128,8 @@ def test_replace_card_keeps_history(client, make_card, make_developer):
 
 def test_replace_with_already_assigned_card_rolls_back(client, make_card, make_developer):
     old, other = make_card(), make_card()
-    client.post(f"{CARDS}{old.pk}/assign/", {"developer": make_developer().pk})
-    client.post(f"{CARDS}{other.pk}/assign/", {"developer": make_developer().pk})
+    client.post(f"{CARDS}{old.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
+    client.post(f"{CARDS}{other.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
 
     response = client.post(f"{CARDS}{old.pk}/replace/", {"new_card_uid": other.uid})
     assert response.status_code == 409
@@ -137,7 +141,7 @@ def test_replace_with_already_assigned_card_rolls_back(client, make_card, make_d
 def test_block_keeps_owner_and_unblock_restores(auth_client, make_user, make_card, make_developer):
     client = auth_client(make_user(Roles.MANAGER))
     card = make_card()
-    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
 
     body = client.post(f"{CARDS}{card.pk}/block/", {"reason": "Reported lost"}).json()
     assert body["status"] == "BLOCKED" and body["current_assignment"] is not None
@@ -147,24 +151,26 @@ def test_block_keeps_owner_and_unblock_restores(auth_client, make_user, make_car
 
 def test_retire_requires_unassigned_card(client, make_card, make_developer):
     card = make_card()
-    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
     assert client.post(f"{CARDS}{card.pk}/retire/").status_code == 409
     client.post(f"{CARDS}{card.pk}/unassign/")
     assert client.post(f"{CARDS}{card.pk}/retire/").json()["status"] == "RETIRED"
-    response = client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
+    response = client.post(
+        f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN}
+    )
     assert response.json()["error"]["code"] == "CARD_NOT_ACTIVE"
 
 
 def test_terminating_developer_ends_assignment(client, make_card, make_developer):
     card, dev = make_card(), make_developer()
-    client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk})
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
     client.patch(f"/api/v1/developers/{dev.pk}/", {"status": "TERMINATED"})
     assert RFIDCardAssignment.objects.get().end_reason == "DEVELOPER_LEFT"
 
 
 def test_deleting_developer_ends_assignment(client, make_card, make_developer):
     card, dev = make_card(), make_developer()
-    client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk})
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
     assert client.delete(f"/api/v1/developers/{dev.pk}/").status_code == 204
     assert RFIDCardAssignment.objects.get().end_reason == "DEVELOPER_DELETED"
 
@@ -173,7 +179,7 @@ def test_card_filters(client, make_card, make_developer):
     assigned = make_card(label="A")
     make_card(label="F")
     dev = make_developer(full_name="Zed Unique")
-    client.post(f"{CARDS}{assigned.pk}/assign/", {"developer": dev.pk})
+    client.post(f"{CARDS}{assigned.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
 
     def labels(query):
         return [c["label"] for c in client.get(f"{CARDS}?{query}").json()["results"]]
@@ -199,7 +205,7 @@ def test_card_permissions(
     client = auth_client(make_user(role))
     card = make_card()
     assert client.get(CARDS).status_code == view
-    r = client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk})
+    r = client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
     assert r.status_code == assign
     assert client.post(f"{CARDS}{card.pk}/block/").status_code == block
 
@@ -207,3 +213,54 @@ def test_card_permissions(
 def test_cards_cannot_be_deleted(client, make_card):
     card = make_card()
     assert client.delete(f"{CARDS}{card.pk}/").status_code in (403, 405)
+
+
+# --- The PIN is set when the card is assigned -----------------------------------------------
+
+
+def test_assigning_a_card_sets_the_pin(client, make_developer, make_card):
+    from apps.finance import services as finance
+
+    dev, card = make_developer(), make_card()
+    response = client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN})
+    assert response.status_code == 200
+    account = finance.open_account(dev)
+    finance.verify_pin(account=account, pin="4826")  # no error
+    log = AuditLog.objects.get(action="finance.pin_set_at_card_assignment")
+    assert "4826" not in str(log.new_values) and "4826" not in str(log.old_values)
+
+
+@pytest.mark.parametrize(
+    ("pin", "confirm", "field"),
+    [
+        ("4826", "4827", "pin_confirm"),
+        ("1234", "1234", "pin"),
+        ("12", "12", "pin"),
+        ("", "", "pin"),
+    ],
+)
+def test_bad_pin_assigns_nothing(client, make_developer, make_card, pin, confirm, field):
+    dev, card = make_developer(), make_card()
+    response = client.post(
+        f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, "pin": pin, "pin_confirm": confirm}
+    )
+    assert response.status_code == 400
+    assert field in response.json()["error"]["details"]
+    assert not RFIDCardAssignment.objects.exists()
+
+
+def test_finance_replaces_a_forgotten_pin(auth_client, make_user, make_developer, make_card):
+    from apps.finance import services as finance
+    from apps.finance.exceptions import InvalidPin
+
+    dev = make_developer()
+    account = finance.open_account(dev)
+    finance.give_pin(actor=None, account=account, pin="4826", action="test")
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+    url = f"/api/v1/finance/accounts/{account.pk}/reset-pin/"
+    r = client.post(url, {"pin": "5093", "pin_confirm": "5039"})
+    assert "pin_confirm" in r.json()["error"]["details"]
+    assert client.post(url, {"pin": "5093", "pin_confirm": "5093"}).status_code == 200
+    finance.verify_pin(account=account, pin="5093")
+    with pytest.raises(InvalidPin):
+        finance.verify_pin(account=account, pin="4826")

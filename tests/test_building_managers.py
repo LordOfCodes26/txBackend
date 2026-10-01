@@ -29,6 +29,8 @@ OCCUPANCY = "/api/v1/attendance/occupancy/"
 PEOPLE = "/api/v1/attendance/occupancy/people/"
 PURCHASES = "/api/v1/purchases/"
 
+NEW_PIN = {"pin": "4826", "pin_confirm": "4826"}  # typed by the developer at assignment
+
 
 @pytest.fixture
 def site(db, make_user, settings):
@@ -144,10 +146,13 @@ def test_building_manager_without_a_building_sees_nothing(auth_client, make_user
 def test_cards_of_own_developers_and_spare_cards(client, site):
     assert sorted(c["uid"] for c in results(client.get(CARDS))) == ["04A1", "04C3"]
     assert client.post(f"{CARDS}{site.bob_card.pk}/block/", {"reason": "x"}).status_code == 404
-    r = client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": site.bob.pk})
+    r = client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": site.bob.pk, **NEW_PIN})
     assert "developer" in r.json()["error"]["details"]
     dee = Developer.objects.create(employee_number="E4", full_name="Dee", building=site.b1)
-    assert client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": dee.pk}).status_code == 200
+    assert (
+        client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": dee.pk, **NEW_PIN}).status_code
+        == 200
+    )
 
 
 def test_door_devices_of_own_building(client, site):

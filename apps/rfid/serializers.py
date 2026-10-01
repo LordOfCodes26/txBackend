@@ -8,6 +8,7 @@ from rest_framework import serializers
 
 from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
+from apps.finance.serializers import NewPinSerializer
 
 from .models import (
     Building,
@@ -74,7 +75,10 @@ class RFIDCardUpdateSerializer(serializers.ModelSerializer):
         fields = ["label", "notes"]
 
 
-class CardAssignSerializer(serializers.Serializer):
+class CardAssignSerializer(NewPinSerializer):
+    """Assigning a card also sets the developer's purchase PIN: the developer types it
+    twice on the assigning staff member's screen."""
+
     developer = serializers.PrimaryKeyRelatedField(queryset=Developer.objects.all())
 
 
