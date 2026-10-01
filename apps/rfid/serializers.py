@@ -206,12 +206,24 @@ class RFIDEventSerializer(serializers.ModelSerializer):
 
 # Field names used by the door devices: {"ID": "Door1", "Type": "in", "UID": "..."}.
 # Keys are matched case-insensitively and mapped onto our names.
-_DEVICE_FIELD_ALIASES = {"id": "device_id", "type": "direction"}
+_DEVICE_FIELD_ALIASES = {"id": "device_id", "direction": "type"}
+
+PAY = "PAY"
 
 
 class DirectionField(serializers.ChoiceField):
     def __init__(self, **kwargs):
         super().__init__(choices=ScanDirection.choices, **kwargs)
+
+    def to_internal_value(self, data):
+        return super().to_internal_value(str(data).strip().upper())
+
+
+class ScanTypeField(serializers.ChoiceField):
+    """`in` / `out` from building doors, `pay` from till readers (case-insensitive)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(choices=[*ScanDirection.values, PAY], **kwargs)
 
     def to_internal_value(self, data):
         return super().to_internal_value(str(data).strip().upper())
@@ -225,11 +237,11 @@ class ScanSerializer(serializers.Serializer):
     device_id = serializers.CharField(
         required=False, help_text="Device code (the doors' `ID`); must match the device's key."
     )
-    direction = DirectionField(
+    type = ScanTypeField(
         required=False,
         allow_blank=True,
         default="",
-        help_text="`in` / `out` as reported by the device (the doors' `Type`).",
+        help_text="`in` / `out` from building doors, `pay` from till readers (`Type`/`TYPE`).",
     )
     event_time = serializers.DateTimeField(required=False)
     client_event_id = serializers.CharField(
@@ -249,6 +261,18 @@ class ScanSerializer(serializers.Serializer):
         if value.strip().lower() != self.context["device"].code.lower():
             raise serializers.ValidationError("Does not match the authenticated device.")
         return value
+
+    def validate(self, attrs):
+        """The scan type must fit the device: doors send in/out, till readers send pay.
+        A mismatch usually means a device is configured with another device's key."""
+        kind = attrs.pop("type", "")
+        purpose = self.context["device"].purpose
+        if purpose == DevicePurpose.TILL and kind not in ("", PAY):
+            raise serializers.ValidationError({"type": ["Till readers send `pay`."]})
+        if purpose == DevicePurpose.ATTENDANCE and kind == PAY:
+            raise serializers.ValidationError({"type": ["Door devices send `in` or `out`."]})
+        attrs["direction"] = kind if kind in ScanDirection.values else ""
+        return attrs
 
     def validate_event_time(self, value):
         limit = timezone.now() + timedelta(seconds=settings.RFID_MAX_FUTURE_SKEW_SECONDS)
@@ -330,7 +354,7 @@ class BatchScanItemSerializer(serializers.Serializer):
     uid = UIDField()
     event_time = serializers.DateTimeField()
     client_event_id = serializers.CharField(max_length=64)
-    direction = DirectionField(required=False, allow_blank=True, default="")
+    type = DirectionField(required=False, allow_blank=True, default="")
 
     def to_internal_value(self, data):
         if hasattr(data, "items"):
@@ -338,7 +362,9 @@ class BatchScanItemSerializer(serializers.Serializer):
                 _DEVICE_FIELD_ALIASES.get(str(k).lower(), str(k).lower()): v
                 for k, v in data.items()
             }
-        return super().to_internal_value(data)
+        attrs = super().to_internal_value(data)
+        attrs["direction"] = attrs.pop("type", "")
+        return attrs
 
     def validate_event_time(self, value):
         limit = timezone.now() + timedelta(seconds=settings.RFID_MAX_FUTURE_SKEW_SECONDS)

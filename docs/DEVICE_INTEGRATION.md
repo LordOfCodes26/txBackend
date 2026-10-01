@@ -22,7 +22,7 @@ POST /api/v1/rfid/devices/
  "direction": "IN"}
 
 POST /api/v1/rfid/devices/
-{"code": "TILL-CAFE-1", "name": "Cafe counter 1", "purpose": "TILL", "service_position": 3}
+{"code": "Reader1", "name": "Cafe counter 1", "purpose": "TILL", "service_position": 3}
 ```
 
 - The response contains `api_key` **once**. Store it in the device's or program's
@@ -104,7 +104,7 @@ Response:
 
 ```json
 {
-  "code": "TILL-CAFE-1", "name": "Cafe counter 1", "location": "", "purpose": "TILL",
+  "code": "Reader1", "name": "Cafe counter 1", "location": "", "purpose": "TILL",
   "direction": "BOTH", "service_position": 3, "service_position_name": "Counter 1",
   "seller_name": "Demo Cafe",
   "server_time": "2026-10-01T09:00:00.123456+00:00",
@@ -129,13 +129,13 @@ Response:
 POST /api/v1/rfid/events/
 Authorization: Device <api_key>
 
-{"uid": "04:A2:B3:C4", "event_time": "2026-10-01T08:59:58Z", "client_event_id": "TILL-CAFE-1-000123"}
+{"uid": "04:A2:B3:C4", "event_time": "2026-10-01T08:59:58Z", "client_event_id": "Reader1-000123"}
 ```
 
 | Field | Required | Notes |
 |---|---|---|
 | `uid` | yes | Card UID in hex. `:`, `-` and spaces are ignored, and case doesn't matter |
-| `direction` | attendance doors | `in` or `out`, as reported by the door. Used for attendance |
+| `type` | doors / tills | Doors: `in` or `out` (used for attendance). Till readers: `pay`. Also accepted as `Type`/`TYPE` |
 | `event_time` | recommended | When the card was read (device clock). Default: time received |
 | `client_event_id` | strongly recommended | Unique per scan, 1–64 chars. Makes retries safe (section 5) |
 | `device_id` | no | If sent, must equal the device's `code` |
@@ -175,7 +175,7 @@ Response (`201` new scan, `200` = this `client_event_id` was already received):
   "developer": {"id": 1, "employee_number": "E0001", "full_name": "Ada Lovelace", "department": "Engineering"},
   "purchase": 52,
   "event_time": "2026-10-01T08:59:58Z",
-  "client_event_id": "TILL-CAFE-1-000123"
+  "client_event_id": "Reader1-000123"
 }
 ```
 
@@ -195,6 +195,27 @@ red one otherwise:
 A response with `accepted: false` is still a **successful request**; don't retry it.
 
 ### TILL devices only
+
+**Till reader format.** Till readers (`Reader1`, `Reader2`, …, one per counter) send:
+
+```http
+POST /api/v1/rfid/events/
+Authorization: Device <api_key of Reader1>
+
+{"ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"}
+```
+
+| Field | Meaning |
+|---|---|
+| `ID` | The reader's device code; must match the key's device |
+| `TYPE` | Always `pay` (case-insensitive) |
+| `UID` | Card UID |
+
+`TYPE` must fit the device: till readers send `pay`, doors send `in`/`out`. A mismatch is
+refused with `400` (`{"type": ["Till readers send `pay`."]}`), which usually means a device
+was configured with another device's key. **Till readers always need their API key**;
+the fixed-IP method is only for doors, because payments move money.
+
 
 - The server attaches an accepted tap to the **newest open (DRAFT) purchase at the
   device's counter**, and returns its id in `purchase`. If no purchase is open,

@@ -80,7 +80,7 @@ def test_lowercase_keys_and_values_work(doors, ada):
     ("payload", "field"),
     [
         ({"ID": "Door2", "Type": "in", "UID": "04A2B3C4"}, "device_id"),  # wrong door for key
-        ({"ID": "Door1", "Type": "sideways", "UID": "04A2B3C4"}, "direction"),
+        ({"ID": "Door1", "Type": "sideways", "UID": "04A2B3C4"}, "type"),
         ({"ID": "Door1", "Type": "in"}, "uid"),
     ],
 )
