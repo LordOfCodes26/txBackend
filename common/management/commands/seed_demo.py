@@ -39,7 +39,7 @@ class Command(BaseCommand):
                 self._catalog()
             self.stdout.write(self.style.SUCCESS("Demo sellers and goods created."))
             created = True
-        if not Seller.objects.filter(name="Demo Sports Center").exists():
+        if not Seller.objects.filter(name="Outdoor Playground").exists():
             with transaction.atomic():
                 self._rentals()
             self.stdout.write(self.style.SUCCESS("Demo rentals created."))
@@ -213,39 +213,34 @@ class Command(BaseCommand):
             )
 
     def _rentals(self):
+        """The outdoor playground: each court is its own bookable rental."""
         from datetime import time
 
-        center = Seller.objects.create(name="Demo Sports Center", contact_name="Center Desk")
-        outdoor = ServicePosition.objects.create(seller=center, name="Outdoor", location="Garden")
-        indoor = ServicePosition.objects.create(seller=center, name="Indoor", location="Basement")
-        goods.create_good(
-            actor=None,
-            service_position=outdoor,
-            name="Playground",
-            kind="RENTAL",
-            price="20.00",
-            description="Whole playground, exclusive use.",
-            rental={
-                "slot_minutes": 60,
-                "opening_time": time(8),
-                "closing_time": time(20),
-                "max_slots_per_booking": 3,
-                "max_days_ahead": 14,
-            },
+        seller = Seller.objects.create(name="Outdoor Playground", contact_name="Sports desk")
+        outdoor = ServicePosition.objects.create(
+            seller=seller, name="Courts", location="Outdoor playground"
         )
-        goods.create_good(
-            actor=None,
-            service_position=indoor,
-            name="Pool",
-            kind="RENTAL",
-            price="15.00",
-            description="Private pool session.",
-            rental={
-                "slot_minutes": 30,
-                "opening_time": time(9),
-                "closing_time": time(21),
-                "weekdays": [0, 1, 2, 3, 4, 5],
-                "max_slots_per_booking": 4,
-                "max_days_ahead": 30,
-            },
-        )
+        rules = {
+            "slot_minutes": 60,
+            "opening_time": time(7),
+            "closing_time": time(21),
+            "max_slots_per_booking": 2,
+            "max_slots_per_day": 2,
+            "max_days_ahead": 14,
+        }
+        for name, price in [
+            ("Football field", "30.00"),
+            ("Basketball court", "20.00"),
+            ("Volleyball court", "20.00"),
+            ("Tennis court 1", "15.00"),
+            ("Tennis court 2", "15.00"),
+        ]:
+            goods.create_good(
+                actor=None,
+                service_position=outdoor,
+                name=name,
+                kind="RENTAL",
+                price=price,
+                description="Outdoor playground, exclusive use per slot.",
+                rental=rules,
+            )
