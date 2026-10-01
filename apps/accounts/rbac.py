@@ -72,6 +72,7 @@ class Roles:
     DEVELOPER = "DEVELOPER"
     SELLER = "SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
+    BUILDING_OWNER = "BUILDING_OWNER"
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,14 @@ ROLES: dict[str, RoleSpec] = {
             "attendance.correct",
             "purchase.view",
         },
+    ),
+    # Like BOSS (read-only + statistics) but narrowed to the user's buildings
+    # (Building.owners), including the stores there. Users, roles and the audit log span
+    # all buildings, so they are left out.
+    Roles.BUILDING_OWNER: RoleSpec(
+        "Building owner",
+        "Sees the data, stores and statistics of their own buildings, read-only",
+        VIEW - {"user.view", "role.view", "audit.view"},
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.SELLER: RoleSpec("Seller", "Self-service access to own goods and sales"),

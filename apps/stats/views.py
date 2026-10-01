@@ -8,6 +8,7 @@ from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.rfid.scope import building_scope
 from common.permissions import HasPermissions
 
 from .services import company_stats
@@ -36,7 +37,8 @@ class PeriodSerializer(serializers.Serializer):
 class CompanyStatsView(APIView):
     """Company statistics for the BOSS dashboard (`stats.view`): developers, who is
     inside now, daily attendance, developer money (balances, deposits, spending) and
-    seller money (earnings, payouts), for a period of company-local days."""
+    seller money (earnings, payouts) and store sales, for a period of company-local days.
+    Building owners get the same figures limited to their buildings (`buildings`)."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"get": ["stats.view"]}
@@ -46,4 +48,5 @@ class CompanyStatsView(APIView):
         period = PeriodSerializer(data=request.query_params)
         period.is_valid(raise_exception=True)
         data = period.validated_data
-        return Response(company_stats(data["date_from"], data["date_to"]))
+        buildings = building_scope(request.user, "stats.view")  # building owners: theirs
+        return Response(company_stats(data["date_from"], data["date_to"], buildings))

@@ -3,6 +3,7 @@ from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.rfid.scope import BuildingScopedMixin, sellers_with_positions_in
 from common.permissions import HasPermissions
 
 from . import services
@@ -14,6 +15,7 @@ from .serializers import SellerSerializer, ServicePositionSerializer
 
 
 class SellerViewSet(
+    BuildingScopedMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -24,6 +26,10 @@ class SellerViewSet(
 
     queryset = Seller.objects.all()
     serializer_class = SellerSerializer
+
+    def filter_by_buildings(self, qs, scope):
+        return qs.filter(pk__in=sellers_with_positions_in(scope).values("pk"))
+
     permission_classes = [HasPermissions]
     required_permissions = {
         "list": ["seller.view"],
@@ -60,7 +66,7 @@ class SellerViewSet(
         return Response(SellerSerializer(seller).data)
 
 
-class ServicePositionViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
+class ServicePositionViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     """Sellers manage their own positions; users with seller.* (e.g. ADMIN) manage all.
     DELETE is soft."""
 
@@ -77,6 +83,7 @@ class ServicePositionViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     seller_actions = ("list", "retrieve", "create", "partial_update", "destroy")
     scope_permission = "seller.view"
     position_lookup = "pk"
+    building_lookup = "building"
     owner_only_actions = ("create", "destroy")
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = ServicePositionFilter

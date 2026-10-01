@@ -1,15 +1,17 @@
-"""Building-scoped access for the BUILDING_MANAGER role.
+"""Building-scoped access for the BUILDING_MANAGER and BUILDING_OWNER roles.
 
-A building manager is linked to one or more buildings (`Building.managers`). For a
-permission that the user holds only through BUILDING_MANAGER, every list is narrowed to
-those buildings and every change must stay inside them. If any other role of the user
-grants the same permission (e.g. MANAGER), that permission is unrestricted.
+A building manager is linked to buildings through `Building.managers`, a building owner
+through `Building.owners`. For a permission that the user holds only through these roles,
+every list (and the statistics) is narrowed to those buildings and every change must stay
+inside them. If any other role of the user grants the same permission (e.g. MANAGER or
+BOSS), that permission is unrestricted.
 """
 
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import ValidationError
 
-SCOPED_ROLE = "BUILDING_MANAGER"
+# Scoped role -> the user's related buildings for that role.
+SCOPED_ROLES = {"BUILDING_MANAGER": "managed_buildings", "BUILDING_OWNER": "owned_buildings"}
 _CACHE_ATTR = "_building_scopes"
 
 
@@ -22,12 +24,35 @@ def building_scope(user, permission: str) -> frozenset[int] | None:
         return None
     cache = user.__dict__.setdefault(_CACHE_ATTR, {})
     if permission not in cache:
-        roles = Role.objects.filter(user_roles__user=user, permissions__codename=permission)
-        if not roles.filter(code=SCOPED_ROLE).exists() or roles.exclude(code=SCOPED_ROLE).exists():
-            cache[permission] = None
+        codes = set(
+            Role.objects.filter(
+                user_roles__user=user, permissions__codename=permission
+            ).values_list("code", flat=True)
+        )
+        if not codes or codes - SCOPED_ROLES.keys():
+            cache[permission] = None  # no scoped role, or an unrestricted role also grants it
         else:
-            cache[permission] = frozenset(user.managed_buildings.values_list("pk", flat=True))
+            buildings = set()
+            for code in codes:
+                buildings |= set(getattr(user, SCOPED_ROLES[code]).values_list("pk", flat=True))
+            cache[permission] = frozenset(buildings)
     return cache[permission]
+
+
+def sellers_with_positions_in(buildings):
+    """Sellers (stores) with at least one active position in `buildings`."""
+    from apps.sellers.models import Seller
+
+    return Seller.objects.filter(positions__building__in=buildings).distinct()
+
+
+def sellers_within(buildings):
+    """Sellers whose active positions are ALL in `buildings` (and that have one there):
+    their seller-wide money (balance, payouts) belongs to those buildings only."""
+    from apps.sellers.models import ServicePosition
+
+    outside = ServicePosition.objects.exclude(building__in=buildings).values("seller")
+    return sellers_with_positions_in(buildings).exclude(pk__in=outside)
 
 
 def ensure_in_scope(user, permission: str, building_id, field: str = "building") -> None:

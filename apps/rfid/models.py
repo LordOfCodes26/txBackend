@@ -111,6 +111,10 @@ class Building(TimeStampedModel):
     managers = models.ManyToManyField(
         settings.AUTH_USER_MODEL, blank=True, related_name="managed_buildings"
     )
+    # Users with the BUILDING_OWNER role: read-only, statistics of this building.
+    owners = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name="owned_buildings"
+    )
 
     class Meta:
         ordering = ["code"]

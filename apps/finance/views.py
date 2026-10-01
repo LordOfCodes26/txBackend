@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
+from apps.rfid.scope import BuildingScopedMixin
 from common.idempotency import HEADER, require_idempotency_key
 from common.permissions import HasPermissions
 
@@ -37,8 +38,9 @@ def _own_developer(request) -> Developer:
     return developer
 
 
-class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
+class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = DeveloperAccount.objects.select_related("developer")
+    building_lookup = "developer__building"
     serializer_class = DeveloperAccountSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
@@ -126,8 +128,9 @@ class DeveloperAccountViewSet(viewsets.ReadOnlyModelViewSet):
         return self._transition(request, "reopen")
 
 
-class AccountTransactionViewSet(viewsets.ReadOnlyModelViewSet):
+class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
     queryset = AccountTransaction.objects.select_related("account__developer")
+    building_lookup = "account__developer__building"
     serializer_class = AccountTransactionSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["finance.view"], "retrieve": ["finance.view"], "me": []}

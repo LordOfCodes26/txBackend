@@ -202,6 +202,7 @@ Default roles, which admins can change:
 | FINANCE_MANAGER | Developer and seller finance, developer view, purchase view, audit log |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
 | SELLER | Nothing global; see *Seller self-service* below |
+| BUILDING_OWNER | Like BOSS (read-only + statistics) but **only their buildings**, including the stores there; no users, roles or audit log (see *Building owners* below) |
 | BUILDING_MANAGER | Developer view/create/update, RFID view/assign/block/devices, attendance view/correct, purchase view, **all limited to their buildings** (see *Building managers* below) |
 
 If `permissions` is empty, the user only has self-service pages (section 7).
@@ -258,6 +259,24 @@ position managers for their own): one row per sell position with
 `{service_position, service_position_name, seller, seller_name, building, building_name,
 sales_count, sales_total, bookings_count, bookings_total, total}`, highest total first.
 Use the purchase list filters, e.g. `?confirmed_after=2026-10-01T00:00:00Z&confirmed_before=…`.
+
+### Building owners
+
+A user with the **BUILDING_OWNER** role who is listed in a building's `owners`
+(`PATCH /rfid/buildings/{id}/ {"owners": [<user ids>]}`, by an ADMIN) sees, **read-only**,
+everything a BOSS sees, limited to their buildings:
+
+| Area | What they see |
+|---|---|
+| People | Developers whose home `building` is theirs; their cards, attendance, occupancy, developer accounts and ledger |
+| Doors | Their buildings' door devices and scans |
+| Stores | Sellers with a position in their buildings; those positions, their goods and stock history; purchases, bookings and `/purchases/performance/` of those positions |
+| Seller money | Balance, ledger and payouts only of stores whose positions are **all** in their buildings (a store that also sells elsewhere shows its sales here, not its seller-wide money) |
+| Statistics | `GET /stats/` with every figure limited to their buildings (`buildings` in the response) |
+
+Users, roles and the audit log are company-wide, so building owners don't get them (`403`).
+Every change returns `403`. If the user also has an unrestricted role such as BOSS, they
+see everything.
 
 ### Position managers
 
@@ -946,6 +965,12 @@ most 366 days. One request returns the whole dashboard:
 }
 ```
 
+- `buildings` is `null` for BOSS / ADMIN (whole company). For a **building owner** it lists
+  their buildings, and every figure is limited to them: their developers (home building)
+  and those developers' money, the stores in their buildings (`store_sales`), and seller
+  money only of stores entirely in their buildings.
+- `money.store_sales`: confirmed till sales and court bookings at the positions in scope
+  during the period: `{sales_total, sales_count, bookings_total, bookings_count}`.
 - `daily` lists **every** day of the period (zeros included), ready for a chart.
 - `developers.total` excludes terminated ones; `by_building` uses their home building
   (`null` = none set). `inside_now` is the live occupancy (same as `/attendance/occupancy/`).

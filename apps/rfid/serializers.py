@@ -188,10 +188,16 @@ class BuildingSerializer(serializers.ModelSerializer):
         queryset=get_user_model().objects.filter(is_active=True),
         help_text="User ids of the building's managers (give them the BUILDING_MANAGER role).",
     )
+    owners = serializers.PrimaryKeyRelatedField(
+        many=True,
+        required=False,
+        queryset=get_user_model().objects.filter(is_active=True),
+        help_text="User ids of the building's owners (give them the BUILDING_OWNER role).",
+    )
 
     class Meta:
         model = Building
-        fields = ["id", "code", "name", "managers", "created_at"]
+        fields = ["id", "code", "name", "managers", "owners", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 

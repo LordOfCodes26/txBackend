@@ -2,6 +2,10 @@
 
 Read-only aggregates over a period of company-local days. Every figure comes straight from
 the source tables (attendance summaries, ledgers), so it matches the detail lists.
+
+`buildings` (a building owner's view) narrows everything to those buildings: developers by
+home building, their attendance and money, and the stores there (sales at positions in the
+buildings; seller-wide money only for stores whose positions are all in them).
 """
 
 from datetime import date, datetime, time, timedelta
@@ -15,6 +19,9 @@ from apps.attendance.models import DailyAttendance
 from apps.attendance.occupancy import occupancy
 from apps.developers.models import Developer, DeveloperStatus
 from apps.finance.models import AccountTransaction, DeveloperAccount, TransactionKind
+from apps.purchases.models import Purchase, PurchaseKind, PurchaseStatus
+from apps.rfid.models import Building
+from apps.rfid.scope import sellers_within
 from apps.seller_finance.models import (
     PayoutStatus,
     SellerAccount,
@@ -42,8 +49,12 @@ def _local_bounds(first: date, last: date):
     return start, end
 
 
-def people(first: date, last: date) -> dict:
+def people(first: date, last: date, buildings=None) -> dict:
     alive = Developer.objects.filter(deleted_at__isnull=True)
+    attendance = DailyAttendance.objects.filter(work_date__range=(first, last))
+    if buildings is not None:
+        alive = alive.filter(building__in=buildings)
+        attendance = attendance.filter(developer__building__in=buildings)
     by_status = dict(alive.order_by().values_list("status").annotate(n=Count("pk")))
     by_building = [
         {"building": row["building"], "name": row["building__name"], "count": row["n"]}
@@ -55,8 +66,7 @@ def people(first: date, last: date) -> dict:
 
     rows = {
         row["work_date"]: row
-        for row in DailyAttendance.objects.filter(work_date__range=(first, last))
-        .order_by()
+        for row in attendance.order_by()
         .values("work_date")
         .annotate(present=Count("developer", distinct=True), avg_seconds=Avg("worked_seconds"))
     }
@@ -77,7 +87,7 @@ def people(first: date, last: date) -> dict:
             "by_status": {s: by_status.get(s, 0) for s in DeveloperStatus.values},
             "by_building": by_building,
         },
-        "inside_now": occupancy(),
+        "inside_now": occupancy(buildings),
         "attendance": {
             "daily": daily,
             "days_with_attendance": len(worked_days),
@@ -95,11 +105,25 @@ def people(first: date, last: date) -> dict:
     }
 
 
-def money(first: date, last: date) -> dict:
+def money(first: date, last: date, buildings=None) -> dict:
     start, end = _local_bounds(first, last)
     accounts = DeveloperAccount.objects.all()
-    by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
     period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
+    seller_accounts = SellerAccount.objects.all()
+    seller_period = SellerTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
+    payouts = SellerPayment.objects.filter(status__in=PENDING_PAYOUTS)
+    sales = Purchase.objects.filter(
+        status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
+    )
+    if buildings is not None:
+        accounts = accounts.filter(developer__building__in=buildings)
+        period = period.filter(account__developer__building__in=buildings)
+        own_stores = sellers_within(buildings)
+        seller_accounts = seller_accounts.filter(seller__in=own_stores)
+        seller_period = seller_period.filter(account__seller__in=own_stores)
+        payouts = payouts.filter(seller__in=own_stores)
+        sales = sales.filter(service_position__building__in=buildings)
+    by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
     totals = period.aggregate(
         deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
         deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
@@ -125,13 +149,16 @@ def money(first: date, last: date) -> dict:
         for day in _days(first, last)
     ]
 
-    seller_period = SellerTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
     seller_totals = seller_period.aggregate(
         earnings=Sum("amount", filter=Q(kind=SellerTransactionKind.SALE)),
         payouts=Sum("amount", filter=Q(kind=SellerTransactionKind.PAYOUT)),
     )
-    pending = SellerPayment.objects.filter(status__in=PENDING_PAYOUTS).aggregate(
-        count=Count("pk"), amount=Sum("amount")
+    pending = payouts.aggregate(count=Count("pk"), amount=Sum("amount"))
+    store_sales = sales.aggregate(
+        sales_total=Sum("total", filter=Q(kind=PurchaseKind.SALE)),
+        sales_count=Count("pk", filter=Q(kind=PurchaseKind.SALE)),
+        bookings_total=Sum("total", filter=Q(kind=PurchaseKind.BOOKING)),
+        bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
     )
     return {
         "developer_accounts": {
@@ -146,7 +173,7 @@ def money(first: date, last: date) -> dict:
         },
         "daily": daily,
         "sellers": {
-            "total_balance": _money(SellerAccount.objects.aggregate(t=Sum("balance"))["t"]),
+            "total_balance": _money(seller_accounts.aggregate(t=Sum("balance"))["t"]),
             "earnings": _money(seller_totals["earnings"]),
             "payouts_paid": _money(-(seller_totals["payouts"] or ZERO)),
             "payouts_pending": {
@@ -154,16 +181,28 @@ def money(first: date, last: date) -> dict:
                 "amount": _money(pending["amount"]),
             },
         },
+        "store_sales": {
+            "sales_total": _money(store_sales["sales_total"]),
+            "sales_count": store_sales["sales_count"],
+            "bookings_total": _money(store_sales["bookings_total"]),
+            "bookings_count": store_sales["bookings_count"],
+        },
     }
 
 
-def company_stats(first: date, last: date) -> dict:
+def company_stats(first: date, last: date, buildings=None) -> dict:
     return {
         "period": {
             "date_from": first.isoformat(),
             "date_to": last.isoformat(),
             "days": (last - first).days + 1,
         },
-        "people": people(first, last),
-        "money": money(first, last),
+        # null: the whole company; else the buildings these figures are limited to.
+        "buildings": None
+        if buildings is None
+        else list(
+            Building.objects.filter(pk__in=buildings).order_by("code").values("id", "code", "name")
+        ),
+        "people": people(first, last, buildings),
+        "money": money(first, last, buildings),
     }

@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.rfid.scope import BuildingScopedMixin, sellers_within
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 from apps.sellers.exceptions import SellerProfileNotFound
 from apps.sellers.models import Seller
@@ -31,7 +32,7 @@ IDEMPOTENCY_PARAM = OpenApiParameter(
 )
 
 
-class SellerAccountViewSet(viewsets.ReadOnlyModelViewSet):
+class SellerAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
     """`available_balance` = balance − `reserved` (open payouts)."""
 
     queryset = services.with_reserved(SellerAccount.objects.select_related("seller"))
@@ -44,6 +45,10 @@ class SellerAccountViewSet(viewsets.ReadOnlyModelViewSet):
     }
     filterset_fields = ["seller"]
     search_fields = ["seller__name"]
+
+    def filter_by_buildings(self, qs, scope):
+        return qs.filter(seller__in=sellers_within(scope))
+
     ordering_fields = ["balance", "seller__name", "updated_at"]
 
     @extend_schema(responses=SellerAccountSerializer)
@@ -58,7 +63,9 @@ class SellerAccountViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(SellerAccountSerializer(account).data)
 
 
-class SellerTransactionViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+class SellerTransactionViewSet(
+    BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
+):
     queryset = SellerTransaction.objects.select_related("account__seller")
     serializer_class = SellerTransactionSerializer
     permission_classes = [CatalogPermission]
@@ -70,6 +77,10 @@ class SellerTransactionViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModel
     scope_permission = "seller_finance.view"
     seller_lookup = "account__seller"
     filterset_class = SellerTransactionFilter
+
+    def filter_by_buildings(self, qs, scope):
+        return qs.filter(account__seller__in=sellers_within(scope))
+
     search_fields = ["description", "reference"]
     ordering_fields = ["created_at", "amount"]
 
@@ -79,6 +90,7 @@ class SellerTransactionViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModel
 
 
 class SellerPaymentViewSet(
+    BuildingScopedMixin,
     SellerScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -107,6 +119,10 @@ class SellerPaymentViewSet(
     seller_actions = ("list", "retrieve", "create", "cancel")
     scope_permission = "seller_finance.view"
     filterset_class = SellerPaymentFilter
+
+    def filter_by_buildings(self, qs, scope):
+        return qs.filter(seller__in=sellers_within(scope))
+
     ordering_fields = ["created_at", "amount", "status"]
 
     @staticmethod

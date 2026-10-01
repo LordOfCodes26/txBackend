@@ -391,10 +391,12 @@ class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         serializer.save()
 
     def perform_update(self, serializer):
-        if self._scoped() and "managers" in serializer.validated_data:
-            raise ValidationError(
-                {"managers": [_("Building managers can't change who manages a building.")]}
-            )
+        if self._scoped():
+            for field in ("managers", "owners"):
+                if field in serializer.validated_data:
+                    raise ValidationError(
+                        {field: [_("Building managers can't change who manages a building.")]}
+                    )
         serializer.save()
 
     def perform_destroy(self, instance):

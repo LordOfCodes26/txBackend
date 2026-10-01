@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
 
 from . import services
@@ -29,7 +30,7 @@ ALL_GOOD_ACTIONS = (
 )
 
 
-class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
+class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     """Seller managers manage every good; an active seller manages their own.
 
     DELETE is a soft delete. Stock changes only through `POST /goods/{id}/stock/`.
@@ -54,6 +55,7 @@ class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
     scope_permission = "good.view"
     seller_lookup = "service_position__seller"
     position_lookup = "service_position"
+    building_lookup = "service_position__building"
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = GoodFilter
@@ -122,7 +124,9 @@ class GoodViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class InventoryMovementViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+class InventoryMovementViewSet(
+    BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
+):
     queryset = InventoryMovement.objects.select_related("good")
     serializer_class = InventoryMovementSerializer
     permission_classes = [CatalogPermission]
@@ -131,6 +135,7 @@ class InventoryMovementViewSet(SellerScopedQuerysetMixin, viewsets.ReadOnlyModel
     scope_permission = "good.view"
     seller_lookup = "good__service_position__seller"
     position_lookup = "good__service_position"
+    building_lookup = "good__service_position__building"
     filterset_class = InventoryMovementFilter
     ordering_fields = ["created_at"]
 
