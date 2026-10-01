@@ -20,8 +20,9 @@ class Booking(TimeStampedModel):
     Paid through a CONFIRMED `Purchase`, so the developer's ledger, the seller's earnings
     and the reconciliation checks treat it like any other sale. Bookings are final.
 
-    The exclusion constraint makes overlapping bookings of the same rental impossible
-    at the database level, even under concurrent requests. Ranges are half-open
+    Exclusion constraints make overlapping bookings impossible at the database level, even
+    under concurrent requests: of the same court, and by the same developer (one court at a
+    time per person). Ranges are half-open
     [start, end), so back-to-back slots (13:00-14:00, 14:00-15:00) are fine.
     """
 
@@ -42,6 +43,14 @@ class Booking(TimeStampedModel):
                 name="booking_no_overlap",
                 expressions=[
                     ("good", RangeOperators.EQUAL),
+                    (TsTzRange("start", "end", RangeBoundary()), RangeOperators.OVERLAPS),
+                ],
+            ),
+            # One developer can't hold two courts at the same time.
+            ExclusionConstraint(
+                name="booking_one_court_per_developer",
+                expressions=[
+                    ("developer", RangeOperators.EQUAL),
                     (TsTzRange("start", "end", RangeBoundary()), RangeOperators.OVERLAPS),
                 ],
             ),

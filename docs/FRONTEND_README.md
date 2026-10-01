@@ -266,6 +266,7 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 `INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
 `DAILY_LIMIT_REACHED` (`details: {max_slots_per_day, already_booked, remaining}`),
+`ALREADY_BOOKED_THEN` (`details: {booking, good, start, end}`),
 `IN_USE` (deleting something still referenced, e.g. a building that has doors), `CONFLICT`.
 
 ### Lists: pagination, search, filters, sorting
@@ -623,11 +624,16 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
    slot's `start` exactly as returned by availability, plus the number of `slots`.
 4. On `201`, show the booking with `total` and `balance_after`.
 
-- **Bookings are exclusive and final.** Nobody else can book an overlapping time, and a
-  booking can't be cancelled or refunded.
+- Only the **outdoor playground** is bookable; each court (football, basketball, volleyball,
+  tennis, …) is its own rental, and different courts can be booked for the same time.
+- **Bookings are exclusive and final.** Nobody else can book an overlapping time on the same
+  court, **one developer can't hold two courts at the same time**, and a booking can't be
+  cancelled or refunded.
 - `SLOT_UNAVAILABLE` (409): someone booked it first, so reload availability.
   `DAILY_LIMIT_REACHED` (409): the developer already has too many slots on this rental that
   day; `details` has `max_slots_per_day`, `already_booked` and `remaining`.
+  `ALREADY_BOOKED_THEN` (409): the developer already has another court at that time;
+  `details` has the existing `booking`, `good` (court name), `start` and `end`.
   `INVALID_SLOT` (400): off the slot grid, outside opening hours, a closed day, in the
   past, too far ahead, or too many slots (`details` says which limit).
 - A booking appears in the developer's statement and purchases (`/purchases/me/`) like a

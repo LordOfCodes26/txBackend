@@ -465,3 +465,106 @@ def test_rentals_need_a_positive_price(auth_client, world):
     assert "price" in r.json()["error"]["details"]
     r = client.patch(f"{GOODS}{world.playground.pk}/", {"price": "0"}, format="json")
     assert "price" in r.json()["error"]["details"]
+
+
+@pytest.mark.django_db
+def test_one_developer_cannot_hold_two_courts_at_once(dev_client, world):
+    other_court = Good.objects.create(
+        service_position=world.position,
+        name="Tennis court",
+        price="15.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=other_court,
+        slot_minutes=60,
+        opening_time=time(8),
+        closing_time=time(20),
+        max_slots_per_booking=3,
+    )
+    first = book(dev_client, world, tomorrow_at(10), slots=2)  # Playground 10-12
+    assert first.status_code == 201
+
+    r = book(dev_client, world, tomorrow_at(11), good=other_court)  # overlaps 11-12
+    assert r.status_code == 409
+    err = r.json()["error"]
+    assert err["code"] == "ALREADY_BOOKED_THEN"
+    assert (err["details"]["booking"], err["details"]["good"]) == (first.json()["id"], "Playground")
+    # Right after is fine.
+    assert book(dev_client, world, tomorrow_at(12), good=other_court).status_code == 201
+
+
+@pytest.mark.django_db
+def test_database_blocks_overlapping_bookings_of_one_developer(dev_client, world):
+    book(dev_client, world, tomorrow_at(10))
+    existing = Booking.objects.get()
+    court = Good.objects.create(
+        service_position=world.position,
+        name="Court",
+        price="5.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Booking.objects.create(
+            good=court,
+            developer=world.developer,
+            purchase=existing.purchase,
+            start=tomorrow_at(10),
+            end=tomorrow_at(11),
+            slots=1,
+        )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_same_developer_racing_for_two_courts_gets_one(world):
+    court = Good.objects.create(
+        service_position=world.position,
+        name="Tennis court",
+        price="15.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=court,
+        slot_minutes=60,
+        opening_time=time(8),
+        closing_time=time(20),
+        max_slots_per_booking=3,
+    )
+    start = tomorrow_at(10)
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def attempt(good):
+        try:
+            barrier.wait()
+            outcomes.append(
+                services.book(
+                    actor=None,
+                    developer=world.developer,
+                    good=good,
+                    start=start,
+                    slots=1,
+                    pin=PIN,
+                    idempotency_key=key(),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            outcomes.append(exc)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=attempt, args=(g,)) for g in (world.playground, court)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(isinstance(o, tuple) for o in outcomes) == 1, outcomes
+    assert [getattr(o, "code", None) for o in outcomes if not isinstance(o, tuple)] == [
+        "ALREADY_BOOKED_THEN"
+    ]
+    winner = Booking.objects.get()  # either court may win the race
+    assert balance(world) == Decimal("100.00") - winner.good.price  # charged exactly once

@@ -16,7 +16,13 @@ from apps.purchases.services import INACTIVE_DEVELOPER
 from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus
 
-from .exceptions import DailyLimitReached, InvalidSlot, RentalNotAvailable, SlotUnavailable
+from .exceptions import (
+    AlreadyBookedThen,
+    DailyLimitReached,
+    InvalidSlot,
+    RentalNotAvailable,
+    SlotUnavailable,
+)
 from .models import Booking
 
 
@@ -177,6 +183,20 @@ def book(
             if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
                 raise SlotUnavailable()
             _ensure_daily_limit(rules, good, developer, start, slots)
+            clash = (
+                Booking.objects.filter(developer=developer, start__lt=end, end__gt=start)
+                .select_related("good")
+                .first()
+            )
+            if clash is not None:
+                raise AlreadyBookedThen(
+                    details={
+                        "booking": clash.pk,
+                        "good": clash.good.name,
+                        "start": clash.start.isoformat(),
+                        "end": clash.end.isoformat(),
+                    }
+                )
 
             total = finance.money(good.price * slots)
             if total <= 0:
@@ -223,6 +243,10 @@ def book(
                         slots=slots,
                     )
             except IntegrityError as exc:
+                # A concurrent request won: either the court or the developer's time is taken.
+                cause = getattr(exc.__cause__, "diag", None)
+                if cause is not None and cause.constraint_name == "booking_one_court_per_developer":
+                    raise AlreadyBookedThen() from exc
                 raise SlotUnavailable() from exc
 
             record_audit(
