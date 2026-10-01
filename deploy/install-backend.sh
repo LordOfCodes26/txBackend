@@ -178,6 +178,7 @@ else
 fi
 
 IP=$(hostname -I | awk '{print $1}')
+[[ -n "$IP" ]] || IP=$(hostname)
 if (( FAILED )); then
     say "Installed $VERSION, but some checks failed (see above)."
     echo "    Logs: journalctl -u backend-web -u backend-tcp -u backend-ws -n 100"
