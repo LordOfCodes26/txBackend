@@ -503,7 +503,9 @@ the response.
 3. The developer taps their card on the counter's **till reader**. The card-reader program on
    the seller's computer sends the tap straight to the server (see `DEVICE_INTEGRATION.md`),
    which attaches it to this purchase. **The web app never reads or sends card numbers.**
-4. Poll `GET /purchases/{id}/` (every ~1 s while waiting) until `presented_card` is set:
+4. Wait for the tap: listen on the counter's WebSocket (section *Realtime* below) for
+   `card_tapped`, or as a fallback poll `GET /purchases/{id}/` every ~1 s until
+   `presented_card` is set:
    `{"developer": {...}, "presented_at": "...", "expires_at": "..."}`. Show
    "**Ada Lovelace** - enter your PIN". A newer tap replaces it; after `expires_at` it
    becomes `null` again (ask for another tap).
@@ -558,6 +560,33 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - A booking appears in the developer's statement and purchases (`/purchases/me/`) like a
   till purchase, and in the seller's earnings.
 - Sellers see who booked what at `/bookings/?date=…`, e.g. for a daily schedule screen.
+
+### Realtime (WebSocket) for the till screen
+
+The server pushes counter events, so the seller's screen updates the moment a card is
+tapped, with no polling.
+
+1. `POST /api/v1/realtime/ticket/` (normal auth) → `{"ticket": "...", "expires_in": 30}`.
+   A ticket works **once** within 30 seconds; get a new one for every (re)connect.
+2. Open `wss://<host>/ws/counters/<service_position_id>/?ticket=<ticket>`
+   (`ws://` on a plain-HTTP setup). Allowed: the counter's own active seller, and users
+   with `purchase.view`.
+3. The first message is `{"type": "connected", "service_position": 3, "as": "user:7"}`.
+   Every event has the shape `{"type", "service_position", "sent_at", "data"}`:
+
+| `type` | `data` | Screen action |
+|---|---|---|
+| `card_tapped` | `result`, `accepted`, `display_message`, `developer`, `purchase` (id or null) | Accepted with a purchase: show the name and ask for the PIN. Otherwise show `display_message` in red |
+| `purchase_updated` | the full purchase (as `GET /purchases/{id}/`) | Re-render the bucket (useful for a second, customer-facing screen) |
+| `purchase_confirmed` | the full purchase, incl. `total`, `balance_after`, `developer` | Show "Paid" and start a new purchase |
+| `purchase_cancelled` | the full purchase | Clear the bucket |
+
+- Close codes: `4401` bad or used ticket (get a new one), `4403` not your counter,
+  `4404` unknown counter. Reconnect with backoff (1, 2, 5, 10 s) and **refetch the open
+  purchase after every reconnect**, because events sent while disconnected are not replayed.
+- Optional keep-alive: send `{"type": "ping"}` and receive `{"type": "pong"}`.
+- With the BFF setup, the browser connects to the WebSocket directly (only `/ws/` needs to
+  be reachable). Getting the ticket goes through your normal API path.
 
 ### Seller finance and payouts
 

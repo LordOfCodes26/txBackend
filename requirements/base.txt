@@ -12,3 +12,7 @@ psycopg[binary]>=3.2,<4.0
 redis>=5.2
 django-redis>=6.0
 celery>=5.5,<6.0
+channels>=4.2
+channels-redis>=4.2
+uvicorn>=0.30
+websockets>=13

@@ -8,6 +8,7 @@ from .base import REST_FRAMEWORK  # noqa: E402
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {"auth": "1000/min"}

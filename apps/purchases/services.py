@@ -13,6 +13,7 @@ from apps.finance.models import DeveloperAccount, TransactionKind
 from apps.goods import services as goods
 from apps.goods.exceptions import InsufficientStock
 from apps.goods.models import Good, GoodKind, MovementKind
+from apps.realtime.notify import notify_purchase
 from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
 from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus, ServicePosition
@@ -86,22 +87,25 @@ def add_item(*, purchase: Purchase, good: Good, quantity: int) -> PurchaseItem:
         item.quantity += quantity
     _check_stock_hint(good, item.quantity)
     item.save()
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 
 
 @transaction.atomic
 def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
-    _lock_draft(purchase)
+    purchase = _lock_draft(purchase)
     _check_stock_hint(item.good, quantity)
     item.quantity = quantity
     item.save(update_fields=["quantity"])
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
     return item
 
 
 @transaction.atomic
 def remove_item(*, purchase: Purchase, item: PurchaseItem) -> None:
-    _lock_draft(purchase)
+    purchase = _lock_draft(purchase)
     item.delete()
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
 
 
 def _check_stock_hint(good: Good, quantity: int) -> None:
@@ -118,6 +122,7 @@ def cancel_purchase(*, actor, purchase: Purchase) -> Purchase:
     purchase.status = PurchaseStatus.CANCELLED
     purchase.cancelled_at = timezone.now()
     purchase.save(update_fields=["status", "cancelled_at", "updated_at"])
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_cancelled")
     return purchase
 
 
@@ -307,4 +312,5 @@ def confirm_purchase(
                 "balance_after": txn.balance_after,
             },
         )
+        notify_purchase(purchase.pk, purchase.service_position_id, "purchase_confirmed")
     return purchase, True

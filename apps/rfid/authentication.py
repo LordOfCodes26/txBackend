@@ -5,6 +5,14 @@ from rest_framework.exceptions import AuthenticationFailed
 from .models import RFIDDevice
 
 
+def device_for_key(key: str) -> RFIDDevice | None:
+    """The active device owning this API key, or None."""
+    for device in RFIDDevice.objects.filter(api_key_prefix=key[:8], is_active=True):
+        if device.check_api_key(key):
+            return device
+    return None
+
+
 class DevicePrincipal:
     """`request.user` for a reader. It holds no RBAC permissions."""
 
@@ -35,11 +43,10 @@ class DeviceAuthentication(BaseAuthentication):
             return None
         if len(parts) != 2:
             raise AuthenticationFailed("Invalid device credentials.")
-        key = parts[1].decode(errors="ignore")
-        for device in RFIDDevice.objects.filter(api_key_prefix=key[:8], is_active=True):
-            if device.check_api_key(key):
-                return DevicePrincipal(device), device
-        raise AuthenticationFailed("Invalid device credentials.")
+        device = device_for_key(parts[1].decode(errors="ignore"))
+        if device is None:
+            raise AuthenticationFailed("Invalid device credentials.")
+        return DevicePrincipal(device), device
 
     def authenticate_header(self, request):
         return self.keyword

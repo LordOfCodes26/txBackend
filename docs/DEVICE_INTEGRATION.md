@@ -160,6 +160,23 @@ A response with `accepted: false` is still a **successful request**; don't retry
 - **Never buffer till taps.** If the server can't be reached, show "Offline - cannot pay
   right now" and discard the tap. A late tap would be ignored anyway.
 
+### Live counter events for the till program (optional)
+
+Besides the immediate reply to each tap, a TILL program can listen to its counter's live
+events, e.g. to show "Paid ✓ Ada Lovelace" when the seller confirms:
+
+```
+wss://<server>/ws/counters/<service_position_id>/
+Authorization: Device <api_key>          (sent as a header on the WebSocket handshake)
+```
+
+The `service_position` id is in the heartbeat response. Messages are JSON
+`{"type", "service_position", "sent_at", "data"}` with types `card_tapped`,
+`purchase_updated`, `purchase_confirmed` (data includes `total`, `balance_after`,
+`developer`) and `purchase_cancelled`. The connection is closed with code `4401` for a bad
+key and `4403` if the key belongs to another counter. Reconnect with backoff if it drops;
+events missed while disconnected are not replayed.
+
 ---
 
 ## 5. Retries and offline buffering (ATTENDANCE devices)

@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.purchases",
     "apps.seller_finance",
     "apps.bookings",
+    "apps.realtime",
 ]
 
 MIDDLEWARE = [
@@ -91,6 +92,14 @@ CACHES = {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
         "OPTIONS": {"SOCKET_CONNECT_TIMEOUT": 2, "SOCKET_TIMEOUT": 2},
+    }
+}
+
+# Realtime (WebSockets via Django Channels, served by uvicorn at /ws/).
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL], "capacity": 500, "expiry": 30},
     }
 }
 

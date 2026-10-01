@@ -1,0 +1,15 @@
+[Unit]
+Description=Backend staging realtime WebSockets (uvicorn on 127.0.0.1:8092)
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+WorkingDirectory=/root/backend
+EnvironmentFile=/root/backend/.env.staging
+ExecStart=/root/backend/.venv/bin/uvicorn config.asgi:application \
+    --host 127.0.0.1 --port 8092 --workers 1 --proxy-headers --no-access-log
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

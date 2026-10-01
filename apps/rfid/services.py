@@ -277,6 +277,10 @@ def record_scan(
         from apps.purchases.services import present_card
 
         present_card(event)
+    if device.purpose == DevicePurpose.TILL:
+        from apps.realtime.notify import notify_card_tapped
+
+        notify_card_tapped(event)
     return event, True
 
 
