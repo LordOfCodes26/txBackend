@@ -84,7 +84,7 @@ def recompute_day(developer_id: int, work_date: date) -> DailyAttendance | None:
     Developer.all_objects.select_for_update().filter(pk=developer_id).exists()
 
     records = list(
-        AttendanceRecord.objects.select_related("device")
+        AttendanceRecord.objects.select_related("device", "rfid_event")
         .filter(developer_id=developer_id, work_date=work_date, is_void=False)
         .order_by("event_time", "id")
     )

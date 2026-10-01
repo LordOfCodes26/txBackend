@@ -400,8 +400,10 @@ edit pages, not in list tables.
 - Daily `status`: `PRESENT` or `INCOMPLETE` (a single scan, or an IN without an OUT).
   **No row means no scans that day**; absence and lateness aren't calculated yet.
 - `worked_hours` is a ready-to-display number; `worked_seconds` is exact.
-- `event_type` is `SCAN` until the company picks an IN/OUT rule, then `IN`/`OUT`. It can
-  change after the rule changes, so always display the value from the API; never derive it.
+- `event_type` is `IN`/`OUT` as reported by the building doors (`Door1` = Building 1,
+  `Door2` = Building 2; see the record's `device_code`). It can be recalculated if the rule
+  changes, so always display the value from the API; never derive it.
+- Raw scans (`/rfid/events/`) carry `direction` (`IN`, `OUT` or empty).
 - Show voided records struck through, with `void_reason`, rather than hiding them.
 
 ### Sellers and service positions

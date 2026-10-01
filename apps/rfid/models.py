@@ -181,6 +181,11 @@ class RFIDDevice(TimeStampedModel):
         return secrets.compare_digest(self.api_key_hash, self.hash_key(key))
 
 
+class ScanDirection(models.TextChoices):
+    IN = "IN", "In"
+    OUT = "OUT", "Out"
+
+
 class ScanResult(models.TextChoices):
     ACCEPTED = "ACCEPTED", "Accepted"
     DUPLICATE = "DUPLICATE", "Duplicate (debounced)"
@@ -213,6 +218,12 @@ class RFIDEvent(AppendOnlyModel):
     )
     event_time = models.DateTimeField()
     received_at = models.DateTimeField(default=timezone.now)
+    direction = models.CharField(
+        max_length=3,
+        choices=ScanDirection.choices,
+        blank=True,
+        help_text="In/out as reported by the device with this scan (blank if not reported).",
+    )
     result = models.CharField(max_length=20, choices=ScanResult.choices)
 
     class Meta:

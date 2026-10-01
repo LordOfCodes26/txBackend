@@ -13,6 +13,7 @@ from .models import (
     RFIDCardAssignment,
     RFIDDevice,
     RFIDEvent,
+    ScanDirection,
     normalize_uid,
     uid_validator,
 )
@@ -177,25 +178,55 @@ class RFIDEventSerializer(serializers.ModelSerializer):
             "developer",
             "event_time",
             "received_at",
+            "direction",
             "result",
         ]
         read_only_fields = fields
 
 
+# Field names used by the door devices: {"ID": "Door1", "Type": "in", "UID": "..."}.
+# Keys are matched case-insensitively and mapped onto our names.
+_DEVICE_FIELD_ALIASES = {"id": "device_id", "type": "direction"}
+
+
+class DirectionField(serializers.ChoiceField):
+    def __init__(self, **kwargs):
+        super().__init__(choices=ScanDirection.choices, **kwargs)
+
+    def to_internal_value(self, data):
+        return super().to_internal_value(str(data).strip().upper())
+
+
 class ScanSerializer(serializers.Serializer):
-    """Payload a reader sends."""
+    """Payload a reader sends. Accepts both our field names and the door devices' format
+    `{"ID": "Door1", "Type": "in", "UID": "04A2B3C4"}`."""
 
     uid = UIDField()
     device_id = serializers.CharField(
-        required=False, help_text="Optional; must match the authenticated reader's code."
+        required=False, help_text="Device code (the doors' `ID`); must match the device's key."
+    )
+    direction = DirectionField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="`in` / `out` as reported by the device (the doors' `Type`).",
     )
     event_time = serializers.DateTimeField(required=False)
     client_event_id = serializers.CharField(
         max_length=64, required=False, allow_blank=True, default=""
     )
 
+    def to_internal_value(self, data):
+        if hasattr(data, "items"):
+            normalized = {}
+            for key, value in data.items():
+                name = str(key).lower()
+                normalized[_DEVICE_FIELD_ALIASES.get(name, name)] = value
+            data = normalized
+        return super().to_internal_value(data)
+
     def validate_device_id(self, value):
-        if value != self.context["device"].code:
+        if value.strip().lower() != self.context["device"].code.lower():
             raise serializers.ValidationError("Does not match the authenticated device.")
         return value
 
@@ -233,6 +264,7 @@ class ScanResponseSerializer(serializers.ModelSerializer):
             "id",
             "result",
             "accepted",
+            "direction",
             "display_message",
             "developer",
             "purchase",
@@ -250,6 +282,8 @@ class ScanResponseSerializer(serializers.ModelSerializer):
                 if self.get_purchase(obj) is None:
                     return "No open purchase at this counter"
                 return f"{obj.developer.full_name} - enter PIN"
+            if obj.direction == "OUT":
+                return f"Goodbye, {obj.developer.full_name}"
             return f"Welcome, {obj.developer.full_name}"
         return DISPLAY_MESSAGES.get(obj.result, obj.result)
 
@@ -273,6 +307,15 @@ class BatchScanItemSerializer(serializers.Serializer):
     uid = UIDField()
     event_time = serializers.DateTimeField()
     client_event_id = serializers.CharField(max_length=64)
+    direction = DirectionField(required=False, allow_blank=True, default="")
+
+    def to_internal_value(self, data):
+        if hasattr(data, "items"):
+            data = {
+                _DEVICE_FIELD_ALIASES.get(str(k).lower(), str(k).lower()): v
+                for k, v in data.items()
+            }
+        return super().to_internal_value(data)
 
     def validate_event_time(self, value):
         limit = timezone.now() + timedelta(seconds=settings.RFID_MAX_FUTURE_SKEW_SECONDS)

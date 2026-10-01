@@ -4,7 +4,7 @@ How RFID devices talk to the backend. Two kinds of devices connect over the netw
 
 | Purpose | What it is | A scan means |
 |---|---|---|
-| `ATTENDANCE` | Network reader at an entrance or exit | The developer arrived or left (attendance) |
+| `ATTENDANCE` | Door device of a building (`Door1` = Building 1, `Door2` = Building 2) | The developer came in or went out (attendance) |
 | `TILL` | The card-reader **program on a seller's computer** | The developer is paying at this counter |
 
 Both use the same authentication, scan endpoint and heartbeat. Differences are called out
@@ -112,9 +112,31 @@ Authorization: Device <api_key>
 | Field | Required | Notes |
 |---|---|---|
 | `uid` | yes | Card UID in hex. `:`, `-` and spaces are ignored, and case doesn't matter |
+| `direction` | attendance doors | `in` or `out`, as reported by the door. Used for attendance |
 | `event_time` | recommended | When the card was read (device clock). Default: time received |
 | `client_event_id` | strongly recommended | Unique per scan, 1–64 chars. Makes retries safe (section 5) |
 | `device_id` | no | If sent, must equal the device's `code` |
+
+**Door device format.** The building doors send their own field names, which the server
+accepts as-is (key names and values are case-insensitive):
+
+```http
+POST /api/v1/rfid/events/
+Authorization: Device <api_key of Door1>
+
+{"ID": "Door1", "Type": "in", "UID": "04A2B3C4"}
+```
+
+| Door field | Meaning | Server field |
+|---|---|---|
+| `ID` | `Door1` or `Door2`; must be the code of the device whose key is used | `device_id` |
+| `Type` | `in` or `out` | `direction` |
+| `UID` | Card UID | `uid` |
+
+The reply's `display_message` is "Welcome, <name>" for `in` and "Goodbye, <name>" for `out`.
+An `in` followed quickly by an `out` is two real movements; only the *same* direction
+repeated within 10 seconds is marked `DUPLICATE`. Attendance pairs `in`/`out` across both
+buildings, e.g. in at Door1 and out at Door2 counts as one stretch of work.
 
 Response (`201` new scan, `200` = this `client_event_id` was already received):
 
@@ -123,6 +145,7 @@ Response (`201` new scan, `200` = this `client_event_id` was already received):
   "id": 4711,
   "result": "ACCEPTED",
   "accepted": true,
+  "direction": "",
   "display_message": "Ada Lovelace - enter PIN",
   "developer": {"id": 1, "employee_number": "E0001", "full_name": "Ada Lovelace", "department": "Engineering"},
   "purchase": 52,
@@ -224,21 +247,29 @@ import time, uuid, requests
 
 API = "https://server/api/v1"
 HEADERS = {"Authorization": f"Device {API_KEY}"}
-VERIFY = "/etc/company-ca.pem"          # internal CA; never verify=False
+VERIFY = "/etc/company-ca.pem"  # internal CA; never verify=False
+
 
 def heartbeat():
-    r = requests.post(f"{API}/rfid/device/heartbeat/", json={"app_version": "till-agent 1.0"},
-                      headers=HEADERS, timeout=5, verify=VERIFY)
+    r = requests.post(
+        f"{API}/rfid/device/heartbeat/",
+        json={"app_version": "till-agent 1.0"},
+        headers=HEADERS,
+        timeout=5,
+        verify=VERIFY,
+    )
     r.raise_for_status()
     return r.json()
 
-def on_card(uid):                        # called by the reader driver for every tap
+
+def on_card(uid):  # called by the reader driver for every tap
     scan = {"uid": uid, "event_time": utc_now_iso(), "client_event_id": str(uuid.uuid4())}
-    for delay in (0, 1, 2):              # a few quick retries, then give up (no buffering)
+    for delay in (0, 1, 2):  # a few quick retries, then give up (no buffering)
         time.sleep(delay)
         try:
-            r = requests.post(f"{API}/rfid/events/", json=scan, headers=HEADERS,
-                              timeout=5, verify=VERIFY)
+            r = requests.post(
+                f"{API}/rfid/events/", json=scan, headers=HEADERS, timeout=5, verify=VERIFY
+            )
         except requests.RequestException:
             continue
         if r.status_code == 401:

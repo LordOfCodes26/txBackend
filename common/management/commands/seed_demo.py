@@ -44,14 +44,24 @@ class Command(BaseCommand):
                 self._rentals()
             self.stdout.write(self.style.SUCCESS("Demo rentals created."))
             created = True
+        if not rfid.RFIDDevice.objects.filter(code__in=["Door1", "Door2"]).exists():
+            for code, building in (("Door1", "Building 1"), ("Door2", "Building 2")):
+                _, door_key = rfid.register_device(
+                    actor=None, code=code, name=f"{building} door", location=building
+                )
+                self.stdout.write(f"Door device {code} API key (shown only now): {door_key}")
+            created = True
         if not rfid.RFIDDevice.objects.filter(purpose="TILL").exists():
             counter = ServicePosition.objects.filter(
                 seller__name="Demo Cafe", name="Counter 1"
             ).first()
             if counter is not None:
                 _, till_key = rfid.register_device(
-                    actor=None, code="TILL-CAFE-1", name="Cafe counter 1 reader",
-                    purpose="TILL", service_position=counter,
+                    actor=None,
+                    code="TILL-CAFE-1",
+                    name="Cafe counter 1 reader",
+                    purpose="TILL",
+                    service_position=counter,
                 )
                 self.stdout.write(self.style.SUCCESS("Demo till device created."))
                 self.stdout.write(f"Till TILL-CAFE-1 API key (shown only now): {till_key}")

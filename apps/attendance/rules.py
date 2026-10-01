@@ -5,8 +5,9 @@ are recalculated, so run `manage.py rebuild_attendance` afterwards.
 
   none    Scans are not labelled. Worked time = last scan - first scan.
   toggle  Scans alternate IN, OUT, IN, ... in time order.
-  device  Scans take the reader's direction (entrance = IN, exit = OUT); readers
-          set to BOTH (and manual records) fall back to toggling.
+  device  Each scan's direction as reported by the device (the doors send in/out);
+          otherwise the reader's configured direction (entrance = IN, exit = OUT);
+          otherwise (readers set to BOTH, manual records) toggling.
 """
 
 from datetime import datetime
@@ -31,7 +32,8 @@ def classify_toggle(records) -> list[str]:
 def classify_device(records) -> list[str]:
     types: list[str] = []
     for record in records:
-        direction = record.device.direction if record.device else DeviceDirection.BOTH
+        reported = record.rfid_event.direction if record.rfid_event_id else ""
+        direction = reported or (record.device.direction if record.device else DeviceDirection.BOTH)
         if direction == DeviceDirection.IN:
             types.append(EventType.IN)
         elif direction == DeviceDirection.OUT:

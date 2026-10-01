@@ -240,7 +240,12 @@ def update_device(*, actor, device: RFIDDevice, **changes) -> RFIDDevice:
 
 
 def record_scan(
-    *, device: RFIDDevice, uid: str, event_time=None, client_event_id: str = ""
+    *,
+    device: RFIDDevice,
+    uid: str,
+    event_time=None,
+    client_event_id: str = "",
+    direction: str = "",
 ) -> tuple[RFIDEvent, bool]:
     """Store and classify one scan. Returns (event, created).
 
@@ -261,6 +266,7 @@ def record_scan(
                 event_time=event_time or now,
                 received_at=now,
                 client_event_id=client_event_id,
+                direction=direction,
             )
     except IntegrityError:
         if not client_event_id:
@@ -284,7 +290,9 @@ def record_scan(
     return event, True
 
 
-def _classify_and_store(*, device, uid, event_time, received_at, client_event_id) -> RFIDEvent:
+def _classify_and_store(
+    *, device, uid, event_time, received_at, client_event_id, direction=""
+) -> RFIDEvent:
     card = RFIDCard.objects.select_for_update().filter(uid=uid).first()
     assignment = _active_assignment(card) if card else None
     developer = assignment.developer if assignment else None
@@ -299,7 +307,7 @@ def _classify_and_store(*, device, uid, event_time, received_at, client_event_id
         result = ScanResult.UNASSIGNED_CARD
     elif developer.deleted_at or developer.status in REJECTED_DEVELOPER_STATUSES:
         result = ScanResult.INACTIVE_DEVELOPER
-    elif device.purpose == DevicePurpose.ATTENDANCE and _is_duplicate(card, event_time):
+    elif device.purpose == DevicePurpose.ATTENDANCE and _is_duplicate(card, event_time, direction):
         # Till taps are never debounced: paying twice in a row is legitimate.
         result = ScanResult.DUPLICATE
     else:
@@ -313,18 +321,21 @@ def _classify_and_store(*, device, uid, event_time, received_at, client_event_id
         developer=developer,
         event_time=event_time,
         received_at=received_at,
+        direction=direction if device.purpose == DevicePurpose.ATTENDANCE else "",
         result=result,
     )
     record_from_scan(event)
     return event
 
 
-def _is_duplicate(card: RFIDCard, event_time) -> bool:
-    # Symmetric window: buffered scans can arrive out of order.
+def _is_duplicate(card: RFIDCard, event_time, direction: str = "") -> bool:
+    # Symmetric window: buffered scans can arrive out of order. A scan reporting the
+    # opposite direction (in, then out) is a real movement, not a repeat.
     window = timedelta(seconds=settings.RFID_DEBOUNCE_SECONDS)
     return RFIDEvent.objects.filter(
         card=card,
         result=ScanResult.ACCEPTED,
+        direction=direction,
         event_time__gt=event_time - window,
         event_time__lt=event_time + window,
     ).exists()
@@ -353,6 +364,7 @@ def record_batch(*, device: RFIDDevice, events: list[dict]) -> list[tuple[RFIDEv
             uid=item["uid"],
             event_time=item["event_time"],
             client_event_id=item["client_event_id"],
+            direction=item.get("direction", ""),
         )
         for item in ordered
     ]

@@ -163,6 +163,8 @@ SPECTACULAR_SETTINGS = {
         "AccountStatusEnum": "apps.finance.models.AccountStatus",
         "PayoutStatusEnum": "apps.seller_finance.models.PayoutStatus",
         "GoodKindEnum": "apps.goods.models.GoodKind",
+        "ScanDirectionEnum": "apps.rfid.models.ScanDirection",
+        "DeviceDirectionEnum": "apps.rfid.models.DeviceDirection",
     },
     # Serve Swagger UI assets locally: the server may run without internet access.
     "SWAGGER_UI_DIST": "SIDECAR",

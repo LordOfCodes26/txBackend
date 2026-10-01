@@ -246,6 +246,7 @@ class RFIDEventViewSet(
             uid=data["uid"],
             event_time=data.get("event_time"),
             client_event_id=data["client_event_id"],
+            direction=data["direction"],
         )
         return Response(
             ScanResponseSerializer(event).data,
