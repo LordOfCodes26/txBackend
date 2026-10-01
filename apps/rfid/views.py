@@ -2,20 +2,32 @@ from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
+from rest_framework.views import APIView
 
+from common.context import get_request_context
 from common.permissions import HasPermissions
 
 from . import services
 from .authentication import DeviceAuthentication
-from .filters import RFIDCardAssignmentFilter, RFIDCardFilter, RFIDEventFilter
-from .models import RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent
+from .filters import (
+    RFIDCardAssignmentFilter,
+    RFIDCardFilter,
+    RFIDDeviceFilter,
+    RFIDEventFilter,
+)
+from .models import DevicePurpose, RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent
 from .permissions import IsRFIDDevice
 from .serializers import (
+    BatchResultSerializer,
+    BatchScanSerializer,
     CardAssignSerializer,
     CardReasonSerializer,
     CardReplaceSerializer,
+    DeviceConfigSerializer,
+    HeartbeatSerializer,
     RFIDCardAssignmentSerializer,
     RFIDCardSerializer,
     RFIDCardUpdateSerializer,
@@ -163,7 +175,7 @@ class RFIDDeviceViewSet(
 ):
     """Deactivate a reader with `PATCH {"is_active": false}`; its key stops working."""
 
-    queryset = RFIDDevice.objects.all()
+    queryset = RFIDDevice.objects.select_related("service_position__seller")
     serializer_class = RFIDDeviceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
@@ -174,7 +186,7 @@ class RFIDDeviceViewSet(
         "rotate_key": ["rfid.device.manage"],
     }
     http_method_names = ["get", "post", "patch", "head", "options"]
-    filterset_fields = ["is_active", "purpose"]
+    filterset_class = RFIDDeviceFilter
     search_fields = ["code", "name", "location"]
     ordering_fields = ["code", "last_seen_at"]
 
@@ -217,7 +229,7 @@ class RFIDEventViewSet(
     ordering_fields = ["event_time", "received_at"]
 
     def get_permissions(self):
-        return [IsRFIDDevice()] if self.action == "create" else [HasPermissions()]
+        return [IsRFIDDevice()] if self.action in ("create", "batch") else [HasPermissions()]
 
     @extend_schema(
         request=ScanSerializer,
@@ -239,3 +251,49 @@ class RFIDEventViewSet(
             ScanResponseSerializer(event).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        request=BatchScanSerializer,
+        responses=BatchResultSerializer(many=True),
+        description="ATTENDANCE devices upload scans buffered while offline (oldest first). "
+        "Every item needs a client_event_id, so re-sending a batch is safe.",
+    )
+    @action(detail=False, methods=["post"])
+    def batch(self, request):
+        device = request.auth
+        if device.purpose != DevicePurpose.ATTENDANCE:
+            raise ValidationError(
+                {"events": ["Only attendance readers may upload buffered scans."]}
+            )
+        serializer = BatchScanSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        results = services.record_batch(device=device, events=serializer.validated_data["events"])
+        data = [
+            {
+                "client_event_id": e.client_event_id,
+                "id": e.pk,
+                "result": e.result,
+                "created": created,
+            }
+            for e, created in results
+        ]
+        return Response(BatchResultSerializer(data, many=True).data)
+
+
+class DeviceHeartbeatView(APIView):
+    """Devices call this every RFID_HEARTBEAT_SECONDS with `Authorization: Device <key>`."""
+
+    authentication_classes = [DeviceAuthentication]
+    permission_classes = [IsRFIDDevice]
+
+    @extend_schema(request=HeartbeatSerializer, responses=DeviceConfigSerializer)
+    def post(self, request):
+        serializer = HeartbeatSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ctx = get_request_context()
+        device = services.heartbeat(
+            device=request.auth,
+            ip_address=ctx.ip_address if ctx else None,
+            app_version=serializer.validated_data.get("app_version", ""),
+        )
+        return Response(DeviceConfigSerializer(device).data)

@@ -1,5 +1,7 @@
+from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -16,9 +18,11 @@ from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus, ServicePosition
 
 from .exceptions import (
+    CardNotPresented,
     CardNotUsable,
     DeveloperNotActive,
     GoodNotAvailable,
+    ManualCardEntryDisabled,
     PurchaseEmpty,
     PurchaseNotDraft,
     SelfPurchaseForbidden,
@@ -117,6 +121,47 @@ def cancel_purchase(*, actor, purchase: Purchase) -> Purchase:
     return purchase
 
 
+# --- Card presented on the till reader ---------------------------------------------------
+
+
+def present_card(event) -> Purchase | None:
+    """Attach an accepted TILL scan to the newest draft purchase at that device's counter.
+
+    The seller's screen polls the purchase and shows who tapped; checkout then charges
+    that card. A newer tap replaces an older one. Stale scans (e.g. replayed late) are
+    ignored. Returns the purchase, or None when the counter has no open draft.
+    """
+    window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+    if event.event_time < timezone.now() - window:
+        return None
+    with transaction.atomic():
+        purchase = (
+            Purchase.objects.select_for_update()
+            .filter(
+                service_position_id=event.device.service_position_id, status=PurchaseStatus.DRAFT
+            )
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if purchase is None:
+            return None
+        purchase.presented_event = event
+        purchase.presented_at = timezone.now()
+        purchase.save(update_fields=["presented_event", "presented_at", "updated_at"])
+    return purchase
+
+
+def _presented_uid(purchase: Purchase) -> str:
+    window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+    if (
+        purchase.presented_event_id is None
+        or purchase.presented_at is None
+        or purchase.presented_at < timezone.now() - window
+    ):
+        raise CardNotPresented()
+    return purchase.presented_event.uid
+
+
 # --- Checkout ------------------------------------------------------------------------
 
 
@@ -141,9 +186,12 @@ def _card_holder(uid: str):
 
 
 def confirm_purchase(
-    *, actor, purchase: Purchase, card_uid: str, pin: str, idempotency_key: str
+    *, actor, purchase: Purchase, pin: str, idempotency_key: str, card_uid: str | None = None
 ) -> tuple[Purchase, bool]:
     """Charge the card holder for a draft purchase. Returns (purchase, newly_confirmed).
+
+    The card is the one tapped on the counter's TILL reader (`present_card`). A typed
+    `card_uid` is accepted only when PURCHASE_ALLOW_MANUAL_CARD_UID is on.
 
     1. Resolve the card and verify the PIN (own transaction, so failures are counted).
     2. One atomic transaction, locking rows always in the same order to avoid deadlocks
@@ -159,6 +207,13 @@ def confirm_purchase(
             raise IdempotencyKeyReused()
         return replay, False
 
+    presented = card_uid is None
+    if presented:
+        purchase = Purchase.objects.select_related("presented_event").get(pk=purchase.pk)
+        card_uid = _presented_uid(purchase)
+    elif not settings.PURCHASE_ALLOW_MANUAL_CARD_UID:
+        raise ManualCardEntryDisabled()
+
     card, developer, account = _card_holder(card_uid)
     if purchase.seller.user_id and purchase.seller.user_id == developer.user_id:
         raise SelfPurchaseForbidden()
@@ -170,6 +225,8 @@ def confirm_purchase(
             if purchase.confirm_idempotency_key == idempotency_key:
                 return purchase, False
             raise PurchaseNotDraft()
+        if presented and _presented_uid(purchase) != card_uid:
+            raise CardNotUsable("A different card was tapped meanwhile; ask for the PIN again.")
 
         # Re-validate under locks: the card may have been blocked since step 1.
         card = RFIDCard.objects.select_for_update().get(pk=card.pk)

@@ -258,7 +258,7 @@ Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSI
 (`details: {max}`), `SELF_TRANSACTION_FORBIDDEN`, `IDEMPOTENCY_KEY_REUSED`,
 `INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
-`PIN_NOT_SET`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
+`PIN_NOT_SET`, `CARD_NOT_PRESENTED`, `MANUAL_CARD_ENTRY_DISABLED`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
 `details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
 `INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
@@ -380,8 +380,12 @@ edit pages, not in list tables.
   `RETIRED_CARD`, `INACTIVE_DEVELOPER`.
 - **Registering a new card from a tap:** filter `/rfid/events/?result=UNKNOWN_CARD`
   for the latest unknown UID, then prefill the "register card" form with it.
-- `POST /rfid/events/` is for reader hardware only (it uses a device key, not a user
-  login). The frontend never calls it.
+- `POST /rfid/events/`, `/rfid/events/batch/` and `/rfid/device/heartbeat/` are for devices
+  only (they use a device key, not a user login). The frontend never calls them. Device
+  protocol: `docs/DEVICE_INTEGRATION.md`.
+- Device `purpose`: `ATTENDANCE` (entrance reader) or `TILL` (card-reader program on a
+  seller's computer; has a `service_position`). Devices show `online`, `last_seen_at`,
+  `last_ip` and `app_version` from their heartbeats.
 
 ### Attendance
 
@@ -483,7 +487,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 | POST | `/purchases/` | own seller, or `purchase.create` | `{service_position}`: opens a DRAFT bucket |
 | POST | `/purchases/{id}/items/` | same | `{good, quantity?}`; adding a good already in the bucket increases its quantity |
 | PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
-| POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{card_uid, pin}` + `Idempotency-Key`: charges the card holder |
+| POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the card tapped on the counter's reader |
 | POST | `/purchases/{id}/cancel/` | own seller, or `purchase.cancel` | Drafts only |
 | GET | `/purchases/`, `/purchases/{id}/` | own seller, or `purchase.view` | Filters: `status`, `seller`, `service_position`, `developer`, `confirmed_after`, `confirmed_before`, `total_min`, `total_max` |
 | GET | `/purchases/me/` | logged in | The developer's own purchases |
@@ -496,12 +500,18 @@ the response.
 **Till flow:**
 1. Seller picks their service position → `POST /purchases/` (keep the returned `id`).
 2. Seller adds goods → `POST /purchases/{id}/items/`. `total` and `unit_price` show current prices.
-3. The developer taps their card: read the UID from the till's card reader (usually a
-   USB reader that types the UID like a keyboard), and the developer types their PIN.
-   Mask the PIN field, never store or log it, and clear it after each attempt.
-4. `POST /purchases/{id}/confirm/` with a **new** `Idempotency-Key` generated when the
-   confirm step starts; reuse it only for automatic retries of that same attempt.
-5. On `201`: show success with `developer.full_name`, `total` and `balance_after`
+3. The developer taps their card on the counter's **till reader**. The card-reader program on
+   the seller's computer sends the tap straight to the server (see `DEVICE_INTEGRATION.md`),
+   which attaches it to this purchase. **The web app never reads or sends card numbers.**
+4. Poll `GET /purchases/{id}/` (every ~1 s while waiting) until `presented_card` is set:
+   `{"developer": {...}, "presented_at": "...", "expires_at": "..."}`. Show
+   "**Ada Lovelace** - enter your PIN". A newer tap replaces it; after `expires_at` it
+   becomes `null` again (ask for another tap).
+5. The developer types their PIN. Mask it, never store or log it, and clear it after each
+   attempt. `POST /purchases/{id}/confirm/` with `{"pin": "..."}` and a **new**
+   `Idempotency-Key` generated when the confirm step starts; reuse it only for automatic
+   retries of that same attempt.
+6. On `201`: show success with `developer.full_name`, `total` and `balance_after`
    (the developer's remaining balance), then start a new purchase.
 
 **Confirmation is all-or-nothing.** Stock, the developer's balance and the purchase change
@@ -509,6 +519,7 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 
 | `code` | Show |
 |---|---|
+| `CARD_NOT_PRESENTED` | "Please tap your card" (no tap yet, or it expired) |
 | `INVALID_PIN` | "Wrong PIN, N attempts left" (`details.attempts_remaining`) |
 | `PIN_LOCKED` (423) | "PIN locked until …" (`details.locked_until`); another payment is needed |
 | `PIN_NOT_SET` | "Set your PIN first" (developer: My account → PIN) |
@@ -601,7 +612,7 @@ before → after table.
 | My profile, my attendance | `developers/me/`, `attendance/*/me/` | anyone with a developer profile |
 | Developers (list, detail, edit) | `developers/`, `rfid/cards/?developer=`, `attendance/daily/?developer=` | `developer.view` |
 | Cards (list, detail with history and actions) | `rfid/cards/`, `rfid/assignments/?card=` | `rfid.view` |
-| Readers | `rfid/devices/` | `rfid.view` |
+| Devices (attendance readers and till programs; online status, last seen, version) | `rfid/devices/`, `rfid/devices/?online=false` | `rfid.view` |
 | Live scan monitor | poll `rfid/events/?ordering=-event_time&page_size=20` every few seconds | `rfid.view` |
 | Attendance (daily table by date/department, corrections) | `attendance/daily/`, `attendance/records/` | `attendance.view` |
 | Users and roles | `users/`, `roles/` | `user.view` |

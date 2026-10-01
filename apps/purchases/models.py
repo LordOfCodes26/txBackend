@@ -35,6 +35,15 @@ class Purchase(TimeStampedModel):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, related_name="+"
     )
+    # Last card tapped on this counter's TILL reader while the purchase was a draft.
+    presented_event = models.ForeignKey(
+        "rfid.RFIDEvent",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    presented_at = models.DateTimeField(null=True, blank=True)
     # Filled on confirmation.
     developer = models.ForeignKey(
         Developer, on_delete=models.PROTECT, null=True, blank=True, related_name="purchases"

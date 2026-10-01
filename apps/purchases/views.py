@@ -45,7 +45,12 @@ class PurchaseViewSet(
     """
 
     queryset = Purchase.objects.select_related(
-        "seller", "service_position", "developer", "card", "account_transaction"
+        "seller",
+        "service_position",
+        "developer",
+        "card",
+        "account_transaction",
+        "presented_event__developer",
     ).prefetch_related("items__good")
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]

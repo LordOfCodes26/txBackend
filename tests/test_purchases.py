@@ -27,6 +27,13 @@ def key():
     return str(uuid.uuid4())
 
 
+@pytest.fixture(autouse=True)
+def manual_card_entry(settings):
+    """These tests drive checkout with a typed card UID; the till-reader flow (the default
+    in production) is covered in test_till_devices.py."""
+    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = True
+
+
 @pytest.fixture
 def world(db, make_user):
     """A seller with a till, two goods, and a developer with card, PIN and 50.00."""

@@ -41,3 +41,14 @@ class SelfPurchaseForbidden(DomainError):
     status_code = status.HTTP_403_FORBIDDEN
     code = "SELF_PURCHASE_FORBIDDEN"
     default_detail = "Sellers cannot charge their own card."
+
+
+class CardNotPresented(PurchaseConflict):
+    code = "CARD_NOT_PRESENTED"
+    default_detail = "Ask the developer to tap their card on this counter's reader."
+
+
+class ManualCardEntryDisabled(DomainError):
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "MANUAL_CARD_ENTRY_DISABLED"
+    default_detail = "Typed card numbers are not accepted; the card must be tapped on the reader."

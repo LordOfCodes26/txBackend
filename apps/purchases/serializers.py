@@ -1,6 +1,8 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
@@ -33,12 +35,25 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         return f"{item.good.price * item.quantity:.2f}"
 
 
+class PresentedCardSerializer(serializers.Serializer):
+    """Who tapped on the counter's reader, for the seller's screen."""
+
+    developer = DeveloperSummarySerializer(source="presented_event.developer")
+    presented_at = serializers.DateTimeField()
+    expires_at = serializers.SerializerMethodField()
+
+    def get_expires_at(self, purchase) -> str:
+        window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+        return (purchase.presented_at + window).isoformat()
+
+
 class PurchaseSerializer(serializers.ModelSerializer):
     seller = SellerSummarySerializer(read_only=True)
     service_position_name = serializers.CharField(source="service_position.name", read_only=True)
     developer = DeveloperSummarySerializer(read_only=True)
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
     items = PurchaseItemSerializer(many=True, read_only=True)
+    presented_card = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
     balance_after = serializers.DecimalField(
@@ -60,6 +75,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "items",
             "total",
             "currency",
+            "presented_card",
             "developer",
             "card_uid",
             "balance_after",
@@ -70,6 +86,15 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "cancelled_at",
         ]
         read_only_fields = fields
+
+    def get_presented_card(self, purchase) -> dict | None:
+        """The card tapped on this counter's reader, while still valid (drafts only)."""
+        if purchase.status != "DRAFT" or purchase.presented_event_id is None:
+            return None
+        window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+        if purchase.presented_at < timezone.now() - window:
+            return None
+        return PresentedCardSerializer(purchase).data
 
     def get_total(self, purchase) -> str:
         if purchase.total is not None:
@@ -103,7 +128,11 @@ class ItemUpdateSerializer(serializers.Serializer):
 
 
 class ConfirmSerializer(serializers.Serializer):
-    card_uid = UIDField(help_text="UID read from the developer's card at the till.")
+    card_uid = UIDField(
+        required=False,
+        help_text="Leave out: the card tapped on the counter's reader is used. Typed UIDs are "
+        "accepted only if the server allows manual entry.",
+    )
     pin = serializers.CharField(
         write_only=True, max_length=6, help_text="PIN typed by the developer."
     )

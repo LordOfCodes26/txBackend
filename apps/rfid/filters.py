@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import RFIDCard, RFIDCardAssignment, RFIDEvent, normalize_uid
+from .models import RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent, normalize_uid
 
 
 class RFIDCardFilter(django_filters.FilterSet):
@@ -42,3 +42,21 @@ class RFIDEventFilter(django_filters.FilterSet):
 
     def filter_uid(self, queryset, name, value):
         return queryset.filter(uid=normalize_uid(value))
+
+
+class RFIDDeviceFilter(django_filters.FilterSet):
+    online = django_filters.BooleanFilter(method="filter_online")
+
+    class Meta:
+        model = RFIDDevice
+        fields = ["is_active", "purpose", "service_position", "online"]
+
+    def filter_online(self, queryset, name, value):
+        from datetime import timedelta
+
+        from django.conf import settings
+        from django.utils import timezone
+
+        since = timezone.now() - timedelta(seconds=settings.RFID_DEVICE_OFFLINE_AFTER_SECONDS)
+        online = queryset.filter(last_seen_at__gte=since)
+        return online if value else queryset.exclude(pk__in=online.values("pk"))

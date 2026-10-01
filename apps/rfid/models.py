@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.validators import RegexValidator
@@ -97,7 +98,8 @@ class RFIDCardAssignment(models.Model):
 
 
 class DevicePurpose(models.TextChoices):
-    ATTENDANCE = "ATTENDANCE", "Attendance"
+    ATTENDANCE = "ATTENDANCE", "Attendance reader"
+    TILL = "TILL", "Till card reader (program on a seller's computer)"
 
 
 class DeviceDirection(models.TextChoices):
@@ -128,14 +130,42 @@ class RFIDDevice(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     api_key_prefix = models.CharField(max_length=8, db_index=True, editable=False)
     api_key_hash = models.CharField(max_length=64, editable=False)
+    service_position = models.ForeignKey(
+        "sellers.ServicePosition",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="till_devices",
+        help_text="TILL devices only: the counter whose purchases receive this reader's taps.",
+    )
     last_seen_at = models.DateTimeField(null=True, blank=True)
+    last_ip = models.GenericIPAddressField(null=True, blank=True)
+    app_version = models.CharField(
+        max_length=50, blank=True, help_text="Firmware or program version, from heartbeats."
+    )
 
     class Meta:
         ordering = ["code"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(purpose=DevicePurpose.TILL, service_position__isnull=False)
+                    | (~Q(purpose=DevicePurpose.TILL) & Q(service_position__isnull=True))
+                ),
+                name="rfid_till_device_has_position",
+            ),
+        ]
         verbose_name = "RFID device"
 
     def __str__(self):
         return self.code
+
+    @property
+    def is_online(self) -> bool:
+        if self.last_seen_at is None:
+            return False
+        limit = timezone.now() - timedelta(seconds=settings.RFID_DEVICE_OFFLINE_AFTER_SECONDS)
+        return self.last_seen_at >= limit
 
     @staticmethod
     def hash_key(key: str) -> str:

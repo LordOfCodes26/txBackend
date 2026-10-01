@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.attendance.services import record_from_scan
-from apps.audit.services import record_audit
+from apps.audit.services import diff, record_audit, snapshot
 from apps.developers.models import Developer, DeveloperStatus
 
 from .exceptions import (
@@ -20,6 +20,7 @@ from .exceptions import (
 from .models import (
     AssignmentEndReason,
     CardStatus,
+    DevicePurpose,
     RFIDCard,
     RFIDCardAssignment,
     RFIDDevice,
@@ -27,6 +28,15 @@ from .models import (
     ScanResult,
 )
 
+DEVICE_FIELDS = [
+    "code",
+    "name",
+    "location",
+    "purpose",
+    "direction",
+    "service_position",
+    "is_active",
+]
 REJECTED_DEVELOPER_STATUSES = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
 
 
@@ -193,7 +203,12 @@ def register_device(*, actor, **data) -> tuple[RFIDDevice, str]:
     device = RFIDDevice(**data)
     key = device.set_new_api_key()
     device.save()
-    record_audit("rfid.device_registered", actor=actor, entity=device, new_values=data)
+    record_audit(
+        "rfid.device_registered",
+        actor=actor,
+        entity=device,
+        new_values=snapshot(device, DEVICE_FIELDS),
+    )
     return device, key
 
 
@@ -209,18 +224,14 @@ def rotate_device_key(*, actor, device: RFIDDevice) -> str:
 @transaction.atomic
 def update_device(*, actor, device: RFIDDevice, **changes) -> RFIDDevice:
     device = RFIDDevice.objects.select_for_update().get(pk=device.pk)
-    old = {k: getattr(device, k) for k in changes}
+    before = snapshot(device, DEVICE_FIELDS)
     for field, value in changes.items():
         setattr(device, field, value)
     device.save()
-    changed = {k: v for k, v in changes.items() if old[k] != v}
-    if changed:
+    old, new = diff(before, snapshot(device, DEVICE_FIELDS))
+    if new:
         record_audit(
-            "rfid.device_updated",
-            actor=actor,
-            entity=device,
-            old_values={k: old[k] for k in changed},
-            new_values=changed,
+            "rfid.device_updated", actor=actor, entity=device, old_values=old, new_values=new
         )
     return device
 
@@ -260,6 +271,12 @@ def record_scan(
     RFIDDevice.objects.filter(pk=device.pk).filter(
         Q(last_seen_at__isnull=True) | Q(last_seen_at__lt=now - timedelta(seconds=60))
     ).update(last_seen_at=now)
+    if device.purpose == DevicePurpose.TILL and event.result == ScanResult.ACCEPTED:
+        # Separate transaction, after the card lock is released: checkout locks the
+        # purchase before the card, so locking them in the other order here could deadlock.
+        from apps.purchases.services import present_card
+
+        present_card(event)
     return event, True
 
 
@@ -278,7 +295,8 @@ def _classify_and_store(*, device, uid, event_time, received_at, client_event_id
         result = ScanResult.UNASSIGNED_CARD
     elif developer.deleted_at or developer.status in REJECTED_DEVELOPER_STATUSES:
         result = ScanResult.INACTIVE_DEVELOPER
-    elif _is_duplicate(card, event_time):
+    elif device.purpose == DevicePurpose.ATTENDANCE and _is_duplicate(card, event_time):
+        # Till taps are never debounced: paying twice in a row is legitimate.
         result = ScanResult.DUPLICATE
     else:
         result = ScanResult.ACCEPTED
@@ -306,3 +324,31 @@ def _is_duplicate(card: RFIDCard, event_time) -> bool:
         event_time__gt=event_time - window,
         event_time__lt=event_time + window,
     ).exists()
+
+
+def heartbeat(*, device: RFIDDevice, ip_address: str | None, app_version: str = "") -> RFIDDevice:
+    """Mark a device as alive. Devices call this every RFID_HEARTBEAT_SECONDS."""
+    fields = {"last_seen_at": timezone.now(), "last_ip": ip_address}
+    if app_version:
+        fields["app_version"] = app_version
+    RFIDDevice.objects.filter(pk=device.pk).update(**fields)
+    device.refresh_from_db()
+    return device
+
+
+def record_batch(*, device: RFIDDevice, events: list[dict]) -> list[tuple[RFIDEvent, bool]]:
+    """Upload scans an attendance reader buffered while offline, oldest first.
+
+    Each scan goes through `record_scan`, so retries of a partly uploaded batch are safe
+    (every item carries a client_event_id) and debouncing sees the scans in time order.
+    """
+    ordered = sorted(events, key=lambda e: e["event_time"])
+    return [
+        record_scan(
+            device=device,
+            uid=item["uid"],
+            event_time=item["event_time"],
+            client_event_id=item["client_event_id"],
+        )
+        for item in ordered
+    ]

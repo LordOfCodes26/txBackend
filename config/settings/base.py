@@ -187,6 +187,12 @@ TRUST_X_FORWARDED_FOR = env.bool("TRUST_X_FORWARDED_FOR", default=False)
 RFID_DEBOUNCE_SECONDS = env.int("RFID_DEBOUNCE_SECONDS", default=10)
 # Scans timestamped further than this in the future are rejected (reader clock wrong).
 RFID_MAX_FUTURE_SKEW_SECONDS = env.int("RFID_MAX_FUTURE_SKEW_SECONDS", default=300)
+# A device counts as offline when it hasn't been heard from for this long.
+# Devices should send a heartbeat at least every RFID_HEARTBEAT_SECONDS.
+RFID_HEARTBEAT_SECONDS = env.int("RFID_HEARTBEAT_SECONDS", default=30)
+RFID_DEVICE_OFFLINE_AFTER_SECONDS = env.int("RFID_DEVICE_OFFLINE_AFTER_SECONDS", default=120)
+# Maximum scans in one buffered batch upload.
+RFID_BATCH_MAX_EVENTS = env.int("RFID_BATCH_MAX_EVENTS", default=500)
 
 # --- Attendance -------------------------------------------------------------
 # How scans become IN/OUT: "none" (first/last scan only), "toggle" (alternate IN/OUT),
@@ -208,6 +214,11 @@ FINANCE_MAX_DEPOSIT = env("FINANCE_MAX_DEPOSIT", default="1000.00")
 # Developer PIN entered at the till: lock after this many wrong attempts, for this long.
 PURCHASE_PIN_MAX_ATTEMPTS = env.int("PURCHASE_PIN_MAX_ATTEMPTS", default=5)
 PURCHASE_PIN_LOCKOUT_MINUTES = env.int("PURCHASE_PIN_LOCKOUT_MINUTES", default=15)
+# A card tapped on a till reader is valid for confirming the purchase for this long.
+PURCHASE_CARD_PRESENTATION_SECONDS = env.int("PURCHASE_CARD_PRESENTATION_SECONDS", default=120)
+# Allow the browser to send a typed card UID at checkout. Off: the card must come from the
+# counter's TILL device, so a seller cannot charge an arbitrary card number.
+PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", default=False)
 
 # --- Logging ----------------------------------------------------------------
 LOG_LEVEL = env("LOG_LEVEL", default="INFO")
