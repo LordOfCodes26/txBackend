@@ -84,3 +84,26 @@ def test_unmapped_action_is_denied_by_default(auth_client, boss):
     # before routing reaches a 405, so new endpoints are closed by default.
     response = auth_client(boss).put("/api/v1/users/1/", {})
     assert response.status_code in (403, 405)
+
+
+@pytest.mark.django_db
+def test_admin_warns_when_seller_role_gets_global_permissions(client, django_user_model):
+    """A global permission on SELLER means every seller sees every store's data."""
+    from apps.accounts.models import Permission, Role
+
+    admin = django_user_model.objects.create_superuser(email="root@x.com", password="Str0ng-pass!")
+    client.force_login(admin)
+    role = Role.objects.get(code="SELLER")
+    good_view = Permission.objects.get(codename="good.view")
+    response = client.post(
+        f"/admin/accounts/role/{role.pk}/change/",
+        {
+            "code": role.code,
+            "name": role.name,
+            "description": role.description,
+            "is_system": "on",
+            "permissions": [good_view.pk],
+        },
+        follow=True,
+    )
+    assert "ALL data, not only their own" in response.content.decode()

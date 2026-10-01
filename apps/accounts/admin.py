@@ -1,7 +1,8 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import Permission, Role, User, UserRole
+from .rbac import Roles
 
 
 class UserRoleInline(admin.TabularInline):
@@ -30,10 +31,28 @@ class UserAdmin(BaseUserAdmin):
     ]
 
 
+# Roles whose users reach only their *own* data through a link (Seller.user,
+# ServicePosition.manager, Developer.user). A global permission on them means "everything":
+# e.g. good.view lets every seller see every store's goods.
+SELF_SERVICE_ROLES = {Roles.SELLER, Roles.DEVELOPER}
+
+
 @admin.register(Role)
 class RoleAdmin(admin.ModelAdmin):
     list_display = ["code", "name", "is_system"]
     filter_horizontal = ["permissions"]
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        role = form.instance
+        granted = sorted(role.permissions.values_list("codename", flat=True))
+        if role.code in SELF_SERVICE_ROLES and granted:
+            messages.warning(
+                request,
+                f"{role.code} users get these permissions for ALL data, not only their own: "
+                f"{', '.join(granted)}. Sellers then see every store's goods and sales. "
+                f"Leave this role without permissions unless that is intended.",
+            )
 
 
 @admin.register(Permission)
