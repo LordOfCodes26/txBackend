@@ -61,7 +61,7 @@ class SellerViewSet(
 
 
 class ServicePositionViewSet(SellerScopedQuerysetMixin, viewsets.ModelViewSet):
-    """Sellers manage their own positions; users with seller.* (e.g. BOSS) manage all.
+    """Sellers manage their own positions; users with seller.* (e.g. ADMIN) manage all.
     DELETE is soft."""
 
     queryset = ServicePosition.objects.select_related("seller")

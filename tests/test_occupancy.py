@@ -183,7 +183,7 @@ def test_occupancy_and_people_endpoints(site, auth_client, make_user):
 @pytest.mark.parametrize(
     ("role", "expected"),
     [
-        (Roles.BOSS, 200),
+        (Roles.ADMIN, 200),
         (Roles.MANAGER, 200),
         (Roles.FINANCE_MANAGER, 403),
         (Roles.DEVELOPER, 403),

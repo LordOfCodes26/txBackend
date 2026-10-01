@@ -29,7 +29,7 @@ def position(db):
 
 @pytest.fixture
 def seller_manager(auth_client, make_user):
-    return auth_client(make_user(Roles.BOSS))
+    return auth_client(make_user(Roles.ADMIN))
 
 
 @pytest.fixture
@@ -197,7 +197,7 @@ def test_good_cannot_move_to_another_seller(seller_manager, make_good):
 @pytest.mark.parametrize(
     ("role", "view", "stock"),
     [
-        (Roles.BOSS, 200, 201),
+        (Roles.ADMIN, 200, 201),
         (Roles.MANAGER, 200, 403),
         (Roles.FINANCE_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),

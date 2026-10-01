@@ -47,8 +47,8 @@ def make_user(db):
 
 
 @pytest.fixture
-def boss(make_user):
-    return make_user(Roles.BOSS, email="boss@example.com")
+def admin(make_user):
+    return make_user(Roles.ADMIN, email="root@example.com")
 
 
 @pytest.fixture

@@ -21,6 +21,7 @@ PERMISSIONS: dict[str, str] = {
     "role.view": "View roles and their permissions",
     "role.assign": "Assign and remove roles on users",
     "audit.view": "View the audit log",
+    "stats.view": "View company statistics (people, attendance, money)",
     # Developers
     "developer.view": "View developers",
     "developer.create": "Create developers",
@@ -59,9 +60,12 @@ PERMISSIONS: dict[str, str] = {
 }
 
 ALL = frozenset(PERMISSIONS)
+# Every read permission: the BOSS sees all data, changes nothing.
+VIEW = frozenset(p for p in PERMISSIONS if p.endswith(".view"))
 
 
 class Roles:
+    ADMIN = "ADMIN"
     BOSS = "BOSS"
     MANAGER = "MANAGER"
     FINANCE_MANAGER = "FINANCE_MANAGER"
@@ -84,7 +88,8 @@ def _prefixed(*prefixes: str) -> frozenset[str]:
 # DEVELOPER and SELLER get no global permissions: their access is to their *own*
 # records (own account, own goods), enforced by object-level scoping in each module.
 ROLES: dict[str, RoleSpec] = {
-    Roles.BOSS: RoleSpec("Boss", "Full access", ALL),
+    Roles.ADMIN: RoleSpec("Admin", "Full access: users, roles, settings and all data", ALL),
+    Roles.BOSS: RoleSpec("Boss", "Sees all data and statistics, read-only", VIEW),
     Roles.MANAGER: RoleSpec(
         "Manager",
         "Manages developers, RFID and attendance",

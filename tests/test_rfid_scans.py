@@ -143,8 +143,8 @@ def test_users_cannot_submit_scans_and_devices_cannot_read(
 ):
     assert reader.get(EVENTS).status_code == 403
     api_client.credentials()
-    boss = auth_client(make_user(Roles.BOSS))
-    assert scan(boss).status_code == 403
+    admin = auth_client(make_user(Roles.ADMIN))
+    assert scan(admin).status_code == 403
 
 
 def test_staff_can_list_and_filter_events(auth_client, make_user, reader, card):

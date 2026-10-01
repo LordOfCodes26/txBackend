@@ -117,7 +117,7 @@ def test_cannot_deposit_to_own_account(auth_client, make_user, developer):
 @pytest.mark.parametrize(
     ("role", "view", "deposit_status", "adjust_status"),
     [
-        (Roles.BOSS, 200, 201, 201),
+        (Roles.ADMIN, 200, 201, 201),
         (Roles.FINANCE_MANAGER, 200, 201, 201),
         (Roles.MANAGER, 403, 403, 403),
         (Roles.DEVELOPER, 403, 403, 403),

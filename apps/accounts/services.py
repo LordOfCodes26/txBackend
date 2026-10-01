@@ -3,7 +3,7 @@ from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, Ou
 
 from apps.audit.services import record_audit
 
-from .exceptions import LastBoss, PrivilegeEscalation, RoleAlreadyAssigned, RoleNotAssigned
+from .exceptions import LastAdmin, PrivilegeEscalation, RoleAlreadyAssigned, RoleNotAssigned
 from .models import Permission, Role, User, UserRole
 from .rbac import Roles
 
@@ -24,14 +24,14 @@ def _ensure_can_manage(actor: User, permissions: frozenset[str]) -> None:
         raise PrivilegeEscalation()
 
 
-def _ensure_other_boss_remains(user: User) -> None:
-    # Lock the BOSS role row so concurrent removals serialize on this check.
-    boss = Role.objects.select_for_update().filter(code=Roles.BOSS).first()
-    if boss is None or not UserRole.objects.filter(user=user, role=boss).exists():
+def _ensure_other_admin_remains(user: User) -> None:
+    # Lock the ADMIN role row so concurrent removals serialize on this check.
+    admin = Role.objects.select_for_update().filter(code=Roles.ADMIN).first()
+    if admin is None or not UserRole.objects.filter(user=user, role=admin).exists():
         return
-    others = UserRole.objects.filter(role=boss, user__is_active=True).exclude(user=user).exists()
+    others = UserRole.objects.filter(role=admin, user__is_active=True).exclude(user=user).exists()
     if not others:
-        raise LastBoss()
+        raise LastAdmin()
 
 
 def _user_snapshot(user: User) -> dict:
@@ -50,7 +50,7 @@ def update_user(*, actor: User, user: User, **changes) -> User:
     user = User.objects.select_for_update().get(pk=user.pk)
     _ensure_can_manage(actor, granted_permissions(user))
     if changes.get("is_active") is False and user.is_active:
-        _ensure_other_boss_remains(user)
+        _ensure_other_admin_remains(user)
 
     before = _user_snapshot(user)
     for field, value in changes.items():
@@ -81,8 +81,8 @@ def assign_role(*, actor: User, user: User, role: Role) -> UserRole:
 @transaction.atomic
 def remove_role(*, actor: User, user: User, role: Role) -> None:
     _ensure_can_manage(actor, granted_permissions(user))
-    if role.code == Roles.BOSS:
-        _ensure_other_boss_remains(user)
+    if role.code == Roles.ADMIN:
+        _ensure_other_admin_remains(user)
     deleted, _ = UserRole.objects.filter(user=user, role=role).delete()
     if not deleted:
         raise RoleNotAssigned()

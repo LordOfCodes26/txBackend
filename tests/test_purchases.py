@@ -382,7 +382,7 @@ def test_developer_sees_own_purchases_only(auth_client, till, world):
 @pytest.mark.parametrize(
     ("role", "expected"),
     [
-        (Roles.BOSS, 200),
+        (Roles.ADMIN, 200),
         (Roles.FINANCE_MANAGER, 200),
         (Roles.MANAGER, 403),
         (Roles.DEVELOPER, 403),

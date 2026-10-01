@@ -31,8 +31,8 @@ def test_unhandled_exception_becomes_500_envelope():
 
 
 @pytest.mark.django_db
-def test_unknown_resource_is_404_envelope(auth_client, boss):
-    body = auth_client(boss).get("/api/v1/users/999999/").json()
+def test_unknown_resource_is_404_envelope(auth_client, admin):
+    body = auth_client(admin).get("/api/v1/users/999999/").json()
     assert body["error"]["code"] == "NOT_FOUND"
 
 

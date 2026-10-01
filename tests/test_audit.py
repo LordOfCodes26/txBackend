@@ -8,8 +8,8 @@ from apps.audit.services import record_audit
 pytestmark = pytest.mark.django_db
 
 
-def test_audit_log_rejects_update_and_delete_in_python(boss):
-    log = record_audit("test.action", actor=boss, entity=boss)
+def test_audit_log_rejects_update_and_delete_in_python(admin):
+    log = record_audit("test.action", actor=admin, entity=admin)
     log.action = "tampered"
     with pytest.raises(TypeError):
         log.save()
@@ -17,8 +17,8 @@ def test_audit_log_rejects_update_and_delete_in_python(boss):
         log.delete()
 
 
-def test_audit_log_is_append_only_at_database_level(boss):
-    record_audit("test.action", actor=boss, entity=boss)
+def test_audit_log_is_append_only_at_database_level(admin):
+    record_audit("test.action", actor=admin, entity=admin)
     for statement in ("UPDATE audit_auditlog SET action = 'x'", "DELETE FROM audit_auditlog"):
         with pytest.raises(IntegrityError), transaction.atomic():
             with connection.cursor() as cursor:
@@ -38,13 +38,13 @@ def test_system_actions_have_no_actor():
     assert log.actor is None and log.actor_email == ""
 
 
-@pytest.mark.parametrize(("role", "expected"), [(Roles.BOSS, 200), (Roles.DEVELOPER, 403)])
+@pytest.mark.parametrize(("role", "expected"), [(Roles.ADMIN, 200), (Roles.DEVELOPER, 403)])
 def test_audit_log_api_access(auth_client, make_user, role, expected):
     assert auth_client(make_user(role)).get("/api/v1/audit-logs/").status_code == expected
 
 
-def test_audit_log_api_filters(auth_client, boss):
-    record_audit("a.one", actor=boss, entity=boss)
-    record_audit("a.two", actor=boss, entity=boss)
-    results = auth_client(boss).get("/api/v1/audit-logs/?action=a.two").json()["results"]
+def test_audit_log_api_filters(auth_client, admin):
+    record_audit("a.one", actor=admin, entity=admin)
+    record_audit("a.two", actor=admin, entity=admin)
+    results = auth_client(admin).get("/api/v1/audit-logs/?action=a.two").json()["results"]
     assert [r["action"] for r in results] == ["a.two"]

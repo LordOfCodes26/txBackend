@@ -112,8 +112,8 @@ def test_english_without_header(api_client):
 
 
 @pytest.mark.django_db
-def test_validation_details_in_korean(auth_client, boss):
-    response = auth_client(boss).post(DEVELOPERS, {}, format="json", HTTP_ACCEPT_LANGUAGE="ko")
+def test_validation_details_in_korean(auth_client, admin):
+    response = auth_client(admin).post(DEVELOPERS, {}, format="json", HTTP_ACCEPT_LANGUAGE="ko")
     assert response.status_code == 400
     error = response.json()["error"]
     assert error["code"] == "VALIDATION_ERROR"

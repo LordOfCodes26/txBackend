@@ -58,7 +58,7 @@ def test_create_developer_is_audited(manager_client):
 @pytest.mark.parametrize(
     ("role", "list_status", "create_status"),
     [
-        (Roles.BOSS, 200, 201),
+        (Roles.ADMIN, 200, 201),
         (Roles.MANAGER, 200, 201),
         (Roles.FINANCE_MANAGER, 200, 403),
         (Roles.DEVELOPER, 403, 403),
@@ -128,9 +128,9 @@ def test_soft_deleted_developer_frees_identifiers(manager_client, make_developer
 
 
 def test_cannot_delete_developer_with_reports(manager_client, make_developer):
-    boss = make_developer()
-    make_developer(manager=boss)
-    response = manager_client.delete(f"{URL}{boss.pk}/")
+    admin = make_developer()
+    make_developer(manager=admin)
+    response = manager_client.delete(f"{URL}{admin.pk}/")
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "DEVELOPER_HAS_REPORTS"
 

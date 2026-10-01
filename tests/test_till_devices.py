@@ -267,7 +267,7 @@ def test_heartbeat_reports_config_and_marks_online(auth_client, make_user, shop)
 @pytest.mark.django_db
 def test_heartbeat_requires_device_key(auth_client, make_user):
     assert APIClient().post(HEARTBEAT).status_code == 401
-    assert auth_client(make_user(Roles.BOSS)).post(HEARTBEAT).status_code in (401, 403)
+    assert auth_client(make_user(Roles.ADMIN)).post(HEARTBEAT).status_code in (401, 403)
 
 
 # --- Batch upload ---------------------------------------------------------------------------

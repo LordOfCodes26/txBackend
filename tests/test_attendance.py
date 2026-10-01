@@ -230,7 +230,7 @@ def test_void_requires_reason(manager, reader, card):
 @pytest.mark.parametrize(
     ("role", "view", "correct"),
     [
-        (Roles.BOSS, 200, 201),
+        (Roles.ADMIN, 200, 201),
         (Roles.MANAGER, 200, 201),
         (Roles.FINANCE_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),

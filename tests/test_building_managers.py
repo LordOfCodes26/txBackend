@@ -178,9 +178,9 @@ def test_own_building_only(client, site):
     assert r.json()["name"] == "Main building"
 
 
-def test_admin_assigns_building_managers(auth_client, make_user, boss, site):
+def test_admin_assigns_building_managers(auth_client, make_user, admin, site):
     other = make_user(Roles.BUILDING_MANAGER)
-    r = auth_client(boss).patch(
+    r = auth_client(admin).patch(
         f"{BUILDINGS}{site.b2.pk}/", {"managers": [other.pk]}, format="json"
     )
     assert r.json()["managers"] == [other.pk]
@@ -205,12 +205,12 @@ def test_attendance_of_own_developers(client, site):
     assert client.post(f"{RECORDS}{bob_record.pk}/void/", {"reason": "x"}).status_code == 404
 
 
-def test_occupancy_of_own_building(client, site, auth_client, boss):
+def test_occupancy_of_own_building(client, site, auth_client, admin):
     body = client.get(OCCUPANCY).json()
     assert [(b["code"], b["count"]) for b in body["buildings"]] == [("B1", 1)]
     assert (body["total"], body["unknown_building"]) == (1, 0)
     assert [p["developer"]["full_name"] for p in results(client.get(PEOPLE))] == ["Ada"]
-    assert auth_client(boss).get(OCCUPANCY).json()["total"] == 2
+    assert auth_client(admin).get(OCCUPANCY).json()["total"] == 2
 
 
 def test_live_occupancy_feed_is_filtered():
@@ -255,8 +255,8 @@ def test_sales_of_own_building_positions(client, site):
     assert client.post(PURCHASES, {"service_position": site.p1.pk}).status_code == 403
 
 
-def test_boss_sees_performance_of_every_position(auth_client, boss, site):
-    rows = auth_client(boss).get(f"{PURCHASES}performance/").json()
+def test_boss_sees_performance_of_every_position(auth_client, admin, site):
+    rows = auth_client(admin).get(f"{PURCHASES}performance/").json()
     assert [(r["service_position_name"], r["total"]) for r in rows] == [
         ("Cafe B2", "99.00"),
         ("Cafe B1", "30.00"),
@@ -275,7 +275,7 @@ def test_counter_websocket_of_own_building_only(site):
 # --- Regression: staff scan lists use the caller's language, not DEVICE_LANGUAGE ----------
 
 
-def test_scan_history_uses_the_callers_language(auth_client, boss, site, settings):
+def test_scan_history_uses_the_callers_language(auth_client, admin, site, settings):
     settings.DEVICE_LANGUAGE = "ko-kp"
-    response = auth_client(boss).get(f"{EVENTS}?event_time_after=bad")
+    response = auth_client(admin).get(f"{EVENTS}?event_time_after=bad")
     assert response["Content-Language"] == "en"

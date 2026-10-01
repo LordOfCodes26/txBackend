@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 17:34+0000\n"
+"POT-Creation-Date: 2026-10-01 17:48+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -18,8 +18,8 @@ msgstr ""
 msgid "You cannot grant or manage access beyond your own permissions."
 msgstr "자기 권한을 넘어서는 접근권한은 주거나 관리할수 없습니다."
 
-msgid "At least one active user must keep the BOSS role."
-msgstr "활성 리용자 적어도 한명은 BOSS 역할을 가지고있어야 합니다."
+msgid "At least one active user must keep the ADMIN role."
+msgstr "적어도 한명의 활성 리용자는 ADMIN 역할을 가지고있어야 합니다."
 
 msgid "The user already has this role."
 msgstr "이 리용자는 이미 이 역할을 가지고있습니다."
@@ -463,6 +463,12 @@ msgstr "자기 판매자의 매대만 만들수 있습니다."
 
 msgid "This seller already has a position with this name."
 msgstr "이 판매자에게는 이미 이 이름의 매대가 있습니다."
+
+msgid "The start date must not be after the end date."
+msgstr "시작날자는 끝날자보다 뒤일수 없습니다."
+
+msgid "At most %(days)s days at once."
+msgstr "한번에 최대 %(days)s일까지만 볼수 있습니다."
 
 msgid "The request violates a business rule."
 msgstr "요청이 업무규정에 어긋납니다."

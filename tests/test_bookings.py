@@ -482,7 +482,7 @@ def test_who_sees_bookings(auth_client, make_user, world, desk):
     other = make_user(Roles.SELLER)
     Seller.objects.create(name="Other", user=other)
     assert auth_client(other).get(BOOKINGS).json()["count"] == 0
-    assert auth_client(make_user(Roles.BOSS)).get(BOOKINGS).json()["count"] == 1
+    assert auth_client(make_user(Roles.ADMIN)).get(BOOKINGS).json()["count"] == 1
 
 
 # --- Concurrency -------------------------------------------------------------------------

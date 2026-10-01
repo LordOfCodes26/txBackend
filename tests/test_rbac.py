@@ -8,8 +8,8 @@ pytestmark = pytest.mark.django_db
 
 def test_system_roles_are_seeded_after_migrate():
     assert set(Role.objects.values_list("code", flat=True)) == set(ROLES)
-    boss = Role.objects.get(code=Roles.BOSS)
-    assert set(boss.permissions.values_list("codename", flat=True)) == ALL
+    admin = Role.objects.get(code=Roles.ADMIN)
+    assert set(admin.permissions.values_list("codename", flat=True)) == ALL
 
 
 def test_sync_is_idempotent_and_preserves_role_customisations():
@@ -54,7 +54,7 @@ def test_user_permissions_come_from_all_roles(make_user):
 
 
 def test_inactive_user_has_no_permissions(make_user):
-    assert make_user(Roles.BOSS, is_active=False).rbac_permissions == frozenset()
+    assert make_user(Roles.ADMIN, is_active=False).rbac_permissions == frozenset()
 
 
 def test_superuser_has_every_permission(make_user):
@@ -64,7 +64,7 @@ def test_superuser_has_every_permission(make_user):
 @pytest.mark.parametrize(
     ("role", "expected"),
     [
-        (Roles.BOSS, 200),
+        (Roles.ADMIN, 200),
         (Roles.MANAGER, 200),
         (Roles.FINANCE_MANAGER, 403),
         (Roles.DEVELOPER, 403),
@@ -78,10 +78,10 @@ def test_user_list_access_by_role(auth_client, make_user, role, expected):
         assert response.json()["error"]["code"] == "PERMISSION_DENIED"
 
 
-def test_unmapped_action_is_denied_by_default(auth_client, boss):
+def test_unmapped_action_is_denied_by_default(auth_client, admin):
     # UserViewSet exposes no PUT/destroy; with no mapping the permission layer denies
     # before routing reaches a 405, so new endpoints are closed by default.
-    response = auth_client(boss).put("/api/v1/users/1/", {})
+    response = auth_client(admin).put("/api/v1/users/1/", {})
     assert response.status_code in (403, 405)
 
 

@@ -227,7 +227,7 @@ def test_sellers_cannot_approve_or_pay(auth_client, seller_user, seller):
 @pytest.mark.parametrize(
     ("role", "view", "payout"),
     [
-        (Roles.BOSS, 200, 201),
+        (Roles.ADMIN, 200, 201),
         (Roles.FINANCE_MANAGER, 200, 201),
         (Roles.MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),

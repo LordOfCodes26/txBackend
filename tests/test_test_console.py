@@ -51,7 +51,7 @@ def test_simulated_scan_needs_device_permission(auth_client, make_user, door):
 def test_console_is_hidden_when_disabled(client, auth_client, make_user, door, settings):
     settings.TEST_CONSOLE_ENABLED = False
     assert client.get("/test-console/").status_code == 404
-    r = auth_client(make_user(Roles.BOSS)).post(
+    r = auth_client(make_user(Roles.ADMIN)).post(
         SCAN, {"door": "Door1", "type": "in", "uid": "04A2B3C4"}
     )
     assert r.status_code == 404
@@ -138,7 +138,7 @@ def test_simulated_tap_with_unknown_or_blocked_card(till):
 
 
 def test_testers_get_separate_simulated_readers(till, make_user):
-    other_user = make_user(Roles.BOSS)  # purchase.* staff, another tester
+    other_user = make_user(Roles.ADMIN)  # purchase.* staff, another tester
     other = APIClient()
     other.force_authenticate(other_user)
     mine = new_purchase(till)

@@ -20,7 +20,7 @@ Most of it already exists: `/sellers/[id]` has a "Linked user" dropdown and
 | Method | Path | Who | Body |
 |---|---|---|---|
 | GET | `/api/v1/users/?role=SELLER&ordering=full_name` | `user.view` | Candidates for store logins |
-| PATCH | `/api/v1/sellers/{id}/` | `seller.update` (BOSS) | `{"user": <user id>}` links, `{"user": null}` unlinks |
+| PATCH | `/api/v1/sellers/{id}/` | `seller.update` (ADMIN) | `{"user": <user id>}` links, `{"user": null}` unlinks |
 | PATCH | `/api/v1/service-positions/{id}/` | `seller.update`, or the store's owner login | `{"manager": <user id>}` / `{"manager": null}` |
 
 Each seller now also has `user_email` (read-only). Rules the backend enforces, shown as

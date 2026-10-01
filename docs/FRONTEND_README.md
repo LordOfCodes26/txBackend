@@ -173,6 +173,7 @@ const can = (code: string) => me.permissions.includes(code);
 | `user.view` / `user.manage` | User list / create, edit, deactivate users |
 | `role.view` / `role.assign` | Role list / add or remove roles on users |
 | `audit.view` | Audit log |
+| `stats.view` | Company statistics (`GET /stats/`, the BOSS dashboard) |
 | `developer.view` / `.create` / `.update` / `.delete` | Developer pages |
 | `rfid.view` | Cards, assignments, devices, buildings, scan history |
 | `rfid.assign` | Register, assign, unassign, replace, retire cards |
@@ -195,7 +196,8 @@ Default roles, which admins can change:
 
 | Role | Gets |
 |---|---|
-| BOSS | Everything |
+| ADMIN | Everything: users, roles, settings and all data |
+| BOSS | **Read-only**: every `*.view` permission (all lists and details) plus `stats.view` (the statistics dashboard). Can't create, change or delete anything |
 | MANAGER | Developers, RFID, attendance, user list, audit log, seller/goods view |
 | FINANCE_MANAGER | Developer and seller finance, developer view, purchase view, audit log |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
@@ -207,7 +209,7 @@ If `permissions` is empty, the user only has self-service pages (section 7).
 ### Assigning a seller login to a store
 
 A store (seller) is run by **one login with the SELLER role**: set it with
-`PATCH /sellers/{id}/ {"user": <user id>}` (BOSS or `seller.update`; `null` unlinks).
+`PATCH /sellers/{id}/ {"user": <user id>}` (ADMIN or `seller.update`; `null` unlinks).
 Find candidates with `GET /users/?role=SELLER`. The store then shows `user_email`.
 
 - Only active users **with the SELLER role** can be linked (`VALIDATION_ERROR` on `user`:
@@ -312,7 +314,7 @@ owner can't also be a position manager.
 | 429 | `THROTTLED` | "Too many attempts, wait a minute" |
 | 500 | `INTERNAL_ERROR` | Generic error; quote the `X-Request-ID` response header in bug reports |
 
-Business-rule codes so far: `LAST_BOSS`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSIGNED`,
+Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSIGNED`,
 `DEVELOPER_HAS_REPORTS`, `CARD_NOT_ACTIVE`, `CARD_ALREADY_ASSIGNED`,
 `DEVELOPER_ALREADY_HAS_CARD`, `CARD_NOT_ASSIGNED`, `DEVELOPER_NOT_ASSIGNABLE`,
 `INVALID_CARD_TRANSITION`, `RECORD_ALREADY_VOID`, `POSITION_HAS_GOODS`, `INSUFFICIENT_STOCK`
@@ -417,7 +419,7 @@ headers: { "Accept-Language": locale }   // "ko" or "en"
 | GET | `/roles/`, `/roles/{code}/` | `role.view` | Each role includes its permission codes |
 
 Users can't grant roles with more permissions than they have themselves
-(`PRIVILEGE_ESCALATION`), and the last BOSS can't be removed or deactivated (`LAST_BOSS`).
+(`PRIVILEGE_ESCALATION`), and the last ADMIN can't be removed or deactivated (`LAST_ADMIN`).
 
 ### Developers
 
@@ -537,7 +539,7 @@ POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "sn": "ZK2024A000123
 | POST | `/sellers/` | `seller.create` | `{name, user?, contact_name?, email?, phone?, notes?}`; `user` = the seller's login |
 | GET/PATCH | `/sellers/{id}/` | `seller.view` / `seller.update` | No DELETE: close with `status: "CLOSED"` |
 | GET | `/sellers/me/` | logged in | Own seller profile (any status) |
-| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `building`, `manager`, `is_active`. Fields include `building` (optional, `building_name`) and `manager` (user id, `manager_email`). Sellers omit `seller` on create; staff (e.g. BOSS) must send it |
+| GET/POST | `/service-positions/` | `seller.view` / `seller.update`, or own seller | Filters: `seller`, `building`, `manager`, `is_active`. Fields include `building` (optional, `building_name`) and `manager` (user id, `manager_email`). Sellers omit `seller` on create; staff (e.g. ADMIN) must send it |
 | GET/PATCH/DELETE | `/service-positions/{id}/` | same | DELETE is soft and fails with `POSITION_HAS_GOODS` while it has goods |
 
 Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
@@ -910,6 +912,51 @@ backoff; the first message after reconnecting is a fresh snapshot.
   drops only when a payout is PAID.
 - Hide Approve on payouts the logged-in user requested (`requested_by` = `me.id`).
 
+### Company statistics (BOSS dashboard)
+
+`GET /stats/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` (`stats.view`: BOSS and ADMIN).
+Both dates are company-local and optional: the default is the 30 days ending today; at
+most 366 days. One request returns the whole dashboard:
+
+```json
+{
+  "period": {"date_from": "2026-09-02", "date_to": "2026-10-01", "days": 30},
+  "people": {
+    "developers": {
+      "total": 230,
+      "by_status": {"ACTIVE": 221, "ON_LEAVE": 6, "SUSPENDED": 3, "TERMINATED": 12},
+      "by_building": [{"building": 1, "name": "Building 1", "count": 120},
+                      {"building": null, "name": null, "count": 4}]
+    },
+    "inside_now": {"total": 187, "buildings": [...], "unknown_building": 0, "as_of": "..."},
+    "attendance": {
+      "daily": [{"date": "2026-09-02", "present": 205, "avg_worked_hours": 8.12}, ...],
+      "days_with_attendance": 22, "avg_present_per_day": 203.4, "avg_worked_hours": 8.05
+    }
+  },
+  "money": {
+    "developer_accounts": {"count": 230, "by_status": {"ACTIVE": 228, "FROZEN": 2},
+                           "total_balance": "18420.00"},
+    "deposits": {"total": "23000.00", "count": 230},
+    "spending": {"total": "11870.50", "count": 2145},
+    "daily": [{"date": "2026-09-02", "deposits": "0.00", "spending": "412.50"}, ...],
+    "sellers": {"total_balance": "1530.00", "earnings": "11870.50", "payouts_paid": "10340.50",
+                "payouts_pending": {"count": 2, "amount": "640.00"}}
+  }
+}
+```
+
+- `daily` lists **every** day of the period (zeros included), ready for a chart.
+- `developers.total` excludes terminated ones; `by_building` uses their home building
+  (`null` = none set). `inside_now` is the live occupancy (same as `/attendance/occupancy/`).
+- `present` = developers with attendance that day; `avg_worked_hours` is per present person.
+  The overall averages only count days with attendance (weekends don't pull them down).
+- Money is a string with 2 decimals (`CURRENCY`). `spending` = till purchases and bookings.
+  `earnings` = sellers' sales in the period, `payouts_paid` = payouts paid in the period,
+  `payouts_pending` = all payouts not yet paid (requested, approved, processing).
+- The BOSS can open any list for details (developers, attendance, purchases, accounts,
+  payouts, audit log, `/purchases/performance/` per store) but every change returns `403`.
+
 ### Audit log
 
 | Method | Path | Permission | Notes |
@@ -960,7 +1007,7 @@ Build the navigation from `me.permissions` so each user only sees their pages.
 2. The staging certificate is self-signed. For server-side calls from Node during
    development, trust it by setting `NODE_EXTRA_CA_CERTS=/path/to/staging.crt` (ask the
    backend team for the file). Don't use `NODE_TLS_REJECT_UNAUTHORIZED=0`.
-3. Demo accounts exist for each role (`boss@demo.local`, `manager@demo.local`,
+3. Demo accounts exist for each role (`admin@demo.local`, `boss@demo.local`, `manager@demo.local`,
    `finance_manager@demo.local`, `seller_manager@demo.local`, `developer@demo.local`,
    `seller@demo.local`). Ask the backend team for passwords. `developer@demo.local` is
    linked to a developer profile, so the `/me/` pages have data.

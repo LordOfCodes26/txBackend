@@ -10,10 +10,10 @@ class PrivilegeEscalation(DomainError):
     default_detail = _("You cannot grant or manage access beyond your own permissions.")
 
 
-class LastBoss(DomainError):
+class LastAdmin(DomainError):
     status_code = status.HTTP_409_CONFLICT
-    code = "LAST_BOSS"
-    default_detail = _("At least one active user must keep the BOSS role.")
+    code = "LAST_ADMIN"
+    default_detail = _("At least one active user must keep the ADMIN role.")
 
 
 class RoleAlreadyAssigned(DomainError):
