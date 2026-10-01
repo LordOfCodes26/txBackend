@@ -121,9 +121,18 @@
 
   <section>
     <h2>Pay</h2>
-    <label>Card holder tapping the reader</label>
-    <select id="tillCard"></select>
-    <div class="row" style="margin-top:10px"><button id="tap" disabled>Tap card on reader</button></div>
+    <label>Find a test developer (name or employee number)</label>
+    <input id="simSearch" placeholder="e.g. grace, DEMO-0003" autocomplete="off">
+    <label>Developer paying (balance · PIN · card)</label>
+    <select id="simDev"></select>
+    <label>…or any card UID (e.g. an unknown card)</label>
+    <input id="simUid" placeholder="04FFFFFF" autocomplete="off">
+    <div class="row" style="margin-top:10px">
+      <button id="simTap" disabled>Simulate tap (no reader needed)</button>
+      <button class="secondary" id="tap" disabled>Tap on connected reader</button>
+    </div>
+    <small class="muted">"Simulate tap" works on any open purchase: it uses your personal simulated reader
+      if the purchase has none. "Tap on connected reader" sends exactly what a real reader sends.</small>
     <div id="presented" class="status hidden"></div>
     <div id="pinBox" class="hidden">
       <label>Developer's PIN</label>
@@ -253,7 +262,8 @@ async function loadData() {
   state.positions = positions;
   $("door").innerHTML = state.doors.map(d => `<option value="${esc(d.code)}">${esc(d.code)}${d.location ? " · " + esc(d.location) : ""}</option>`).join("");
   const cardOpts = state.cards.map(c => `<option value="${esc(c.uid)}">${esc(c.current_assignment.developer.full_name)} (${esc(c.current_assignment.developer.employee_number)}) · ${esc(c.uid)}</option>`).join("");
-  $("doorCard").innerHTML = cardOpts; $("tillCard").innerHTML = cardOpts;
+  $("doorCard").innerHTML = cardOpts;
+  loadTestCards("");
   $("simReader").innerHTML = state.readers.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.name ? " · " + esc(r.name) : ""}</option>`).join("");
   showReader();
   $("counter").innerHTML = `<option value="">— choose —</option>` + state.positions
@@ -373,6 +383,7 @@ function onTillEvent(msg) {
 function renderBucket() {
   const p = state.purchase, tbody = $("bucket").querySelector("tbody");
   $("tap").disabled = !p || p.status !== "DRAFT" || !reader();
+  $("simTap").disabled = !p || p.status !== "DRAFT";
   $("cancelPurchase").disabled = !p || p.status !== "DRAFT";
   if (!p) { tbody.innerHTML = `<tr><td class="muted">No purchase yet</td></tr>`; return; }
   const rows = p.items.map(i => `<tr><td>${esc(i.good_name)}</td><td>× ${i.quantity}</td><td>${esc(i.unit_price)}</td><td>${esc(i.line_total)}</td></tr>`);
@@ -401,18 +412,63 @@ $("cancelPurchase").onclick = async () => {
 $("tap").onclick = async () => {
   const rd = reader();
   // Exactly what the reader sends: no Authorization header, SN + ID identify it.
-  const body = { SN: rd.sn, ID: rd.code, TYPE: "pay", UID: $("tillCard").value };
+  const uid = payingUid();
+  if (!uid) return alert("Choose a developer or enter a UID");
+  const body = { SN: rd.sn, ID: rd.code, TYPE: "pay", UID: uid };
   const r = await fetch(`${API}/rfid/events/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await r.json();
   log(r.ok ? "reader" : "error", `${rd.code} tap → ${r.status}`, r.ok ? { result: data.result, message: data.display_message, purchase: data.purchase } : data);
   if (!r.ok) status($("presented"), false, esc(errText(data)));
 };
+// ---------------------------------------------------------------- simulated taps
+async function loadTestCards(term) {
+  const r = await api(`/test-console/cards/?search=${encodeURIComponent(term)}`);
+  state.testCards = r.ok ? r.data : [];
+  const keep = $("simDev").value;
+  $("simDev").innerHTML = state.testCards.map(c =>
+    `<option value="${c.developer}">${esc(c.full_name)} (${esc(c.employee_number)}) · ${esc(c.balance ?? "-")} · ` +
+    `${c.has_pin ? "PIN ✓" : "no PIN"} · ${esc(c.card_uid)}${c.card_status !== "ACTIVE" ? " " + esc(c.card_status) : ""}` +
+    `${c.developer_status !== "ACTIVE" ? " · " + esc(c.developer_status) : ""}</option>`).join("")
+    || `<option value="">No matching developers</option>`;
+  if (state.testCards.some(c => String(c.developer) === keep)) $("simDev").value = keep;
+}
+let searchTimer = null;
+$("simSearch").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadTestCards($("simSearch").value.trim()), 300);
+};
+function payingUid() {
+  const raw = $("simUid").value.trim();
+  if (raw) return raw;
+  const c = (state.testCards || []).find(c => String(c.developer) === $("simDev").value);
+  return c ? c.card_uid : "";
+}
+$("simTap").onclick = async () => {
+  const raw = $("simUid").value.trim();
+  const body = { purchase: state.purchase.id };
+  if (raw) body.uid = raw; else body.developer = Number($("simDev").value);
+  if (!raw && !body.developer) return alert("Choose a developer or enter a UID");
+  const r = await api("/test-console/simulate-tap/", { method: "POST", body });
+  if (!r.ok) return status($("presented"), false, esc(errText(r.data)));
+  const d = r.data;
+  if (d.accepted && d.purchase === state.purchase.id) {
+    status($("presented"), true, `<b>${esc(d.developer.full_name)}</b> tapped — enter PIN`);
+    $("pinBox").classList.remove("hidden"); $("pin").value = ""; $("pin").focus();
+  } else {
+    status($("presented"), false, esc(d.display_message || d.result));
+  }
+  // The purchase may now use the simulated reader: refresh it.
+  const p = await api(`/purchases/${state.purchase.id}/`);
+  if (p.ok) { state.purchase = p.data; renderBucket(); }
+};
+
 $("confirm").onclick = async () => {
   const r = await api(`/purchases/${state.purchase.id}/confirm/`, { method: "POST", body: { pin: $("pin").value },
     headers: { "Idempotency-Key": uuid() } });
   $("pin").value = "";
   if (!r.ok) return status($("payStatus"), false, esc(errText(r.data)));
   state.purchase = r.data; renderBucket(); $("pinBox").classList.add("hidden");
+  loadTestCards($("simSearch").value.trim());  // balances changed
   status($("payStatus"), true, `<b>Paid ${esc(r.data.total)} ${esc(r.data.currency)}</b> by ${esc(r.data.developer.full_name)} — balance left ${esc(r.data.balance_after)}`);
 };
 </script>
