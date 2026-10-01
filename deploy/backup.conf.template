@@ -1,0 +1,17 @@
+# Backup settings (/etc/backend/backup.conf), read by scripts/backup/*.sh.
+# Where backups live on this server.
+BACKUP_DIR=/var/backups/backend
+# Database to back up.
+DB_NAME=backend
+# Uploaded files (goods images) to back up.
+MEDIA_ROOT=/var/lib/backend/media
+# Keep nightly dumps this many days; base backups (and the WAL they need) this many weeks.
+KEEP_DAILY_DAYS=14
+KEEP_BASE_BACKUPS=4
+# IMPORTANT: a second disk or another machine. Backups on the same disk die with it.
+# Either a mounted directory (USB disk, NAS share) ...
+OFFSITE_DIR=
+# ... or an rsync target over SSH, e.g. backup@10.0.0.50:/srv/backups/backend
+OFFSITE_RSYNC=
+# Status file read by GET /health/backup/ (must be readable by the web service).
+STATUS_FILE=/var/lib/backend/backup-status.json

@@ -253,6 +253,12 @@ PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", defa
 # LAN; not when many PCs share one router/NAT address).
 TILL_MATCH_READER_BY_IP = env.bool("TILL_MATCH_READER_BY_IP", default=True)
 
+# --- Backups ------------------------------------------------------------------
+# Written by scripts/backup/*.sh, read by GET /health/backup/.
+BACKUP_STATUS_FILE = env("BACKUP_STATUS_FILE", default="/var/lib/backend/backup-status.json")
+BACKUP_MAX_DUMP_AGE_HOURS = env.int("BACKUP_MAX_DUMP_AGE_HOURS", default=26)
+BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=8)
+
 # --- Test console -------------------------------------------------------------
 # A staging-only page (/test-console/) to exercise doors and tills end to end.
 # Never enable it in production.

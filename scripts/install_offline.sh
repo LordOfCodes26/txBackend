@@ -88,15 +88,35 @@ install -m 644 "${RELEASE}/deploy/systemd/backend-web.service" /etc/systemd/syst
 install -m 644 "${RELEASE}/deploy/systemd/backend-worker.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-ws.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-tcp.service" /etc/systemd/system/
+for unit in backend-backup.service backend-backup.timer backend-basebackup.service backend-basebackup.timer; do
+    install -m 644 "${RELEASE}/deploy/systemd/${unit}" /etc/systemd/system/
+done
 install -m 644 "${RELEASE}/deploy/nginx/backend.conf" /etc/nginx/sites-available/backend.conf
 ln -sfn /etc/nginx/sites-available/backend.conf /etc/nginx/sites-enabled/backend.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 
+echo "==> Backups: WAL archiving, schedules, first base backup"
+install -d -o postgres -g postgres -m 0750 /var/backups/backend /var/backups/backend/wal \
+    /var/backups/backend/base /var/backups/backend/db /var/backups/backend/media
+[[ -f "${ETC}/backup.conf" ]] || install -m 0644 "${RELEASE}/deploy/backup.conf.template" "${ETC}/backup.conf"
+PG_CONF_D=$(ls -d /etc/postgresql/*/main/conf.d | sort -V | tail -1)
+if ! cmp -s "${RELEASE}/deploy/postgres/90-backend-backup.conf" "${PG_CONF_D}/90-backend-backup.conf"; then
+    install -m 0644 "${RELEASE}/deploy/postgres/90-backend-backup.conf" "${PG_CONF_D}/"
+    systemctl restart postgresql   # archive_mode needs a restart
+fi
+
 systemctl daemon-reload
 systemctl enable backend-web backend-worker backend-ws backend-tcp nginx redis-server postgresql
 systemctl restart backend-web backend-worker backend-ws backend-tcp
 systemctl reload nginx || systemctl restart nginx
+systemctl enable --now backend-backup.timer backend-basebackup.timer
+if ! ls -1d /var/backups/backend/base/*/ >/dev/null 2>&1; then
+    # Point-in-time recovery needs a base backup to start from.
+    "${RELEASE}/scripts/backup/base_backup.sh"
+fi
+grep -Eq '^OFFSITE_(DIR|RSYNC)=.+' "${ETC}/backup.conf" || \
+    echo "WARNING: set OFFSITE_DIR or OFFSITE_RSYNC in ${ETC}/backup.conf: backups are on this disk only."
 
 echo "Installed ${VERSION}. Check: curl -k https://localhost/health/db/"
 echo "Create the first admin: cd ${BASE}/current && sudo -u backend bash -c 'set -a; . ${ENV_FILE}; set +a; .venv/bin/python manage.py createsuperuser'"

@@ -1,0 +1,10 @@
+[Unit]
+Description=Backend nightly database backup (dump, verify by restore, off-site copy)
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/backend/scripts/backup/nightly.sh
+Nice=10
+IOSchedulingClass=idle

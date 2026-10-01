@@ -1,0 +1,10 @@
+[Unit]
+Description=Backend weekly base backup for point-in-time recovery
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/backend/scripts/backup/base_backup.sh
+Nice=10
+IOSchedulingClass=idle

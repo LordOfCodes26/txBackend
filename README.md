@@ -37,6 +37,13 @@ journalctl -u backend-staging -f           # logs
 set -a; . ./.env.staging; set +a; .venv/bin/python manage.py collectstatic --noinput  # after static changes
 ```
 
+## Backups
+
+Continuous WAL archiving (point-in-time recovery to ~1 minute), weekly base backups, and
+nightly dumps that are automatically restored and checked; `GET /health/backup/` reports
+problems. **Configure an off-site copy** in `/etc/backend/backup.conf`. Full details and
+restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
+
 ## Test console and sample data (staging)
 
 - **Test console:** `https://<staging-host>:8443/test-console/` (enabled by
