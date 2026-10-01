@@ -33,6 +33,29 @@ POST /api/v1/rfid/devices/
   the old one stops working immediately.
 - To retire a device: `PATCH /api/v1/rfid/devices/{id}/ {"is_active": false}`.
 
+### Doors without API keys: fixed-IP authentication
+
+The building doors can't send an `Authorization` header, so they are authenticated by
+their **fixed IP address** instead:
+
+- In the device settings, set `allowed_ip` on each door (e.g. `PATCH
+  /api/v1/rfid/devices/{id}/ {"allowed_ip": "10.20.0.11"}`). This is audited.
+- A request **without** an `Authorization` header is accepted only when it comes from that
+  IP **and** its body names the device: `{"ID": "Door1", ...}`. Door2's IP can't post as
+  Door1. Several doors behind one controller may share an IP, since `ID` tells them apart.
+- This works for the scan, batch (`{"ID": "Door1", "events": [...]}`) and heartbeat
+  (`{"ID": "Door1"}`) endpoints. Only `ATTENDANCE` devices may use it; till programs always
+  need their key. A device that also has a key can keep using it.
+- The server takes the IP from nginx, which overwrites any client-sent
+  `X-Forwarded-For` / `X-Real-IP`, so faking these headers doesn't work.
+- **Network requirement:** anyone who can take over a door's IP on your network could post
+  scans as that door. Put the doors on their own network segment (VLAN) or firewall the
+  door IPs so only the door devices can use them, and give them static/reserved addresses
+  (DHCP reservations).
+
+Refused requests get `401 AUTHENTICATION_FAILED` ("No door device with this ID is
+registered for this IP").
+
 ---
 
 ## 2. Connection basics
@@ -40,7 +63,7 @@ POST /api/v1/rfid/devices/
 | | |
 |---|---|
 | Base URL | `https://<server>/api/v1/` (HTTPS) |
-| Authentication | Header `Authorization: Device <api_key>` on every request |
+| Authentication | Header `Authorization: Device <api_key>` on every request (doors: fixed IP, see section 1) |
 | Body | JSON, `Content-Type: application/json` |
 | Times | ISO 8601 **with timezone**, e.g. `2026-10-01T08:59:58Z` or `...+09:00` |
 | Timeout | Use 5 seconds per request |

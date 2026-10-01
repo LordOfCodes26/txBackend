@@ -120,6 +120,7 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "building",
             "service_position",
             "direction",
+            "allowed_ip",
             "is_active",
             "online",
             "last_seen_at",
@@ -153,6 +154,11 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
         if purpose != DevicePurpose.ATTENDANCE and building is not None:
             raise serializers.ValidationError(
                 {"building": ["Only ATTENDANCE devices belong to a building."]}
+            )
+        allowed_ip = attrs.get("allowed_ip", getattr(self.instance, "allowed_ip", None))
+        if purpose != DevicePurpose.ATTENDANCE and allowed_ip:
+            raise serializers.ValidationError(
+                {"allowed_ip": ["Only ATTENDANCE door devices may authenticate by IP."]}
             )
         return attrs
 
@@ -315,6 +321,9 @@ class ScanResponseSerializer(serializers.ModelSerializer):
 
 class HeartbeatSerializer(serializers.Serializer):
     app_version = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    ID = serializers.CharField(
+        required=False, help_text="Device code; needed only for IP-authenticated doors."
+    )
 
 
 class BatchScanItemSerializer(serializers.Serializer):
@@ -342,6 +351,9 @@ class BatchScanItemSerializer(serializers.Serializer):
 
 class BatchScanSerializer(serializers.Serializer):
     events = BatchScanItemSerializer(many=True, allow_empty=False)
+    ID = serializers.CharField(
+        required=False, help_text="Device code; needed only for IP-authenticated doors."
+    )
 
     def validate_events(self, value):
         if len(value) > settings.RFID_BATCH_MAX_EVENTS:

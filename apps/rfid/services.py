@@ -36,6 +36,7 @@ DEVICE_FIELDS = [
     "direction",
     "building",
     "service_position",
+    "allowed_ip",
     "is_active",
 ]
 REJECTED_DEVELOPER_STATUSES = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}

@@ -155,6 +155,13 @@ SPECTACULAR_SETTINGS = {
     "SCHEMA_PATH_PREFIX": r"/api/v1",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    # Door IP authentication can't be expressed in OpenAPI; it's documented in
+    # docs/DEVICE_INTEGRATION.md instead.
+    "AUTHENTICATION_WHITELIST": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+        "apps.rfid.authentication.DeviceAuthentication",
+    ],
     "ENUM_NAME_OVERRIDES": {
         "DeveloperStatusEnum": "apps.developers.models.DeveloperStatus",
         "CardStatusEnum": "apps.rfid.models.CardStatus",

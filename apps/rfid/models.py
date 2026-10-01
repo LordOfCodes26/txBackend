@@ -159,6 +159,14 @@ class RFIDDevice(TimeStampedModel):
         related_name="till_devices",
         help_text="TILL devices only: the counter whose purchases receive this reader's taps.",
     )
+    allowed_ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text=(
+            "ATTENDANCE doors that cannot send an API key: requests from this fixed IP that "
+            "carry this device's code as `ID` are accepted without a key."
+        ),
+    )
     last_seen_at = models.DateTimeField(null=True, blank=True)
     last_ip = models.GenericIPAddressField(null=True, blank=True)
     app_version = models.CharField(
@@ -171,6 +179,10 @@ class RFIDDevice(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(purpose=DevicePurpose.ATTENDANCE) | Q(building__isnull=True),
                 name="rfid_only_attendance_devices_have_building",
+            ),
+            models.CheckConstraint(
+                condition=Q(purpose=DevicePurpose.ATTENDANCE) | Q(allowed_ip__isnull=True),
+                name="rfid_only_attendance_devices_use_ip_auth",
             ),
             models.CheckConstraint(
                 condition=(

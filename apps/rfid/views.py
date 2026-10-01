@@ -11,7 +11,7 @@ from common.context import get_request_context
 from common.permissions import HasPermissions
 
 from . import services
-from .authentication import DeviceAuthentication
+from .authentication import DeviceAuthentication, DeviceIPAuthentication
 from .filters import (
     RFIDCardAssignmentFilter,
     RFIDCardFilter,
@@ -230,7 +230,11 @@ class RFIDEventViewSet(
 
     queryset = RFIDEvent.objects.select_related("device", "developer")
     serializer_class = RFIDEventSerializer
-    authentication_classes = [*api_settings.DEFAULT_AUTHENTICATION_CLASSES, DeviceAuthentication]
+    authentication_classes = [
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+        DeviceAuthentication,
+        DeviceIPAuthentication,
+    ]
     required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
     filterset_class = RFIDEventFilter
     search_fields = ["uid", "developer__full_name"]
@@ -292,7 +296,7 @@ class RFIDEventViewSet(
 class DeviceHeartbeatView(APIView):
     """Devices call this every RFID_HEARTBEAT_SECONDS with `Authorization: Device <key>`."""
 
-    authentication_classes = [DeviceAuthentication]
+    authentication_classes = [DeviceAuthentication, DeviceIPAuthentication]
     permission_classes = [IsRFIDDevice]
 
     @extend_schema(request=HeartbeatSerializer, responses=DeviceConfigSerializer)

@@ -2,7 +2,9 @@ from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.exceptions import AuthenticationFailed
 
-from .models import RFIDDevice
+from common.middleware import client_ip
+
+from .models import DevicePurpose, RFIDDevice
 
 
 def device_for_key(key: str) -> RFIDDevice | None:
@@ -50,6 +52,54 @@ class DeviceAuthentication(BaseAuthentication):
 
     def authenticate_header(self, request):
         return self.keyword
+
+
+class DeviceIPAuthentication(BaseAuthentication):
+    """Key-less authentication for door devices that cannot send headers.
+
+    Used only when the request has no Authorization header. The request must come from
+    the device's registered `allowed_ip` AND name the device in its body (`ID`, as the
+    doors send it, or `device_id`). Only active ATTENDANCE devices can be authenticated
+    this way. The client IP is taken from the trusted reverse proxy (see
+    common.middleware.client_ip), never from a client-supplied header.
+    """
+
+    def authenticate(self, request):
+        if get_authorization_header(request) or request.method != "POST":
+            return None
+        code = _device_code_from_body(request)
+        if not code:
+            return None
+        ip = client_ip(request)
+        device = (
+            RFIDDevice.objects.filter(
+                code__iexact=code,
+                allowed_ip=ip,
+                is_active=True,
+                purpose=DevicePurpose.ATTENDANCE,
+            ).first()
+            if ip
+            else None
+        )
+        if device is None:
+            raise AuthenticationFailed("No door device with this ID is registered for this IP.")
+        return DevicePrincipal(device), device
+
+    def authenticate_header(self, request):
+        return "Device"
+
+
+def _device_code_from_body(request) -> str:
+    try:
+        data = request.data
+    except Exception:  # unparsable body: let the view report it
+        return ""
+    if not hasattr(data, "items"):
+        return ""
+    for key, value in data.items():
+        if str(key).lower() in ("id", "device_id") and isinstance(value, str):
+            return value.strip()
+    return ""
 
 
 class DeviceAuthenticationScheme(OpenApiAuthenticationExtension):
