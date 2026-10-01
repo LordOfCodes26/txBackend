@@ -4,8 +4,9 @@
 #
 #   tar -xzf backend-<version>.tar.gz && cd backend-<version> && sudo app/scripts/install_offline.sh
 #
-# Needs these OS packages already installed (from the Ubuntu install media or
-# before the server went offline): python3-venv postgresql redis-server nginx openssl
+# The OS packages (Python venv, PostgreSQL, Redis, nginx, ...) are installed from the
+# bundle's own os-packages/ repository; no internet access is used. The bundle is built
+# for one OS release and CPU type (see BUILT_FOR); the script refuses any other.
 #
 # Each release goes to /opt/backend/releases/<version>; /opt/backend/current
 # points at the active one, so rollback = repoint the symlink and restart.
@@ -19,7 +20,34 @@ ETC=/etc/backend
 ENV_FILE="${ETC}/backend.env"
 
 [[ $EUID -eq 0 ]] || { echo "Run as root." >&2; exit 1; }
-for cmd in python3 psql redis-cli nginx openssl systemctl; do
+
+echo "==> Checking the OS matches the bundle"
+. /etc/os-release
+THIS="${PRETTY_NAME} $(uname -m)"
+echo "    server: ${THIS}"
+echo "    bundle: $(cat "${BUNDLE}/BUILT_FOR")"
+if [[ "${ID}" != "ubuntu" || "${VERSION_ID}" != "24.04" || "$(uname -m)" != "x86_64" ]] \
+        && [[ "${FORCE_OS:-}" != "1" ]]; then
+    echo "This bundle is for Ubuntu 24.04 x86_64. Build one on a machine matching this server." >&2
+    exit 1
+fi
+
+if [[ -d "${BUNDLE}/os-packages" ]]; then
+    echo "==> Installing OS packages from the bundle (offline)"
+    APT_TMP=$(mktemp -d)
+    mkdir -p "${APT_TMP}/sources.list.d"
+    echo "deb [trusted=yes] file:${BUNDLE}/os-packages ./" > "${APT_TMP}/sources.list"
+    APT_OPTS=(-o "Dir::Etc::SourceList=${APT_TMP}/sources.list"
+              -o "Dir::Etc::SourceParts=${APT_TMP}/sources.list.d"
+              -o "APT::Get::List-Cleanup=0")
+    apt-get "${APT_OPTS[@]}" update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y -q --no-install-recommends \
+        python3 python3-venv postgresql postgresql-contrib redis-server nginx openssl rsync \
+        ca-certificates
+    rm -rf "${APT_TMP}"
+fi
+
+for cmd in python3 psql redis-cli nginx openssl systemctl rsync; do
     command -v "$cmd" >/dev/null || { echo "Missing required command: $cmd" >&2; exit 1; }
 done
 
