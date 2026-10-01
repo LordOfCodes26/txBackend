@@ -64,7 +64,11 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
   (`SN-DEMO-0001`…`0004`), today's door scans and past purchases. Then
   `manage.py seed_attendance_month [--days 30]` adds a month of realistic door history up
   to yesterday (arrivals, lunch breaks, building changes, absences, forgotten scan-outs) and
-  rebuilds attendance from it; days that already have attendance are skipped.
+  rebuilds attendance from it; days that already have attendance are skipped. Then
+  `manage.py seed_purchases_month [--month 2026-09]` adds that month's purchases by
+  developers who were present, with ledger, seller and stock entries dated in the month; it
+  closes the month with an allowance deposit, seller payouts and a stock delivery so current
+  balances and stock don't change, and checks that everything reconciles.
 
 ## Deploying to an offline server
 
