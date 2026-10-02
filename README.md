@@ -137,3 +137,12 @@ with `Accept-Language`. After adding or changing a message:
 
 Commit both `django.po` and `django.mo` (the offline server has no gettext tools).
 `tests/test_i18n.py` fails if a message is untranslated or the `.mo` is stale.
+
+## Logins for each role
+
+```bash
+.venv/bin/python manage.py create_role_users --domain chonha.com   # admin@chonha.com, boss@chonha.com, ...
+```
+
+Creates one user per role (skips existing ones) with random passwords printed once;
+`--ask-password` to type one, `--roles ...` for only some.

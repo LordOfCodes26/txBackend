@@ -129,3 +129,18 @@ On a freshly built, minimal Ubuntu 24.04 container with networking disabled (no
 interfaces but loopback): the installer completed in about 2 minutes, all services were
 active and all health checks returned 200. An upgrade from an older bundle on the same
 machine kept existing data and the previous release for rollback.
+
+## Creating a login for each role
+
+After installing, create one user per role (admin@…, boss@…, manager@…,
+finance_manager@…, building_manager@…, building_owner@…, seller@…, developer@…):
+
+```bash
+sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
+  cd /opt/backend/current && .venv/bin/python manage.py create_role_users --domain chonha.com'
+```
+
+Each new user gets its own random password, **printed once**: store them safely. Options:
+`--ask-password` (type one password for all), `--roles BOSS BUILDING_OWNER` (only some).
+Existing users are skipped. Then link the accounts that need it: a SELLER to its store,
+a BUILDING_OWNER / BUILDING_MANAGER to buildings, a DEVELOPER to a developer profile.
