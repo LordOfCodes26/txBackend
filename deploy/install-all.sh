@@ -111,7 +111,8 @@ say "3. Frontend (build and service)"
 SRC="${FRONTEND_FROM:-$WORK/management-app}"
 [[ -f "$SRC/package.json" && -d "$SRC/node_modules" ]] \
     || die "$SRC is not a frontend folder with node_modules (package.json + node_modules)."
-VERSION=$(cd "$SRC" && git rev-parse --short HEAD 2>/dev/null || echo build)-$(date +%Y%m%d%H%M%S)
+# safe.directory: the source may belong to a developer, and this runs as root.
+VERSION=$(git -c safe.directory="*" -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo build)-$(date +%Y%m%d%H%M%S)
 RELEASE=/opt/frontend/releases/$VERSION
 BUILD="$WORK/build"
 id frontend >/dev/null 2>&1 || useradd --system --home-dir /opt/frontend --shell /usr/sbin/nologin frontend

@@ -399,7 +399,7 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 |---|---|
 | `Checksum mismatch` | A file was damaged while copying: copy the kit again |
 | `This kit is for Ubuntu 24.04 x86_64 only` | Install on Ubuntu Server 24.04, 64-bit Intel/AMD |
-| `The frontend build failed` | The last lines show why; the full log path is printed. Often: not enough memory (4 GB) |
+| `The frontend build failed` | The last lines show why; the full log path is printed. Often: not enough memory (4 GB), or the frontend loads fonts from the internet (`Failed to fetch … from Google Fonts`: the frontend must use `next/font/local`) |
 | The page shows "502 Bad Gateway" | A service is down: `sudo systemctl status frontend backend-web` and the logs |
 | The site doesn't open from other PCs | Firewall (port 443) and the server IP: `hostname -I` |
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |

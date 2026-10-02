@@ -31,6 +31,13 @@ listing=$(tar -tzf "$FRONTEND_PKG")
 grep -qE '^(\./)?management-app/package\.json$' <<<"$listing" || { echo "No management-app/package.json in $FRONTEND_PKG" >&2; exit 1; }
 grep -qE '^(\./)?management-app/node_modules/' <<<"$listing" || { echo "No node_modules in $FRONTEND_PKG" >&2; exit 1; }
 grep -qE '^(\./)?node-v[0-9.]+-linux-x64\.tar\.xz$' <<<"$listing" || { echo "No Node.js runtime (node-v*-linux-x64.tar.xz) in $FRONTEND_PKG" >&2; exit 1; }
+# The offline server can't download fonts: next/font/google makes the build fail there.
+if tar -xzOf "$FRONTEND_PKG" --wildcards '*management-app/src/*' 2>/dev/null \
+        | grep -qE 'next/font/google|fonts\.(googleapis|gstatic)\.com'; then
+    echo "The frontend still loads Google Fonts (next/font/google): it can't build offline." >&2
+    echo "Use next/font/local with the font files in the repository, then package again." >&2
+    exit 1
+fi
 if grep -qE '^(\./)?management-app/\.env\.local$' <<<"$listing"; then
     echo "WARNING: the frontend package contains .env.local (machine-specific settings, maybe secrets)." >&2
 fi
