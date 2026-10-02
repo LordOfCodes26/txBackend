@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 17:59+0000\n"
+"POT-Creation-Date: 2026-10-02 00:57+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -333,6 +333,9 @@ msgstr "판매대(TILL) 판독기만 일련번호로 인증할수 있습니다."
 
 msgid "Another device already has this serial number."
 msgstr "다른 장치가 이미 이 일련번호를 가지고있습니다."
+
+msgid "These users don't have the %(role)s role: %(users)s"
+msgstr "다음 리용자들에게는 %(role)s 역할이 없습니다: %(users)s"
 
 msgid "Does not match the authenticated device."
 msgstr "인증된 장치와 일치하지 않습니다."

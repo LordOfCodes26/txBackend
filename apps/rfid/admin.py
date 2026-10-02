@@ -45,3 +45,5 @@ class RFIDEventAdmin(ReadOnlyAdmin):
 @admin.register(Building)
 class BuildingAdmin(admin.ModelAdmin):
     list_display = ["code", "name"]
+    # Owners need the BUILDING_OWNER role and managers the BUILDING_MANAGER role.
+    filter_horizontal = ["owners", "managers"]

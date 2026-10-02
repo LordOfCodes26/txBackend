@@ -262,8 +262,7 @@ Use the purchase list filters, e.g. `?confirmed_after=2026-10-01T00:00:00Z&confi
 
 ### Building owners
 
-A user with the **BUILDING_OWNER** role who is listed in a building's `owners`
-(`PATCH /rfid/buildings/{id}/ {"owners": [<user ids>]}`, by an ADMIN) sees, **read-only**,
+A user with the **BUILDING_OWNER** role who is listed in a building's `owners` sees, **read-only**,
 everything a BOSS sees, limited to their buildings:
 
 | Area | What they see |
@@ -277,6 +276,24 @@ everything a BOSS sees, limited to their buildings:
 Users, roles and the audit log are company-wide, so building owners don't get them (`403`).
 Every change returns `403`. If the user also has an unrestricted role such as BOSS, they
 see everything.
+
+### Assigning buildings to owners and managers
+
+1. Give the user the role (`POST /users/{id}/roles/ {"role": "BUILDING_OWNER"}` or
+   `BUILDING_MANAGER`).
+2. Add them to the building: `PATCH /rfid/buildings/{id}/` (ADMIN, `rfid.device.manage`)
+   with the **whole** list, e.g. `{"owners": [7, 12]}` or `{"managers": [9]}`. The list
+   replaces the previous one: to add someone, send the current ids plus theirs; `[]`
+   removes everyone. `GET /rfid/buildings/` returns `owners` and `managers` (user ids).
+3. One user can own or manage several buildings (add them to each).
+
+Users without the matching role are rejected: `VALIDATION_ERROR` on `owners` /
+`managers`, "These users don't have the BUILDING_OWNER role: a@x.com". Candidates:
+`GET /users/?role=BUILDING_OWNER` (or `BUILDING_MANAGER`). In the Django admin the same is
+possible under **RFID → Buildings** (two-box pickers for owners and managers).
+
+Suggested UI on the building page: two multi-selects, "Owners" (users with
+BUILDING_OWNER) and "Managers" (users with BUILDING_MANAGER), saved with one PATCH.
 
 ### Position managers
 

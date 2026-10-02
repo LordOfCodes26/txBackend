@@ -200,6 +200,26 @@ class BuildingSerializer(serializers.ModelSerializer):
         fields = ["id", "code", "name", "managers", "owners", "created_at"]
         read_only_fields = ["id", "created_at"]
 
+    @staticmethod
+    def _with_role(users, role: str):
+        from apps.accounts.models import UserRole
+
+        missing = [
+            u.email for u in users if not UserRole.objects.filter(user=u, role__code=role).exists()
+        ]
+        if missing:
+            raise serializers.ValidationError(
+                _("These users don't have the %(role)s role: %(users)s")
+                % {"role": role, "users": ", ".join(missing)}
+            )
+        return users
+
+    def validate_managers(self, users):
+        return self._with_role(users, "BUILDING_MANAGER")
+
+    def validate_owners(self, users):
+        return self._with_role(users, "BUILDING_OWNER")
+
 
 class RFIDDeviceWithKeySerializer(RFIDDeviceSerializer):
     api_key = serializers.SerializerMethodField(

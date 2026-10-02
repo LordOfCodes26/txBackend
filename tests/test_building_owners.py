@@ -198,3 +198,17 @@ def test_admin_assigns_owners_but_building_managers_cannot(auth_client, admin, m
         f"/api/v1/rfid/buildings/{site.b2.pk}/", {"owners": []}, format="json"
     )
     assert "owners" in r.json()["error"]["details"]
+
+
+def test_owners_need_the_building_owner_role(auth_client, admin, make_user, site):
+    plain = make_user(email="plain@x.com")
+    r = auth_client(admin).patch(
+        f"/api/v1/rfid/buildings/{site.b2.pk}/", {"owners": [plain.pk]}, format="json"
+    )
+    assert r.json()["error"]["details"] == {
+        "owners": ["These users don't have the BUILDING_OWNER role: plain@x.com"]
+    }
+    r = auth_client(admin).patch(
+        f"/api/v1/rfid/buildings/{site.b2.pk}/", {"managers": [site.owner.pk]}, format="json"
+    )
+    assert "managers" in r.json()["error"]["details"]
