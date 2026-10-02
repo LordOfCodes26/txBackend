@@ -23,14 +23,15 @@ git status                                   # must be clean: only committed cod
 scripts/build_offline_bundle.sh 2026.10.05   # the version is the bundle's name
 ```
 
-Result in `dist/`, the five files to copy:
+Result in `dist/`, the six files to copy:
 
 | File | |
 |---|---|
-| `backend-<version>.tar.gz` | app, wheels and OS packages (~140 MB) |
+| `backend-<version>.tar.gz` | app, Python wheels (running and development), OS packages incl. git and gettext, and the full git history `backend.git-bundle` (~175 MB) |
 | `backend-<version>.tar.gz.sha256` | checksum |
 | `prepare-server.sh` | prepares a fresh Ubuntu: checks, name, timezone/clock, fixed IP (netplan), firewall (ufw), no online auto-updates |
 | `install-backend.sh` | installer / upgrader |
+| `setup-dev.sh` | optional: a development copy for a user (see *6. Development on the offline server*) |
 | `README-INSTALL.md` | step-by-step guide for the person installing |
 
 The bundle never contains `.env` files, keys or passwords (it is made with `git archive`,
@@ -39,7 +40,7 @@ bundles from `dist/` before copying, so the installer picks the right one.
 
 ## 2. Install
 
-Copy the five files into one folder on the offline server (USB disk or internal network).
+Copy the six files into one folder on the offline server (USB disk or internal network).
 On a fresh Ubuntu, first run `sudo bash prepare-server.sh` (once; `--dry-run` shows what it
 would do; `--help` lists the options), then:
 
@@ -168,7 +169,38 @@ sudo ln -sfn /opt/backend/releases/<previous-version> /opt/backend/current
 sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
 ```
 
-## 5. Not included
+## 5. Building bundles on the offline server
+
+`scripts/build_offline_bundle.sh` normally downloads the Python and Ubuntu packages. With
+`--reuse DIR` it takes them from an unpacked earlier bundle (or a development copy's
+`.offline-cache/`) instead, so a bundle can be built without internet:
+
+```bash
+scripts/build_offline_bundle.sh --reuse .offline-cache 2026.10.07
+```
+
+It first checks that every Python package the code needs is in `DIR/wheelhouse`, and stops
+if not: a change that adds a package must be built on a machine with internet.
+
+## 6. Development on the offline server
+
+`setup-dev.sh` (run with sudo) makes a development copy for a normal user, by default
+`~/backend-dev`, entirely from the bundle:
+
+| What | Where / how |
+|---|---|
+| Code with full git history | cloned from `backend.git-bundle`; remote `offline` |
+| Python environment | `.venv` with prod + dev requirements (pytest, ruff, ...) |
+| Database | `backend_dev`, user `backend_dev` (CREATEDB, for the test database), on a separate PostgreSQL instance `dev` (port 5433): the main instance archives every change into the backups, the development one doesn't |
+| Settings | `.env` (DEBUG on, Redis database 1, timezone and language from the installed backend) |
+| Packages for offline builds | `.offline-cache/` (wheelhouse, os-packages, git bundle; not in git) |
+
+Options: `--user NAME`, `--dir PATH`, `--seed-demo`, `--run-tests`, `--yes`. Running it again
+with a newer bundle updates the packages and fetches the new code as `offline/main` without
+touching the developer's work. Step-by-step use for developers: `README-INSTALL.md`,
+section 9.
+
+## 7. Not included
 
 - The **frontend** (Next.js) and its Node.js runtime: the frontend team builds it with
   `output: "standalone"` and adds it to the server separately (see `FRONTEND_README.md`).

@@ -26,6 +26,10 @@ ASSUME_YES=0
 BUNDLE_FILE=""
 DB_NAME=backend_dev
 DB_USER=backend_dev
+# A separate PostgreSQL instance for development: the installed backend's one archives every
+# change into its backups, which demo data and test runs must not fill.
+PG_CLUSTER=dev
+PG_PORT=5433
 
 while (( $# )); do
     case "$1" in
@@ -141,21 +145,29 @@ note "$(as_user ".venv/bin/python --version"), pytest, ruff, Django: installed"
 
 # ---------------------------------------------------------------------------------- database
 say "Development database ($DB_NAME, separate from the installed backend)"
+PG_VERSION=$(ls /usr/lib/postgresql | sort -V | tail -1)
+if ! pg_lsclusters -h | awk '{print $2}' | grep -qx "$PG_CLUSTER"; then
+    pg_createcluster "$PG_VERSION" "$PG_CLUSTER" -p "$PG_PORT" --start >/dev/null
+    note "own PostgreSQL $PG_VERSION instance '$PG_CLUSTER' on port $PG_PORT (no backups, local only)"
+else
+    pg_ctlcluster "$PG_VERSION" "$PG_CLUSTER" start 2>/dev/null || true
+fi
+psql_dev() { runuser -u postgres -- psql -p "$PG_PORT" "$@"; }
 ENV_FILE="$DEV_DIR/.env"
-role_exists=$(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'")
+role_exists=$(psql_dev -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'")
 if [[ "$role_exists" == 1 && -f "$ENV_FILE" ]]; then
     note "database user $DB_USER exists; settings in $ENV_FILE kept"
 else
     DB_PASSWORD=$(openssl rand -hex 16)
     if [[ "$role_exists" == 1 ]]; then
-        runuser -u postgres -- psql -qc "ALTER ROLE $DB_USER WITH LOGIN CREATEDB PASSWORD '$DB_PASSWORD'"
+        psql_dev -qc "ALTER ROLE $DB_USER WITH LOGIN CREATEDB PASSWORD '$DB_PASSWORD'"
     else
         # CREATEDB: the tests create their own throw-away test database.
-        runuser -u postgres -- psql -qc "CREATE ROLE $DB_USER LOGIN CREATEDB PASSWORD '$DB_PASSWORD'"
+        psql_dev -qc "CREATE ROLE $DB_USER LOGIN CREATEDB PASSWORD '$DB_PASSWORD'"
     fi
 fi
-runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 \
-    || runuser -u postgres -- createdb -O "$DB_USER" "$DB_NAME"
+psql_dev -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 \
+    || runuser -u postgres -- createdb -p "$PG_PORT" -O "$DB_USER" "$DB_NAME"
 
 if [[ ! -f "$ENV_FILE" ]]; then
     PROD_ENV=/etc/backend/backend.env
@@ -165,7 +177,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
     HOSTS="localhost,127.0.0.1,$(hostname),$(hostname -I | tr ' ' ',' | sed 's/,*$//')"
     sed -e "s|^DJANGO_SECRET_KEY=.*|DJANGO_SECRET_KEY=$(openssl rand -hex 50)|" \
         -e "s|^DJANGO_ALLOWED_HOSTS=.*|DJANGO_ALLOWED_HOSTS=$HOSTS|" \
-        -e "s|^DATABASE_URL=.*|DATABASE_URL=postgres://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME|" \
+        -e "s|^DATABASE_URL=.*|DATABASE_URL=postgres://$DB_USER:$DB_PASSWORD@localhost:$PG_PORT/$DB_NAME|" \
         -e "s|^REDIS_URL=.*|REDIS_URL=redis://localhost:6379/1|" \
         -e "s|^TIME_ZONE=.*|TIME_ZONE=$TZ_VALUE|" \
         -e "s|^LANGUAGE_CODE=.*|LANGUAGE_CODE=${LANG_VALUE:-en}|" \
@@ -193,7 +205,7 @@ rm -rf "${WORK:?}/$NAME"
 say "Development copy ready"
 cat <<EOF
     Folder:    $DEV_DIR   (git: $(as_user "git log --oneline -1"))
-    Database:  $DB_NAME   (settings: $ENV_FILE)
+    Database:  $DB_NAME on the development PostgreSQL, port $PG_PORT   (settings: $ENV_FILE)
 
     As $DEV_USER:
       cd $DEV_DIR

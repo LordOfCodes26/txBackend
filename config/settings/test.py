@@ -1,5 +1,13 @@
 import os
+from pathlib import Path
 
+import environ
+
+# The developer's .env decides the database (e.g. a development copy's own one); read it
+# before the fallbacks below, which only apply when nothing is set.
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+if _ENV_FILE.exists():
+    environ.Env.read_env(_ENV_FILE, overwrite=False)
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256")
 os.environ.setdefault("DATABASE_URL", "postgres://backend:backend@localhost:5432/backend")
 

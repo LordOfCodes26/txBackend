@@ -7,6 +7,7 @@ This folder contains everything needed. The server does **not** need internet ac
 | `backend-<version>.tar.gz` | The bundle: application, Python packages and Ubuntu packages |
 | `backend-<version>.tar.gz.sha256` | Checksum, to detect a damaged copy |
 | `prepare-server.sh` | Prepares a freshly installed Ubuntu (run once, before the installer) |
+| `setup-dev.sh` | Optional: a development copy (code, tests, own database) for a user |
 | `install-backend.sh` | The installer (installs and upgrades) |
 | `README-INSTALL.md` | This guide |
 
@@ -43,7 +44,7 @@ network), for example `/home/<you>/backend-install/`:
 
 ```bash
 cd /home/<you>/backend-install
-ls   # README-INSTALL.md  backend-<version>.tar.gz(.sha256)  install-backend.sh  prepare-server.sh
+ls   # README-INSTALL.md  backend-<version>.tar.gz(.sha256)  install-backend.sh  prepare-server.sh  setup-dev.sh
 ```
 
 ## 3. Prepare the server (once, on a fresh Ubuntu)
@@ -134,7 +135,7 @@ Installed <version> successfully.
   Web / API:     https://<server-ip>/
 ```
 
-If a check fails, see **10. Problems**.
+If a check fails, see **11. Problems**.
 
 ## 5. Check it works
 
@@ -329,7 +330,71 @@ It takes the newest bundle in the folder, **makes a safety backup first**, then 
 Data, accounts and settings are kept; the questions above are not asked again (pass an
 option, e.g. `--language ko`, to change a setting).
 
-## 9. Where things are
+## 9. Development on the offline server (optional)
+
+To change the backend on this server (no internet), make a **development copy** for a
+normal user account. It is separate from the installed backend: its own folder, its own
+database and settings. Experiments never touch the real data.
+
+### Set it up (once per developer)
+
+```bash
+sudo bash setup-dev.sh                    # for you, in ~/backend-dev
+sudo bash setup-dev.sh --seed-demo        # ... with demo people, stores, attendance and sales
+sudo bash setup-dev.sh --user kim         # for another user account
+```
+
+It installs git and the tools from the bundle, clones the code **with its full history**,
+creates a Python environment with the development tools (pytest, ruff), a database
+`backend_dev` on its own PostgreSQL instance (port 5433, not part of the backups) and a
+settings file `~/backend-dev/.env` (DEBUG on). Add `--run-tests` to run
+all tests at the end (10–15 minutes).
+
+### Work in it (as your normal user, not root)
+
+```bash
+cd ~/backend-dev
+.venv/bin/python manage.py createsuperuser           # a login for this copy
+.venv/bin/python manage.py runserver 127.0.0.1:8000  # try it: http://127.0.0.1:8000/admin/
+.venv/bin/pytest -q                                  # all tests
+.venv/bin/ruff check . && .venv/bin/ruff format .    # lint and format
+git status; git diff; git log --oneline              # see changes and history
+git add -A && git commit -m "Describe the change"    # record a change
+```
+
+Set your name for commits once: `git config --global user.name "Kim"` and
+`git config --global user.email kim@chonha.com`. Demo data commands (`seed_*`) work here
+(not on the installed backend). To see the copy from another PC, run
+`runserver 0.0.0.0:8000` and open port 8000 (`sudo ufw allow 8000/tcp`).
+
+### Install your changes on this server
+
+Commit first (the bundle contains only committed code), then build a bundle **without
+internet**, from the packages the copy keeps in `.offline-cache/`, and install it:
+
+```bash
+cd ~/backend-dev
+scripts/build_offline_bundle.sh --reuse .offline-cache 2026.10.07   # any new version name
+sudo bash dist/install-backend.sh                                    # upgrades the installed backend
+```
+
+The installer makes a safety backup first, as with any upgrade. If your change needs a
+Python package that isn't in the bundle, the build stops with a message: that change has to
+be built on a machine with internet.
+
+### When a newer bundle arrives
+
+Run `sudo bash setup-dev.sh` again with the new bundle in the folder. It installs the new
+packages and fetches the new code as the git branch `offline/main`, **without changing
+your work**. Merge it when you're ready:
+
+```bash
+cd ~/backend-dev
+git merge offline/main
+.venv/bin/python manage.py migrate
+```
+
+## 10. Where things are
 
 | What | Where |
 |---|---|
@@ -345,7 +410,7 @@ Restart everything after changing `/etc/backend/backend.env`:
 sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
 ```
 
-## 10. Problems
+## 11. Problems
 
 | Symptom | What to do |
 |---|---|
