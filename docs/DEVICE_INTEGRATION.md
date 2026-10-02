@@ -79,8 +79,8 @@ ${"ID":"Door1","Type":"in","UID":"04A2B3C4"}$
   …), or `ERROR` when the packet itself was rejected. Use `accepted` for the green/red
   light and `message` for a display. A door that ignores replies still works.
 - **Authentication is the fixed IP** (same rule as above): the connection must come from
-  the `allowed_ip` registered for the device named in `ID`. Doors authenticate by IP;
-  till readers on TCP authenticate with `SN` + `ID` (see *TILL devices only*).
+  the `allowed_ip` registered for the device named in `ID`. This port is for the doors
+  only; till readers use HTTPS (see *TILL devices only*).
 - **Finding a door's IP:** point the door at the server and tap a card. The rejection is
   logged with the address the server saw (`journalctl -u backend-tcp`: `rejected
   ID='Door1' from 203.0.113.5`). Register that address as the door's `allowed_ip`. If the
@@ -244,7 +244,7 @@ Content-Type: application/json
 {"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"}
 ```
 
-or over TCP port 9100, framed like the doors: `${"SN":"ZK2024A0001234","ID":"Reader1","TYPE":"pay","UID":"04A2B3C4"}$`
+Till programs use **HTTPS only**; the TCP port 9100 is for the doors.
 
 | Field | Meaning |
 |---|---|

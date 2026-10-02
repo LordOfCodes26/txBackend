@@ -349,17 +349,21 @@ api -X POST "$SERVER/api/v1/rfid/devices/" \
 
 | Setting | Value |
 |---|---|
-| Way to send taps | **TCP**: `<server-ip>:9100`, JSON between `$` signs, like the doors; **or HTTPS**: `POST https://<server-ip>/api/v1/rfid/events/` with JSON (the program must trust the server's certificate) |
-| What to send for each tap | `{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "<card number>"}` (TCP: `${...}$`) |
-| Heartbeat (recommended) | every 30 s: `POST https://<server-ip>/api/v1/rfid/device/heartbeat/` with `{"SN": "...", "ID": "Reader1"}` |
+Till programs talk to the server over **HTTPS** (port 443). The TCP port 9100 is only for
+the doors.
 
-The heartbeat keeps the reader shown as **connected** (heard from in the last 2 minutes),
-so the seller's till page finds it automatically. A tap also counts, but only for 2 minutes;
-TCP has no heartbeat, so a TCP program should still send the heartbeat over HTTPS.
+| Setting | Value |
+|---|---|
+| Each tap | `POST https://<server-ip>/api/v1/rfid/events/`, `Content-Type: application/json`, body `{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "<card number>"}` |
+| Heartbeat | every 30 s: `POST https://<server-ip>/api/v1/rfid/device/heartbeat/`, body `{"SN": "ZK2024A0001234", "ID": "Reader1"}` |
+| Certificate | the program must trust the server's certificate (install the company's one on the server: "After installing", item 1; never switch verification off) |
+| Timeout | about 5 seconds per request |
 
-**Firewall:** a TCP program needs port 9100 from the seller's PC. If `prepare-server.sh`
-limited 9100 to the doors' network, allow the PC too:
-`sudo ufw allow from <seller pc ip> to any port 9100 proto tcp`.
+No API key is needed: `SN` + `ID` identify the reader. The heartbeat keeps the reader shown
+as **connected** (heard from in the last 2 minutes), so the seller's till page finds it
+automatically.
+
+**Firewall:** the seller's PC needs port **443** to the server (opened by `prepare-server.sh`).
 
 ### Step 4. Check the reader is connected
 
@@ -385,16 +389,8 @@ A tap is valid for **2 minutes**; a newer tap replaces it. The card number is ne
 
 ### What the server answers to a tap
 
-Every tap gets an answer right away, in the reply to the program's own message.
-
-**Over TCP** (`$...$`):
-
-```json
-{"result": "ACCEPTED", "accepted": true, "direction": "", "message": "Ada Kim - enter PIN",
- "event_id": 10503, "purchase": 6543}
-```
-
-**Over HTTPS** (status `201`):
+Every tap gets an answer right away, in the reply to the program's own request
+(status `201`). For a registered card with a purchase open:
 
 ```json
 {"id": 10504, "result": "ACCEPTED", "accepted": true, "direction": "",
@@ -403,7 +399,7 @@ Every tap gets an answer right away, in the reply to the program's own message.
  "purchase": 6543, "event_time": "2026-10-02T05:10:28.440673Z", "client_event_id": ""}
 ```
 
-**All the answers** (TCP `message` = HTTPS `display_message`):
+**All the answers** (the reader shows `display_message`):
 
 | The card | `result` | `accepted` | Message on the reader | `purchase` |
 |---|---|---|---|---|
@@ -415,9 +411,7 @@ Every tap gets an answer right away, in the reply to the program's own message.
 | Retired | `RETIRED_CARD` | `false` | `Card no longer valid` | `null` |
 | Developer suspended or terminated | `INACTIVE_DEVELOPER` | `false` | `Not active - contact your manager` | `null` |
 
-**Wrong reader `SN` or `ID`:** over TCP
-`{"result": "ERROR", "accepted": false, "error": "Unknown till reader ID or serial number."}`;
-over HTTPS status `401` with
+**Wrong reader `SN` or `ID`:** status `401` with
 `{"error": {"code": "AUTHENTICATION_FAILED", "message": "Unknown till reader ID or serial number."}}`.
 After **10 wrong attempts from one PC within 15 minutes**, that PC is blocked for 15 minutes.
 
@@ -437,11 +431,11 @@ The messages are in English, or in Korean if the server was installed with
 | What you see | Meaning / fix |
 |---|---|
 | "Unknown till reader ID or serial number." | `ID` or `SN` differs from step 2 (check spelling), or the reader is deactivated |
-| No answer at all | The PC doesn't reach the server: address, port 9100 (TCP) or 443 (HTTPS), firewall |
+| No answer at all | The PC doesn't reach the server: address, port 443, firewall |
 | "No open purchase for this reader" | The seller hasn't started a purchase, or chose another reader on the till page |
 | The till page doesn't find the reader | No heartbeat: check step 3, and step 4 shows `"online": true` with the PC's IP |
 | "Unknown card" / "Card not assigned" | Register the card and assign it to the developer (door section, step 8) |
-| HTTPS: certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
+| Certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
 
 ## 9. Upgrading to a newer version
 

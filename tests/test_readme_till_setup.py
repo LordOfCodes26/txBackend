@@ -1,18 +1,16 @@
 """The till reader steps and replies documented in deploy/README-OFFLINE-KIT.md (section
-"Connecting the till readers"), request by request, over HTTP and TCP."""
+"Connecting the till readers"), request by request. Till programs use HTTPS only."""
 
 import json
 import os
 
 import pytest
-from django.utils import timezone
 
 from apps.accounts.rbac import Roles
 from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.goods.models import Good
 from apps.rfid.models import RFIDCard, RFIDCardAssignment
-from apps.rfid.tcp import handle_frame
 from apps.sellers.models import Seller, ServicePosition
 
 pytestmark = pytest.mark.django_db
@@ -27,9 +25,13 @@ def show(title, body):
         print(f"\n--- {title}\n{json.dumps(body, indent=2, ensure_ascii=False)}")
 
 
-def tcp(uid, sn=SN):
-    frame = json.dumps({"SN": sn, "ID": "Reader1", "TYPE": "pay", "UID": uid}).encode()
-    return handle_frame(frame, TILL_PC)
+def tap(till, uid, sn=SN):
+    return till.post(
+        "/api/v1/rfid/events/",
+        {"SN": sn, "ID": "Reader1", "TYPE": "pay", "UID": uid},
+        format="json",
+        REMOTE_ADDR=TILL_PC,
+    )
 
 
 def test_readme_till_setup(auth_client, make_user):
@@ -90,24 +92,17 @@ def test_readme_till_setup(auth_client, make_user):
         f"/api/v1/purchases/{purchase}/items/", {"good": tea.pk, "quantity": 2}, format="json"
     )
 
-    reply = tcp("04A2B3C4")
-    show("registered card, purchase open (TCP)", reply)
-    assert reply == {
-        "result": "ACCEPTED",
-        "accepted": True,
-        "direction": "",
-        "message": "Ada Kim - enter PIN",
-        "event_id": reply["event_id"],
-        "purchase": purchase,
-    }
-    r = till.post(
-        "/api/v1/rfid/events/",
-        {"SN": SN, "ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"},
-        format="json",
-        REMOTE_ADDR=TILL_PC,
+    r = tap(till, "04A2B3C4")
+    assert r.status_code == 201, r.json()
+    body = r.json()
+    show("registered card, purchase open", body)
+    assert (body["result"], body["accepted"], body["display_message"], body["purchase"]) == (
+        "ACCEPTED",
+        True,
+        "Ada Kim - enter PIN",
+        purchase,
     )
-    show("registered card, purchase open (HTTP)", r.json())
-    assert (r.json()["display_message"], r.json()["purchase"]) == ("Ada Kim - enter PIN", purchase)
+    assert body["developer"]["full_name"] == "Ada Kim"
 
     # The seller's screen shows who tapped; the developer types the PIN; paid.
     presented = desk.get(f"/api/v1/purchases/{purchase}/").json()["presented_card"]
@@ -144,24 +139,24 @@ def test_readme_till_setup(auth_client, make_user):
         "04BB0002": ("INACTIVE_DEVELOPER", "Not active - contact your manager"),
     }
     for uid, (result, message) in expected.items():
-        reply = tcp(uid)
-        show(f"{result} (TCP)", reply)
-        assert (reply["result"], reply["accepted"], reply["message"]) == (result, False, message)
+        r = tap(till, uid)
+        body = r.json()
+        show(result, body)
+        assert r.status_code == 201
+        assert (body["result"], body["accepted"], body["display_message"], body["purchase"]) == (
+            result,
+            False,
+            message,
+            None,
+        )
 
     # Step 8: wrong serial number.
-    reply = tcp("04A2B3C4", sn="WRONG-SN")
-    show("wrong SN (TCP)", reply)
-    assert reply == {
-        "result": "ERROR",
-        "accepted": False,
-        "error": "Unknown till reader ID or serial number.",
-    }
-    r = till.post(
-        "/api/v1/rfid/events/",
-        {"SN": "WRONG-SN", "ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"},
-        format="json",
-        REMOTE_ADDR=TILL_PC,
-    )
-    show("wrong SN (HTTP)", {"status": r.status_code, **r.json()})
+    r = tap(till, "04A2B3C4", sn="WRONG-SN")
+    show("wrong SN", {"status": r.status_code, **r.json()})
     assert r.status_code == 401
-    assert timezone.now()  # keep the import used
+    assert r.json() == {
+        "error": {
+            "code": "AUTHENTICATION_FAILED",
+            "message": "Unknown till reader ID or serial number.",
+        }
+    }
