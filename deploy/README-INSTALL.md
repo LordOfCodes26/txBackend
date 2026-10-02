@@ -89,7 +89,7 @@ Installed <version> successfully.
   Web / API:     https://<server-ip>/
 ```
 
-If a check fails, see **8. Problems**.
+If a check fails, see **9. Problems**.
 
 ## 4. Check it works
 
@@ -121,14 +121,8 @@ installer made a temporary self-signed one (see step 5).
    a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER logins to their
    buildings, DEVELOPER logins to a developer profile.
 
-4. **Buildings and devices:** create the buildings (Building 1, Building 2), register the
-   doors (`Door1`, `Door2`) with each door's fixed IP, and the till readers with their
-   serial numbers. A door that isn't registered yet shows up in the log as
-   `rejected ID='Door1' from <ip>`:
-
-   ```bash
-   sudo journalctl -u backend-tcp -f
-   ```
+4. **Buildings and doors:** see **6. Connecting the door devices**, step by step.
+   Till readers are registered with their serial numbers (`sn`).
 
 5. **Backups to a second place:** backups are made every night into
    `/var/backups/backend`, on the same disk. Set a second disk or machine in
@@ -137,7 +131,146 @@ installer made a temporary self-signed one (see step 5).
 6. **Firewall:** allow 443 (and 80) from the company network, and 9100 only from the
    door devices.
 
-## 6. Upgrading to a newer version
+## 6. Connecting the door devices (attendance)
+
+Right after installing, the door service (`backend-tcp`) already listens on **TCP port
+9100**, and doors that send `in` / `out` are understood. But the server **rejects every
+door until it is registered**: a door is accepted only when its **ID** (`Door1`, `Door2`)
+is registered **and** its scans come from that door's **fixed IP address**.
+
+Do these steps once, on the server (a terminal on the server itself).
+
+### Step 1. Sign in from the terminal
+
+Use the admin account from the installation. The sign-in lasts 15 minutes: if a later
+command answers `token_not_valid`, run this step again.
+
+```bash
+SERVER=https://localhost
+read -p "Admin email: " EMAIL; read -s -p "Password: " PASSWORD; echo
+TOKEN=$(EMAIL="$EMAIL" PASSWORD="$PASSWORD" python3 -c \
+  'import json, os; print(json.dumps({"email": os.environ["EMAIL"], "password": os.environ["PASSWORD"]}))' \
+  | curl -sk "$SERVER/api/v1/auth/token/" -H 'Content-Type: application/json' -d @- \
+  | python3 -c 'import sys, json; print(json.load(sys.stdin).get("access", ""))')
+[ -n "$TOKEN" ] && echo "Signed in." || echo "Sign-in failed: check the email and password."
+api() { curl -sk -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; echo; }
+api "$SERVER/api/v1/auth/me/"          # shows your account: the sign-in worked
+```
+
+### Step 2. Create the buildings
+
+```bash
+api -X POST "$SERVER/api/v1/rfid/buildings/" -d '{"code": "B1", "name": "Building 1"}'
+api -X POST "$SERVER/api/v1/rfid/buildings/" -d '{"code": "B2", "name": "Building 2"}'
+api "$SERVER/api/v1/rfid/buildings/"   # note each building's "id"
+```
+
+(Buildings can also be created in the admin: `https://<server-ip>/admin/` → RFID → Buildings.)
+
+### Step 3. Register the doors
+
+One door device per door, with the building it belongs to (use the ids from step 2):
+
+```bash
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Building 1 door", "building": 1}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door2", "name": "Building 2 door", "building": 2}'
+api "$SERVER/api/v1/rfid/devices/?purpose=ATTENDANCE"   # note each door's "id"
+```
+
+The `code` must be exactly the **ID the door sends** (`Door1`, `Door2`). The answer also
+shows an `api_key`: doors don't need it (they are recognised by their IP), ignore it.
+
+### Step 4. Point each door at the server
+
+In each door device's own settings:
+
+| Setting | Value |
+|---|---|
+| Server address | the server's IP, e.g. `192.168.1.10` (`hostname -I` on the server shows it) |
+| Port | `9100` |
+| Protocol | TCP, JSON between `$` signs: `${"ID": "Door1", "Type": "in", "UID": "..."}$` |
+| ID | `Door1` (or `Door2`), the same as the `code` in step 3 |
+
+### Step 5. Find each door's IP address
+
+Watch the door log and tap any card on the door:
+
+```bash
+sudo journalctl -u backend-tcp -f
+```
+
+A line like this appears (press Ctrl+C to stop watching):
+
+```
+RFID TCP: rejected ID='Door1' from 192.168.1.50 (no matching door/IP)
+```
+
+`192.168.1.50` is that door's IP. Nothing appears? The door doesn't reach the server: check
+step 4, the network cable, and the firewall (step 7). Give each door a **fixed IP** in the
+door's settings or the router, otherwise it stops working when its address changes.
+
+### Step 6. Allow each door by its IP
+
+Use the door's id from step 3 and the IP from step 5:
+
+```bash
+api -X PATCH "$SERVER/api/v1/rfid/devices/1/" -d '{"allowed_ip": "192.168.1.50"}'
+api -X PATCH "$SERVER/api/v1/rfid/devices/2/" -d '{"allowed_ip": "192.168.1.51"}'
+```
+
+Tap a card again: the door now gets an answer from the server. With a card that isn't
+registered yet the door shows **"Unknown card"**: the connection works.
+
+### Step 7. Firewall (if the server has one)
+
+Allow port 9100 only from the doors:
+
+```bash
+sudo ufw allow from 192.168.1.50 to any port 9100 proto tcp
+sudo ufw allow from 192.168.1.51 to any port 9100 proto tcp
+```
+
+### Step 8. Register developers and their cards
+
+A tap is counted only for a card assigned to a developer. For each developer (usually from
+the web app; by command for a first test):
+
+```bash
+api -X POST "$SERVER/api/v1/developers/" -d '{"employee_number": "E001", "full_name": "Ada Kim", "building": 1}'
+api -X POST "$SERVER/api/v1/rfid/cards/" -d '{"uid": "04A2B3C4"}'          # the card's number
+api -X POST "$SERVER/api/v1/rfid/cards/<card id>/assign/" \
+  -d '{"developer": <developer id>, "pin": "<PIN typed by the developer>", "pin_confirm": "<same PIN>"}'
+```
+
+(Assigning a card also sets the developer's purchase PIN: 4–6 digits, not 1111 or 1234.)
+Don't know a card's number (UID)? Tap it on a door, then list the latest unknown cards:
+`api "$SERVER/api/v1/rfid/events/?result=UNKNOWN_CARD&ordering=-event_time"` → `"uid"`.
+
+### Step 9. Check it
+
+Tap the developer's card on the door: it shows **"Welcome, Ada Kim"** (or "Goodbye, …"
+on the way out). Then:
+
+```bash
+api "$SERVER/api/v1/attendance/occupancy/"                    # who is inside, per building
+api "$SERVER/api/v1/rfid/events/?ordering=-event_time"        # the latest taps
+```
+
+### If a door doesn't work
+
+| Log line (`sudo journalctl -u backend-tcp -f`) | Meaning / fix |
+|---|---|
+| nothing when tapping | The door doesn't reach the server: step 4, network, firewall (step 7) |
+| `rejected ID='Door1' from <ip>` | Door not registered, wrong ID, or another IP than `allowed_ip`: steps 3 and 6 |
+| `rejected ID='door 1' ...` | The door sends a different ID than the `code`: make them the same |
+| door shows "Unknown card" / "Card not assigned" | Connection is fine; register / assign the card (step 8) |
+| door shows "Card blocked" | The card was blocked; unblock it or give a new card |
+
+Door screens show English; for Korean, install with `--device-language ko` (or set
+`DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
+the door screens can show Korean letters.
+
+## 7. Upgrading to a newer version
 
 Copy the new `backend-<new version>.tar.gz`, its `.sha256` and `install-backend.sh` into
 the same folder, and run the same command:
@@ -150,7 +283,7 @@ It takes the newest bundle in the folder, **makes a safety backup first**, then 
 Data, accounts and settings are kept; the questions above are not asked again (pass an
 option, e.g. `--language ko`, to change a setting).
 
-## 7. Where things are
+## 8. Where things are
 
 | What | Where |
 |---|---|
@@ -166,7 +299,7 @@ Restart everything after changing `/etc/backend/backend.env`:
 sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
 ```
 
-## 8. Problems
+## 9. Problems
 
 | Symptom | What to do |
 |---|---|
