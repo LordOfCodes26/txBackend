@@ -175,18 +175,46 @@ if [[ -n "$DEV_USER" ]]; then
         bash "$HERE/setup-dev.sh" --user "$DEV_USER" --yes "${SEED_ARG[@]}" "$BACKEND_BUNDLE"
     fi
     FE_DEV="$HOME_DIR/frontend-dev"
-    if [[ -e "$FE_DEV" ]]; then
-        note "frontend copy $FE_DEV exists: your work is kept (not overwritten)"
-    elif [[ -n "$FRONTEND_FROM" ]]; then
-        note "frontend copy: not made from --frontend-from"
-    else
+    fe_git() { runuser -u "$DEV_USER" -- git -C "$FE_DEV" "$@"; }
+    NEW_FE=0
+    if [[ -n "$FRONTEND_FROM" ]]; then
+        note "frontend copy: unchanged (building from --frontend-from)"
+    elif [[ ! -e "$FE_DEV" ]]; then
         note "frontend copy: $FE_DEV (source, git history, node_modules)..."
         cp -a "$WORK/management-app" "$FE_DEV"
         # Point the development frontend at the development backend (runserver on :8000).
         printf '# Written by install-all.sh: the development backend (~/backend-dev, runserver).\nAPI_URL=http://127.0.0.1:8000\n' \
             > "$FE_DEV/.env.local"
         chown -R "$DEV_USER:" "$FE_DEV"
-        note "frontend copy ready ($(runuser -u "$DEV_USER" -- git -C "$FE_DEV" log --oneline -1 2>/dev/null || echo 'no git history'))"
+        NEW_FE=1
+    elif [[ ! -d "$FE_DEV/.git" ]]; then
+        warn "$FE_DEV exists but is not a git repository: left alone"
+    else
+        note "frontend copy $FE_DEV exists: your work is kept (not overwritten)"
+    fi
+    # The kit's frontend history becomes the branch offline/main (as for the backend copy):
+    # merge it when you're ready; your branches and files are never changed here.
+    if [[ -z "$FRONTEND_FROM" && -d "$FE_DEV/.git" && -d "$WORK/management-app/.git" ]]; then
+        FE_CACHE="$FE_DEV/.offline-cache/frontend.git"
+        rm -rf "$FE_CACHE"
+        mkdir -p "$FE_DEV/.offline-cache"
+        git -c safe.directory="*" clone -q --bare --no-hardlinks "$WORK/management-app" "$FE_CACHE"
+        chown -R "$DEV_USER:" "$FE_DEV/.offline-cache"
+        grep -qx ".offline-cache/" "$FE_DEV/.git/info/exclude" 2>/dev/null \
+            || echo ".offline-cache/" >> "$FE_DEV/.git/info/exclude"
+        fe_git remote set-url offline "$FE_CACHE" 2>/dev/null || fe_git remote add offline "$FE_CACHE"
+        fe_git fetch -q offline
+        if (( NEW_FE )); then
+            note "frontend copy ready ($(fe_git log --oneline -1))"
+        else
+            # The new kit's npm packages, for after the merge (offline there's no npm install):
+            #   rm -rf node_modules && cp -a .offline-cache/node_modules .
+            rsync -a --delete "$WORK/management-app/node_modules/" "$FE_DEV/.offline-cache/node_modules/"
+            chown -R "$DEV_USER:" "$FE_DEV/.offline-cache/node_modules"
+            behind=$(fe_git rev-list --count HEAD..offline/main 2>/dev/null || echo 0)
+            note "the kit's frontend code is the branch offline/main ($behind new commits): merge it with  git merge offline/main"
+            note "its npm packages are in .offline-cache/node_modules (see README, section 10 B)"
+        fi
     fi
 else
     say "4. Development copies: none (--dev-user)"

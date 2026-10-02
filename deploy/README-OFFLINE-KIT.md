@@ -349,18 +349,93 @@ Door screens show English; for Korean, install with `--device-language ko` (or s
 `DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
 the door screens can show Korean letters.
 
-## 10. Updating with a newer kit
+## 10. Keeping the offline server and the internet machine in step
 
-Copy the new kit folder to the server and run the same command:
+The code lives in two places: the **offline server** (`~/backend-dev`, `~/frontend-dev`)
+and the **internet machine** (where kits are built, and GitHub). Changes go both ways
+with git, carried on a USB stick. In each development copy, the branch **`offline/main`**
+is the code of the last kit installed; your work is on **`main`**.
 
-```bash
-sudo bash install-all.sh
+```
+internet machine                      USB stick                    offline server
+  /root/backend, /root/frontend   ──── new kit folder ────►   install-all.sh → offline/main
+                                  ◄─── *-changes.bundle ────   git bundle create
 ```
 
-The installed system is upgraded (with a safety backup first); settings, data and accounts
-are kept. **Development copies are never overwritten:** the backend's new code arrives as the
-git branch `offline/main` (merge it with `git merge offline/main`); for the frontend, compare
-or merge from the new package by hand if needed.
+### A. Offline changes → internet machine
+
+1. **On the offline server**, as your user, commit, then export the commits that the
+   internet machine doesn't have yet (everything after the last kit):
+
+   ```bash
+   cd ~/backend-dev  && git status && git bundle create /media/usb/backend-changes.bundle  offline/main..main
+   cd ~/frontend-dev && git status && git bundle create /media/usb/frontend-changes.bundle offline/main..main
+   ```
+
+   (`/media/usb` = where the USB stick is mounted; `lsblk` shows it. "Refusing to create
+   an empty bundle" means there's nothing new in that copy.) The files are small: only
+   your new commits.
+
+2. **On the internet machine**, import, look, merge, test, push:
+
+   ```bash
+   cd /root/backend
+   git bundle verify /media/usb/backend-changes.bundle        # "is okay"
+   git fetch /media/usb/backend-changes.bundle main:offline-server
+   git log --oneline main..offline-server                     # the offline commits
+   git merge offline-server                                   # fix conflicts if any
+   .venv/bin/pytest -q && git push && git branch -d offline-server
+   ```
+
+   The same for the frontend in `/root/frontend` with `frontend-changes.bundle`
+   (check it with `npm run lint && npx tsc --noEmit && npm run build`).
+
+`git bundle verify` needs the internet machine to have the commit the kit was built from
+(it always does, unless that history was rewritten).
+
+### B. Internet machine → offline server (a newer kit)
+
+1. On the internet machine, commit and push everything (backend and frontend), then build
+   the kit:
+
+   ```bash
+   cd /root/frontend && scripts/package-offline.sh
+   cd /root/backend  && scripts/build_full_kit.sh 2026.10.20
+   ```
+
+   Commit the frontend **before** packaging: only committed changes reach `offline/main`.
+
+2. Copy the new `dist/offline-kit-<version>/` folder to the offline server and run:
+
+   ```bash
+   sudo bash install-all.sh
+   ```
+
+   The installed system is upgraded (safety backup first; data, settings and accounts
+   kept). **The development copies are never overwritten:** each gets the new code as
+   `offline/main`; the installer says how many new commits there are.
+
+3. Merge it into your work in each copy, when you're ready:
+
+   ```bash
+   cd ~/backend-dev  && git merge offline/main && .venv/bin/python manage.py migrate && .venv/bin/pytest -q
+   cd ~/frontend-dev && git merge offline/main && npm run build
+   ```
+
+   **New npm packages** (when the merge changed `package.json`): the installer left the new
+   kit's packages in `.offline-cache/node_modules`. Use them:
+
+   ```bash
+   cd ~/frontend-dev && rm -rf node_modules && cp -a .offline-cache/node_modules . && npm run build
+   ```
+
+### Rules that keep this simple
+
+- **Commit before exporting or packaging.** Uncommitted changes don't travel.
+- **One direction at a time:** bring offline changes in (A) **before** building the next
+  kit (B); then the new kit already contains them and `git merge offline/main` is clean.
+- **Don't rewrite history** (`git rebase`, `git push --force`) of commits that already
+  travelled: the other side can't match them up anymore.
 
 ## 11. Ports and services
 
