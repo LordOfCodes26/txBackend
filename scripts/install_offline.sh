@@ -122,6 +122,8 @@ for unit in backend-backup.service backend-backup.timer backend-basebackup.servi
     install -m 644 "${RELEASE}/deploy/systemd/${unit}" /etc/systemd/system/
 done
 install -m 644 "${RELEASE}/deploy/nginx/backend.conf" /etc/nginx/sites-available/backend.conf
+# What "/" serves: the backend, unless install-all.sh has put the frontend there (kept).
+[[ -f "${ETC}/nginx-root.conf" ]] || install -m 644 "${RELEASE}/deploy/nginx/root-backend.conf" "${ETC}/nginx-root.conf"
 ln -sfn /etc/nginx/sites-available/backend.conf /etc/nginx/sites-enabled/backend.conf
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
