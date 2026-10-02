@@ -14,6 +14,10 @@
 #
 # Options:
 #   --timezone Area/City     company timezone, e.g. Asia/Seoul (default: keep current, UTC on first install)
+#   --language en|ko         language of the web/API when the browser doesn't choose one
+#                            (ko = Korean, DPRK usage) (default: keep current, asked on first install)
+#   --device-language en|ko  language on the door and till reader screens; use ko only if the
+#                            readers can show Korean letters (default: keep current, asked on first install)
 #   --hosts "a,b"            extra host names / IPs clients use to reach the server
 #                            (the server's own IPs and hostname are always allowed)
 #   --admin-email EMAIL      create the first admin with this email (asks for the password)
@@ -26,6 +30,8 @@
 set -euo pipefail
 
 TIMEZONE=""
+LANGUAGE=""
+DEVICE_LANGUAGE=""
 EXTRA_HOSTS=""
 ADMIN_EMAIL=""
 NO_ADMIN=0
@@ -37,6 +43,8 @@ BUNDLE_FILE=""
 while (( $# )); do
     case "$1" in
         --timezone) TIMEZONE="$2"; shift 2 ;;
+        --language) LANGUAGE="$2"; shift 2 ;;
+        --device-language) DEVICE_LANGUAGE="$2"; shift 2 ;;
         --hosts) EXTRA_HOSTS="$2"; shift 2 ;;
         --admin-email) ADMIN_EMAIL="$2"; shift 2 ;;
         --no-admin) NO_ADMIN=1; shift ;;
@@ -44,10 +52,23 @@ while (( $# )); do
         --extract-only)
             EXTRACT_ONLY=1; shift
             if (( $# )) && [[ "$1" != -* && "$1" != *.tar.gz ]]; then EXTRACT_DIR="$1"; shift; fi ;;
-        -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 2 ;;
         *) BUNDLE_FILE="$1"; shift ;;
     esac
+done
+
+lang_code() {  # lang_code VALUE -> en | ko-kp (or empty if unknown)
+    case "${1,,}" in
+        en|english) echo en ;;
+        ko|ko-kp|kp|korean) echo ko-kp ;;
+        *) echo "" ;;
+    esac
+}
+for value in "$LANGUAGE" "$DEVICE_LANGUAGE"; do
+    if [[ -n "$value" && -z "$(lang_code "$value")" ]]; then
+        echo "Unknown language: $value (use en or ko)" >&2; exit 2
+    fi
 done
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -147,12 +168,28 @@ if [[ -n "$TIMEZONE" ]]; then
     [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] || die "Unknown timezone: $TIMEZONE"
     set_env TIME_ZONE "$TIMEZONE"; CHANGED=1
 fi
+if [[ -z "$LANGUAGE" && $UPGRADE -eq 0 ]]; then
+    LANGUAGE=$(ask "Default language for the web and API: en = English, ko = Korean" "en")
+fi
+if [[ -n "$LANGUAGE" ]]; then
+    code=$(lang_code "$LANGUAGE"); [[ -n "$code" ]] || die "Unknown language: $LANGUAGE (use en or ko)"
+    set_env LANGUAGE_CODE "$code"; CHANGED=1
+fi
+if [[ -z "$DEVICE_LANGUAGE" && $UPGRADE -eq 0 ]]; then
+    DEVICE_LANGUAGE=$(ask "Language on door/till reader screens (ko only if they show Korean letters): en / ko" "en")
+fi
+if [[ -n "$DEVICE_LANGUAGE" ]]; then
+    code=$(lang_code "$DEVICE_LANGUAGE"); [[ -n "$code" ]] || die "Unknown language: $DEVICE_LANGUAGE (use en or ko)"
+    set_env DEVICE_LANGUAGE "$code"; CHANGED=1
+fi
 HOSTS="localhost,127.0.0.1,$(hostname),$(hostname -I | tr ' ' ',' | sed 's/,*$//')"
 [[ -n "$EXTRA_HOSTS" ]] && HOSTS="$HOSTS,$EXTRA_HOSTS"
 CURRENT_HOSTS=$(grep '^DJANGO_ALLOWED_HOSTS=' "$ENV_FILE" | cut -d= -f2-)
 MERGED=$(printf '%s,%s' "$CURRENT_HOSTS" "$HOSTS" | tr ',' '\n' | sed '/^$/d' | awk '!seen[$0]++' | paste -sd, -)
 if [[ "$MERGED" != "$CURRENT_HOSTS" ]]; then set_env DJANGO_ALLOWED_HOSTS "$MERGED"; CHANGED=1; fi
 echo "    TIME_ZONE=$(grep '^TIME_ZONE=' "$ENV_FILE" | cut -d= -f2-)"
+echo "    LANGUAGE_CODE=$(grep '^LANGUAGE_CODE=' "$ENV_FILE" | cut -d= -f2- || true)  (web/API default)"
+echo "    DEVICE_LANGUAGE=$(grep '^DEVICE_LANGUAGE=' "$ENV_FILE" | cut -d= -f2- || true)  (reader screens)"
 echo "    DJANGO_ALLOWED_HOSTS=$(grep '^DJANGO_ALLOWED_HOSTS=' "$ENV_FILE" | cut -d= -f2-)"
 if (( CHANGED )); then
     systemctl restart backend-web backend-ws backend-tcp backend-worker

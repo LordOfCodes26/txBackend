@@ -34,6 +34,17 @@ Then the easy way, which checks, unpacks (`tar -xzf`) and installs in one go:
 sudo bash install-backend.sh                        # newest backend-*.tar.gz in this folder
 ```
 
+On a first install it asks for the company timezone and the **languages** (English or
+Korean): the default for the web/API, and the one on the door and till reader screens
+(choose Korean for readers only if their screens can show Korean letters). Change them
+later, or set them without questions:
+
+```bash
+sudo bash install-backend.sh --language ko --device-language en --timezone Asia/Pyongyang
+```
+
+On an upgrade the current settings are kept unless you pass these options.
+
 To only unpack (no installation), e.g. to look inside first:
 
 ```bash
