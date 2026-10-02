@@ -18,6 +18,9 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 # Independent of whatever a developer's .env says; tests opt into other values.
+TIME_ZONE = "UTC"
+LANGUAGE_CODE = "en"
+DEVICE_LANGUAGE = "en"
 ATTENDANCE_DIRECTION_RULE = "none"
 TEST_CONSOLE_ENABLED = False
 CELERY_TASK_ALWAYS_EAGER = True
