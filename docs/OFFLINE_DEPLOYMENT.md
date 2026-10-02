@@ -23,12 +23,13 @@ git status                                   # must be clean: only committed cod
 scripts/build_offline_bundle.sh 2026.10.05   # the version is the bundle's name
 ```
 
-Result in `dist/`, the four files to copy:
+Result in `dist/`, the five files to copy:
 
 | File | |
 |---|---|
 | `backend-<version>.tar.gz` | app, wheels and OS packages (~140 MB) |
 | `backend-<version>.tar.gz.sha256` | checksum |
+| `prepare-server.sh` | prepares a fresh Ubuntu: checks, name, timezone/clock, fixed IP (netplan), firewall (ufw), no online auto-updates |
 | `install-backend.sh` | installer / upgrader |
 | `README-INSTALL.md` | step-by-step guide for the person installing |
 
@@ -38,8 +39,9 @@ bundles from `dist/` before copying, so the installer picks the right one.
 
 ## 2. Install
 
-Copy the four files into one folder on the offline server (USB disk or internal network)
-and run:
+Copy the five files into one folder on the offline server (USB disk or internal network).
+On a fresh Ubuntu, first run `sudo bash prepare-server.sh` (once; `--dry-run` shows what it
+would do; `--help` lists the options), then:
 
 ```bash
 sudo bash install-backend.sh                        # newest backend-*.tar.gz in this folder
@@ -141,7 +143,7 @@ Settings live in `/etc/backend/backend.env` (`TIME_ZONE`, `LANGUAGE_CODE`,
 
 ## 4. Upgrades
 
-Build a new bundle, copy the four files over (into the same folder is fine: the newest
+Build a new bundle, copy the files over (into the same folder is fine: the newest
 bundle is used) and run the same command:
 
 ```bash

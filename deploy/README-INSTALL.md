@@ -6,6 +6,7 @@ This folder contains everything needed. The server does **not** need internet ac
 |---|---|
 | `backend-<version>.tar.gz` | The bundle: application, Python packages and Ubuntu packages |
 | `backend-<version>.tar.gz.sha256` | Checksum, to detect a damaged copy |
+| `prepare-server.sh` | Prepares a freshly installed Ubuntu (run once, before the installer) |
 | `install-backend.sh` | The installer (installs and upgrades) |
 | `README-INSTALL.md` | This guide |
 
@@ -42,10 +43,41 @@ network), for example `/home/<you>/backend-install/`:
 
 ```bash
 cd /home/<you>/backend-install
-ls        # backend-<version>.tar.gz  backend-<version>.tar.gz.sha256  install-backend.sh
+ls   # README-INSTALL.md  backend-<version>.tar.gz(.sha256)  install-backend.sh  prepare-server.sh
 ```
 
-## 3. Install
+## 3. Prepare the server (once, on a fresh Ubuntu)
+
+```bash
+sudo bash prepare-server.sh
+```
+
+It asks step by step (Enter keeps what is shown):
+
+1. **checks** the system (Ubuntu 24.04, x86_64, disk space, memory);
+2. **server name**, e.g. `backend-server`;
+3. **timezone and clock**: the company's time server if there is one, otherwise it shows
+   the clock and lets you correct it (attendance and purchases use this clock);
+4. **fixed IP address**: network card, IP with prefix (e.g. `192.168.1.10/24`), gateway and
+   DNS (`none` if the network has none);
+5. **firewall**: opens SSH (22), web (80, 443) and the door port 9100 (optionally only
+   for the doors' network, e.g. `192.168.1.0/24`);
+6. switches off Ubuntu's automatic online updates (they can't work offline).
+
+At the end it prints the install command to run next, with the IP and timezone filled in.
+
+- Connected over SSH? When the IP changes, the script uses `netplan try`: press **Enter
+  within 2 minutes** to keep the new address, then reconnect to it. If you don't, the old
+  settings come back by themselves, so you can't lock yourself out. Safest is to run it at
+  the server's own screen.
+- See first what it would do, without changing anything: `sudo bash prepare-server.sh --dry-run`
+- All answers can be given as options (`--help` lists them), e.g.
+  `sudo bash prepare-server.sh --timezone Asia/Pyongyang --ip 192.168.1.10/24 --gateway 192.168.1.1 --dns none`
+
+Already set up the network and firewall yourself? Skip those steps with
+`--skip-network --skip-firewall`, or skip the script entirely.
+
+## 4. Install
 
 ```bash
 sudo bash install-backend.sh
@@ -102,15 +134,15 @@ Installed <version> successfully.
   Web / API:     https://<server-ip>/
 ```
 
-If a check fails, see **9. Problems**.
+If a check fails, see **10. Problems**.
 
-## 4. Check it works
+## 5. Check it works
 
 From a computer in the company network, open `https://<server-ip>/admin/` and sign in
 with the admin account. The browser warns about the certificate the first time: the
-installer made a temporary one for the server IP (see step 5).
+installer made a temporary one for the server IP (see step 6).
 
-## 5. After installing
+## 6. After installing
 
 1. **Certificate:** put your company's certificate on the server, then reload nginx:
 
@@ -134,17 +166,18 @@ installer made a temporary one for the server IP (see step 5).
    a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER logins to their
    buildings, DEVELOPER logins to a developer profile.
 
-4. **Buildings and doors:** see **6. Connecting the door devices**, step by step.
+4. **Buildings and doors:** see **7. Connecting the door devices**, step by step.
    Till readers are registered with their serial numbers (`sn`).
 
 5. **Backups to a second place:** backups are made every night into
    `/var/backups/backend`, on the same disk. Set a second disk or machine in
    `/etc/backend/backup.conf` (`OFFSITE_DIR=` or `OFFSITE_RSYNC=`).
 
-6. **Firewall:** allow 443 (and 80) from the company network, and 9100 only from the
-   door devices.
+6. **Firewall:** `prepare-server.sh` already opened 22, 80, 443 and 9100. To limit 9100
+   to the doors later: `sudo ufw allow from <door ip> to any port 9100 proto tcp`, then
+   `sudo ufw delete allow 9100/tcp`.
 
-## 6. Connecting the door devices (attendance)
+## 7. Connecting the door devices (attendance)
 
 Right after installing, the door service (`backend-tcp`) already listens on **TCP port
 9100**, and doors that send `in` / `out` are understood. But the server **rejects every
@@ -283,7 +316,7 @@ Door screens show English; for Korean, install with `--device-language ko` (or s
 `DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
 the door screens can show Korean letters.
 
-## 7. Upgrading to a newer version
+## 8. Upgrading to a newer version
 
 Copy the new `backend-<new version>.tar.gz`, its `.sha256` and `install-backend.sh` into
 the same folder, and run the same command:
@@ -296,7 +329,7 @@ It takes the newest bundle in the folder, **makes a safety backup first**, then 
 Data, accounts and settings are kept; the questions above are not asked again (pass an
 option, e.g. `--language ko`, to change a setting).
 
-## 8. Where things are
+## 9. Where things are
 
 | What | Where |
 |---|---|
@@ -312,7 +345,7 @@ Restart everything after changing `/etc/backend/backend.env`:
 sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
 ```
 
-## 9. Problems
+## 10. Problems
 
 | Symptom | What to do |
 |---|---|

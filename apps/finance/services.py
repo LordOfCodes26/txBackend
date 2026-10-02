@@ -132,7 +132,7 @@ def _post_once(
 
 
 def deposit(
-    *, actor, developer: Developer, amount, idempotency_key: str, description: str = ""
+    *, actor, developer: Developer, amount, idempotency_key: str, description: str = "", pin: str | None = None
 ) -> tuple[AccountTransaction, bool]:
     amount = money(amount)
     limit = money(settings.FINANCE_MAX_DEPOSIT)
@@ -140,6 +140,8 @@ def deposit(
         raise DepositLimitExceeded(details={"max": str(limit)})
     account = open_account(developer)
     _ensure_not_own_account(actor, account)
+    if pin is not None:
+        verify_pin(account=account, pin=pin)
     return _post_once(
         actor=actor,
         account=account,

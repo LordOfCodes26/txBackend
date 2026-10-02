@@ -58,6 +58,7 @@ class DepositSerializer(serializers.Serializer):
     developer = serializers.PrimaryKeyRelatedField(queryset=Developer.objects.all())
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     description = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    pin = serializers.CharField(write_only=True, min_length=4, max_length=6)
 
 
 class AdjustmentSerializer(serializers.Serializer):

@@ -69,5 +69,6 @@ rm -rf "${STAGE}"
 (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
 install -m 0755 deploy/install-backend.sh dist/install-backend.sh
 install -m 0644 deploy/README-INSTALL.md dist/README-INSTALL.md
-echo "Files to copy to the offline server: dist/${NAME}.tar.gz, dist/${NAME}.tar.gz.sha256, dist/install-backend.sh, dist/README-INSTALL.md"
+install -m 0755 deploy/prepare-server.sh dist/prepare-server.sh
+echo "Files to copy to the offline server: dist/${NAME}.tar.gz, dist/${NAME}.tar.gz.sha256, dist/install-backend.sh, dist/prepare-server.sh, dist/README-INSTALL.md"
 echo "Bundle: dist/${NAME}.tar.gz (commit $(git rev-parse --short HEAD), built for: $(tar -xzOf "dist/${NAME}.tar.gz" "${NAME}/BUILT_FOR"))"

@@ -35,6 +35,13 @@ def finance(auth_client, make_user):
 
 
 def deposit(client, developer, amount, idem=None, **extra):
+    from django.contrib.auth.hashers import make_password
+
+    account = DeveloperAccount.objects.get(developer=developer)
+    if not account.pin_hash:
+        account.pin_hash = make_password("5864")
+        account.save(update_fields=["pin_hash"])
+    extra.setdefault("pin", "5864")
     return client.post(
         DEPOSITS,
         {"developer": developer.pk, "amount": amount, **extra},
