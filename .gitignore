@@ -9,3 +9,4 @@ __pycache__/
 celerybeat-schedule
 dist/
 .env.staging
+.offline-cache/
