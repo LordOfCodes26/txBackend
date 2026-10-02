@@ -290,7 +290,7 @@ cat <<EOF
 $(printf '\033[32m')Installed $VERSION successfully.$(printf '\033[0m')
 
   Web / API:     https://$IP/            (admin: https://$IP/admin/)
-  API docs:      https://$IP/api/docs/   (after logging in)
+  API docs:      https://$IP/api/docs/   (sign in at https://$IP/admin/ first)
   Door devices:  TCP $IP:9100
   Till readers:  https://$IP/api/v1/rfid/events/
   Settings:      $ENV_FILE

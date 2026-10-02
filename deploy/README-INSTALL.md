@@ -135,15 +135,74 @@ Installed <version> successfully.
   Web / API:     https://<server-ip>/
 ```
 
-If a check fails, see **12. Problems**.
+If a check fails, see **13. Problems**.
 
 ## 5. Check it works
 
 From a computer in the company network, open `https://<server-ip>/admin/` and sign in
 with the admin account. The browser warns about the certificate the first time: the
-installer made a temporary one for the server IP (see step 6).
+installer made a temporary one for the server IP (see step 7).
 
-## 6. After installing
+## 6. The API: addresses and documentation
+
+| What | Address |
+|---|---|
+| **API** (all requests start here) | `https://<server-ip>/api/v1/` |
+| **Interactive documentation** (every endpoint, its fields and answers) | `https://<server-ip>/api/docs/` |
+| API description file (OpenAPI), e.g. for the frontend's types | `https://<server-ip>/api/schema/` |
+| Live updates (WebSocket) | `wss://<server-ip>/ws/…` |
+| Door devices (TCP) | `<server-ip>:9100` |
+| The development copy's API, when running | `http://127.0.0.1:8000/api/v1/`, docs `http://127.0.0.1:8000/api/docs/` (no sign-in) |
+
+### Open the documentation
+
+1. Sign in at `https://<server-ip>/admin/` with an **admin** account (the first admin from
+   the installation, or any ADMIN user marked as staff). The docs need you to be signed in.
+2. Open `https://<server-ip>/api/docs/`: every endpoint, grouped (auth, developers, rfid,
+   attendance, purchases, …), with what to send and what comes back.
+3. **To try a request there:** open `POST /api/v1/auth/token/` → *Try it out* → put your
+   email and password → *Execute* → copy the `access` value. Click **Authorize** at the top,
+   paste it, *Authorize*. Now *Try it out* works on every endpoint. A token lasts 15 minutes.
+
+### Use it from a program or the terminal
+
+Every request (except signing in) sends the token: `Authorization: Bearer <access token>`.
+
+```bash
+curl -sk https://<server-ip>/api/v1/auth/token/ -H 'Content-Type: application/json' \
+  -d '{"email": "admin@chonha.com", "password": "..."}'            # → {"access": "...", "refresh": "..."}
+curl -sk https://<server-ip>/api/v1/developers/ -H "Authorization: Bearer <access>"
+```
+
+(The door section, step 1, has a small `api` helper that does this for you.)
+
+### The main groups
+
+| Path (after `/api/v1/`) | What |
+|---|---|
+| `auth/token/`, `auth/token/refresh/`, `auth/me/`, `auth/password/`, `auth/logout/` | Sign in, refresh, who am I, change password, sign out |
+| `users/`, `roles/` | Users and their roles |
+| `developers/` | Developers |
+| `rfid/cards/`, `rfid/assignments/`, `rfid/devices/`, `rfid/buildings/`, `rfid/events/` | Cards, who has which card, door and till readers, buildings, every tap |
+| `attendance/records/`, `attendance/daily/`, `attendance/occupancy/` | Attendance, daily summary, who is inside now |
+| `finance/accounts/`, `finance/transactions/`, `finance/deposits/`, `finance/adjustments/` | Developers' money |
+| `sellers/`, `service-positions/`, `goods/`, `inventory/movements/` | Stores, counters, goods, stock |
+| `purchases/` | Till sales (and `purchases/performance/`: sales per counter) |
+| `rentals/`, `bookings/` | Courts and bookings |
+| `seller-finance/accounts/`, `…/transactions/`, `…/payouts/`, `…/adjustments/` | Stores' money and payouts |
+| `stats/` | Company statistics (BOSS dashboard) |
+| `audit-logs/` | Who changed what |
+| `realtime/ticket/` | A ticket to open the live-updates connection |
+
+### The written reference
+
+On the server, in `/opt/backend/current/docs/` (and in `~/backend-dev/docs/`):
+
+- `FRONTEND_README.md`: every endpoint with permissions, filters, errors and examples;
+- `DEVICE_INTEGRATION.md`: doors and till readers;
+- `BACKUP_AND_RESTORE.md`: backups and how to restore.
+
+## 7. After installing
 
 1. **Certificate:** put your company's certificate on the server, then reload nginx:
 
@@ -167,8 +226,8 @@ installer made a temporary one for the server IP (see step 6).
    a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER logins to their
    buildings, DEVELOPER logins to a developer profile.
 
-4. **Buildings, doors and tills:** see **7. Connecting the door devices** and
-   **8. Connecting the till readers**, step by step.
+4. **Buildings, doors and tills:** see **8. Connecting the door devices** and
+   **9. Connecting the till readers**, step by step.
 
 5. **Backups to a second place:** backups are made every night into
    `/var/backups/backend`, on the same disk. Set a second disk or machine in
@@ -178,7 +237,7 @@ installer made a temporary one for the server IP (see step 6).
    to the doors later: `sudo ufw allow from <door ip> to any port 9100 proto tcp`, then
    `sudo ufw delete allow 9100/tcp`.
 
-## 7. Connecting the door devices (attendance)
+## 8. Connecting the door devices (attendance)
 
 Right after installing, the door service (`backend-tcp`) already listens on **TCP port
 9100**, and doors that send `in` / `out` are understood. But the server **rejects every
@@ -317,7 +376,7 @@ Door screens show English; for Korean, install with `--device-language ko` (or s
 `DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
 the door screens can show Korean letters.
 
-## 8. Connecting the till readers (payments)
+## 9. Connecting the till readers (payments)
 
 A **till reader** is a card reader plugged into a **seller's PC**. A small **till program** on
 that PC sends every card tap to the server and shows the server's answer. The developer
@@ -437,7 +496,7 @@ The messages are in English, or in Korean if the server was installed with
 | "Unknown card" / "Card not assigned" | Register the card and assign it to the developer (door section, step 8) |
 | Certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
 
-## 9. Upgrading to a newer version
+## 10. Upgrading to a newer version
 
 Copy the new `backend-<new version>.tar.gz`, its `.sha256` and `install-backend.sh` into
 the same folder, and run the same command:
@@ -450,7 +509,7 @@ It takes the newest bundle in the folder, **makes a safety backup first**, then 
 Data, accounts and settings are kept; the questions above are not asked again (pass an
 option, e.g. `--language ko`, to change a setting).
 
-## 10. Development on the offline server (optional)
+## 11. Development on the offline server (optional)
 
 To change the backend on this server (no internet), make a **development copy** for a
 normal user account. It is separate from the installed backend: its own folder, its own
@@ -514,7 +573,7 @@ git merge offline/main
 .venv/bin/python manage.py migrate
 ```
 
-## 11. Where things are
+## 12. Where things are
 
 | What | Where |
 |---|---|
@@ -530,7 +589,7 @@ Restart everything after changing `/etc/backend/backend.env`:
 sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
 ```
 
-## 12. Problems
+## 13. Problems
 
 | Symptom | What to do |
 |---|---|

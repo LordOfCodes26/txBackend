@@ -15,6 +15,12 @@ CSRF_COOKIE_SECURE = True
 SECURE_REDIRECT_EXEMPT = [r"^health/"]
 
 SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"] = ["rest_framework.permissions.IsAuthenticated"]
+# The docs page is opened in a browser: accept the Django admin login (session) there, as
+# well as API tokens. Without it the docs answered 401 to everyone.
+SPECTACULAR_SETTINGS["SERVE_AUTHENTICATION"] = [
+    "rest_framework.authentication.SessionAuthentication",
+    "rest_framework_simplejwt.authentication.JWTAuthentication",
+]
 
 # HSTS preload is a public browser list; irrelevant for an offline/internal server.
 SILENCED_SYSTEM_CHECKS = ["security.W021"]

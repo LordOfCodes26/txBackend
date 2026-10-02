@@ -113,15 +113,74 @@ Everything is installed.
   Open in a browser:   https://192.168.1.10/
 ```
 
-If something fails, the message says what; see **15. Problems**.
+If something fails, the message says what; see **16. Problems**.
 
 ## 5. Check it in a browser
 
 From a PC in the company network open `https://<server-ip>/`. The browser warns about the
-certificate the first time (the installer made a temporary one, see step 6): continue, and
+certificate the first time (the installer made a temporary one, see step 7): continue, and
 sign in with the admin account.
 
-## 6. After installing
+## 6. The API: addresses and documentation
+
+| What | Address |
+|---|---|
+| **API** (all requests start here) | `https://<server-ip>/api/v1/` |
+| **Interactive documentation** (every endpoint, its fields and answers) | `https://<server-ip>/api/docs/` |
+| API description file (OpenAPI), e.g. for the frontend's types | `https://<server-ip>/api/schema/` |
+| Live updates (WebSocket) | `wss://<server-ip>/ws/…` |
+| Door devices (TCP) | `<server-ip>:9100` |
+| The development copy's API, when running | `http://127.0.0.1:8000/api/v1/`, docs `http://127.0.0.1:8000/api/docs/` (no sign-in) |
+
+### Open the documentation
+
+1. Sign in at `https://<server-ip>/admin/` with an **admin** account (the first admin from
+   the installation, or any ADMIN user marked as staff). The docs need you to be signed in.
+2. Open `https://<server-ip>/api/docs/`: every endpoint, grouped (auth, developers, rfid,
+   attendance, purchases, …), with what to send and what comes back.
+3. **To try a request there:** open `POST /api/v1/auth/token/` → *Try it out* → put your
+   email and password → *Execute* → copy the `access` value. Click **Authorize** at the top,
+   paste it, *Authorize*. Now *Try it out* works on every endpoint. A token lasts 15 minutes.
+
+### Use it from a program or the terminal
+
+Every request (except signing in) sends the token: `Authorization: Bearer <access token>`.
+
+```bash
+curl -sk https://<server-ip>/api/v1/auth/token/ -H 'Content-Type: application/json' \
+  -d '{"email": "admin@chonha.com", "password": "..."}'            # → {"access": "...", "refresh": "..."}
+curl -sk https://<server-ip>/api/v1/developers/ -H "Authorization: Bearer <access>"
+```
+
+(The door section, step 1, has a small `api` helper that does this for you.)
+
+### The main groups
+
+| Path (after `/api/v1/`) | What |
+|---|---|
+| `auth/token/`, `auth/token/refresh/`, `auth/me/`, `auth/password/`, `auth/logout/` | Sign in, refresh, who am I, change password, sign out |
+| `users/`, `roles/` | Users and their roles |
+| `developers/` | Developers |
+| `rfid/cards/`, `rfid/assignments/`, `rfid/devices/`, `rfid/buildings/`, `rfid/events/` | Cards, who has which card, door and till readers, buildings, every tap |
+| `attendance/records/`, `attendance/daily/`, `attendance/occupancy/` | Attendance, daily summary, who is inside now |
+| `finance/accounts/`, `finance/transactions/`, `finance/deposits/`, `finance/adjustments/` | Developers' money |
+| `sellers/`, `service-positions/`, `goods/`, `inventory/movements/` | Stores, counters, goods, stock |
+| `purchases/` | Till sales (and `purchases/performance/`: sales per counter) |
+| `rentals/`, `bookings/` | Courts and bookings |
+| `seller-finance/accounts/`, `…/transactions/`, `…/payouts/`, `…/adjustments/` | Stores' money and payouts |
+| `stats/` | Company statistics (BOSS dashboard) |
+| `audit-logs/` | Who changed what |
+| `realtime/ticket/` | A ticket to open the live-updates connection |
+
+### The written reference
+
+On the server, in `/opt/backend/current/docs/` (and in `~/backend-dev/docs/`):
+
+- `FRONTEND_README.md`: every endpoint with permissions, filters, errors and examples;
+- `DEVICE_INTEGRATION.md`: doors and till readers;
+- `BACKUP_AND_RESTORE.md`: backups and how to restore.
+
+## 7. After installing
 
 Commands that use the installed backend run as its service user:
 
@@ -136,12 +195,12 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    `<command>` = `create_role_users --domain chonha.com`. Each password is **shown once**.
 3. **Link the accounts:** a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER
    logins to their buildings, DEVELOPER logins to developer profiles (in the web app).
-4. **Doors and tills:** see **9. Connecting the door devices** and **10. Connecting the till
+4. **Doors and tills:** see **10. Connecting the door devices** and **11. Connecting the till
    readers**.
 5. **Backups to a second place:** set `OFFSITE_DIR=` or `OFFSITE_RSYNC=` in
    `/etc/backend/backup.conf` (backups are made every night into `/var/backups/backend`).
 
-## 7. Developing on the server
+## 8. Developing on the server
 
 The development copies are yours (not root's) and **separate from the installed system**:
 their own database (on its own PostgreSQL, port 5433) and settings. Experiments never
@@ -186,7 +245,7 @@ git status; git diff; git log --oneline
 git add -A && git commit -m "Describe the change"
 ```
 
-## 8. Putting your changes live (without internet)
+## 9. Putting your changes live (without internet)
 
 Commit first: only committed backend code goes into a bundle.
 
@@ -211,7 +270,7 @@ It builds the frontend from your copy (as it is now) and replaces the running on
 3 versions are kept in `/opt/frontend/releases/`. New npm packages can't be installed
 without internet: add them on a machine with internet and bring a new kit.
 
-## 9. Connecting the door devices (attendance)
+## 10. Connecting the door devices (attendance)
 
 Right after installing, the door service (`backend-tcp`) already listens on **TCP port
 9100**, and doors that send `in` / `out` are understood. But the server **rejects every
@@ -350,7 +409,7 @@ Door screens show English; for Korean, install with `--device-language ko` (or s
 `DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
 the door screens can show Korean letters.
 
-## 10. Connecting the till readers (payments)
+## 11. Connecting the till readers (payments)
 
 A **till reader** is a card reader plugged into a **seller's PC**. A small **till program** on
 that PC sends every card tap to the server and shows the server's answer. The developer
@@ -470,7 +529,7 @@ The messages are in English, or in Korean if the server was installed with
 | "Unknown card" / "Card not assigned" | Register the card and assign it to the developer (door section, step 8) |
 | Certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
 
-## 11. Keeping the offline server and the internet machine in step
+## 12. Keeping the offline server and the internet machine in step
 
 The code lives in two places: the **offline server** (`~/backend-dev`, `~/frontend-dev`)
 and the **internet machine** (where kits are built, and GitHub). Changes go both ways
@@ -558,7 +617,7 @@ internet machine                      USB stick                    offline serve
 - **Don't rewrite history** (`git rebase`, `git push --force`) of commits that already
   travelled: the other side can't match them up anymore.
 
-## 12. Ports and services
+## 13. Ports and services
 
 | Port | Who listens | Reachable from |
 |---|---|---|
@@ -573,7 +632,7 @@ Services: `frontend`, `backend-web`, `backend-ws`, `backend-tcp`, `backend-worke
 `postgresql`, `redis-server`. Logs: `sudo journalctl -u frontend -n 100` (or the service named).
 Restart all: `sudo systemctl restart frontend backend-web backend-ws backend-tcp backend-worker`.
 
-## 13. Where things are
+## 14. Where things are
 
 | What | Where |
 |---|---|
@@ -585,11 +644,11 @@ Restart all: `sudo systemctl restart frontend backend-web backend-ws backend-tcp
 | Backups | `/var/backups/backend` (settings: `/etc/backend/backup.conf`) |
 | Development copies | `~/backend-dev` (settings `.env`), `~/frontend-dev` (settings `.env.local`) |
 
-## 14. Without development copies
+## 15. Without development copies
 
 For a server that only runs the system: `sudo bash install-all.sh --dev-user none`.
 
-## 15. Problems
+## 16. Problems
 
 | Symptom | What to do |
 |---|---|
@@ -599,5 +658,5 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 | The page shows "502 Bad Gateway" | A service is down: `sudo systemctl status frontend backend-web` and the logs |
 | The site doesn't open from other PCs | Firewall (port 443) and the server IP: `hostname -I` |
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |
-| Door scans don't arrive | See section 9, "If a door doesn't work" |
-| A till reader gets no answer or an error | See section 10, "If a till reader doesn't work" |
+| Door scans don't arrive | See section 10, "If a door doesn't work" |
+| A till reader gets no answer or an error | See section 11, "If a till reader doesn't work" |
