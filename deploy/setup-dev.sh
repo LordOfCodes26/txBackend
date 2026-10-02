@@ -91,7 +91,8 @@ BUNDLE="$WORK/$NAME"
 
 # ---------------------------------------------------------------------------------- OS packages
 say "OS packages (from the bundle)"
-PKGS=(python3 python3-venv postgresql postgresql-contrib redis-server git gettext rsync openssl)
+# openssh-server: to reach the development servers from another PC (an SSH tunnel).
+PKGS=(python3 python3-venv postgresql postgresql-contrib redis-server git gettext rsync openssl openssh-server)
 APT_TMP=$(mktemp -d)
 mkdir -p "$APT_TMP/sources.list.d"
 echo "deb [trusted=yes] file:$BUNDLE/os-packages ./" > "$APT_TMP/sources.list"
@@ -103,7 +104,7 @@ DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y -q --no-insta
     "${PKGS[@]}" >/dev/null
 rm -rf "$APT_TMP"
 systemctl enable --now postgresql redis-server >/dev/null 2>&1
-note "python3, PostgreSQL, Redis, git, gettext: ready"
+note "python3, PostgreSQL, Redis, git, gettext, SSH server: ready"
 
 # ---------------------------------------------------------------------------------- source
 say "Source code (git)"
@@ -209,7 +210,7 @@ cat <<EOF
 
     As $DEV_USER:
       cd $DEV_DIR
-      .venv/bin/python manage.py runserver 127.0.0.1:8000   # try it: http://127.0.0.1:8000/admin/
+      .venv/bin/uvicorn config.asgi:application --reload --port 8000   # try it: http://127.0.0.1:8000/admin/
       .venv/bin/python manage.py createsuperuser             # a login for this copy
       .venv/bin/pytest -q                                    # all tests
       .venv/bin/ruff check . && .venv/bin/ruff format .      # lint and format

@@ -211,7 +211,7 @@ touch the real data. Run things **as your normal user**, without sudo.
 ```bash
 cd ~/backend-dev
 .venv/bin/python manage.py createsuperuser           # a login for the development copy
-.venv/bin/python manage.py runserver 127.0.0.1:8000  # leave running (Ctrl+C stops)
+.venv/bin/uvicorn config.asgi:application --reload --port 8000   # leave running (Ctrl+C stops)
 .venv/bin/pytest -q                                  # all tests (3–4 minutes)
 .venv/bin/ruff check . && .venv/bin/ruff format .    # lint and format
 .venv/bin/python manage.py seed_demo                 # demo data (development only)
@@ -231,9 +231,48 @@ npm run generate:api         # refresh the API types from the development backen
 npm run build                # a production build, to check it builds
 ```
 
-To open the development frontend from another PC: `npm run dev -- -H 0.0.0.0`, open port
-3000 (`sudo ufw allow 3000/tcp`) and add the server IP to `allowedDevOrigins` in
-`next.config.ts`.
+`uvicorn` serves the pages **and** the live updates (WebSockets), reloading on every code
+change. (`manage.py runserver 127.0.0.1:8000` also works, but without live updates.)
+
+### From another computer
+
+The development servers listen only on the server itself (`127.0.0.1`), so nobody else on
+the network reaches them by accident. To use them from your own PC's browser:
+
+**A. SSH tunnel (recommended: nothing to change on the server).** Start the development
+servers on the server as above, then on **your PC** open a terminal (Windows: PowerShell)
+and keep this running:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 kim@<server-ip>
+```
+
+Now, on your PC: `http://localhost:3000` is the development frontend,
+`http://localhost:8000/admin/` and `http://localhost:8000/api/docs/` the development
+backend. It works exactly as on the server, live updates included, and is encrypted. It
+needs SSH on the server: `setup-dev.sh` installs the SSH server from the kit; port 22 is
+opened by `prepare-server.sh`.
+
+**B. Directly over the network.** Start them on all addresses and open the ports:
+
+```bash
+cd ~/backend-dev  && .venv/bin/uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000
+cd ~/frontend-dev && npm run dev -- -H 0.0.0.0
+sudo ufw allow 3000/tcp; sudo ufw allow 8000/tcp
+```
+
+and add the server's IP to `allowedDevOrigins` in `~/frontend-dev/next.config.ts`
+(otherwise the page loads but doesn't work). Then open `http://<server-ip>:3000` and
+`http://<server-ip>:8000/admin/`. This is unencrypted and anyone on the network can reach
+the development copies: close the ports again afterwards (`sudo ufw delete allow 3000/tcp`,
+same for 8000). Live updates don't work this way yet (see the note below); use A for them.
+
+**Note: live updates and the frontend.** The frontend tells the browser to open live
+updates at its `API_URL`. That address is only right from the server itself (or through
+the tunnel A). The installed system has the same problem (`ws://127.0.0.1:8001`): until the
+frontend is fixed, pages that update live (occupancy, the till screen's card taps) only
+refresh when reloaded or polled. The fix is in the frontend; see
+`docs/FRONTEND_WEBSOCKET_URL.md` in the backend.
 
 ### Git (both copies)
 

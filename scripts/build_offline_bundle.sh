@@ -72,7 +72,7 @@ else
         echo "==> Downloading OS packages (with dependencies) into a local apt repository"
         OS_PKGS="python3 python3-venv python3.12-venv postgresql postgresql-16 postgresql-client-16
                  postgresql-contrib redis-server nginx openssl rsync ca-certificates tar gzip
-                 git gettext"
+                 git gettext openssh-server"
         mkdir -p "${STAGE}/os-packages"
         apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks \
             --no-replaces --no-enhances ${OS_PKGS} 2>/dev/null \

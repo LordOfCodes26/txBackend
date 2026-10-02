@@ -534,7 +534,7 @@ all tests at the end (10–15 minutes).
 ```bash
 cd ~/backend-dev
 .venv/bin/python manage.py createsuperuser           # a login for this copy
-.venv/bin/python manage.py runserver 127.0.0.1:8000  # try it: http://127.0.0.1:8000/admin/
+.venv/bin/uvicorn config.asgi:application --reload --port 8000   # try it: http://127.0.0.1:8000/admin/
 .venv/bin/pytest -q                                  # all tests
 .venv/bin/ruff check . && .venv/bin/ruff format .    # lint and format
 git status; git diff; git log --oneline              # see changes and history
@@ -543,8 +543,15 @@ git add -A && git commit -m "Describe the change"    # record a change
 
 Set your name for commits once: `git config --global user.name "Kim"` and
 `git config --global user.email kim@chonha.com`. Demo data commands (`seed_*`) work here
-(not on the installed backend). To see the copy from another PC, run
-`runserver 0.0.0.0:8000` and open port 8000 (`sudo ufw allow 8000/tcp`).
+(not on the installed backend). `uvicorn` serves the pages and the live updates and reloads
+on every change.
+
+To use the copy from **another PC's browser**, the simplest and safest way is an SSH tunnel:
+on your PC run `ssh -L 8000:127.0.0.1:8000 kim@<server-ip>` and keep it open, then browse
+`http://localhost:8000/admin/` or `http://localhost:8000/api/docs/` on your PC.
+(`setup-dev.sh` installs the SSH server.) Or run uvicorn with `--host 0.0.0.0`, open the
+port (`sudo ufw allow 8000/tcp`) and browse `http://<server-ip>:8000/`: unencrypted and
+open to the whole network, so close the port again afterwards.
 
 ### Install your changes on this server
 
