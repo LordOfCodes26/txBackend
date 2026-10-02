@@ -45,18 +45,20 @@ and run:
 sudo bash install-backend.sh                        # newest backend-*.tar.gz in this folder
 ```
 
-On a first install it asks for the company **timezone**, the **languages** (English or
+On a first install it asks for the **server IP** (it shows the server's addresses and
+suggests one; find it yourself with `hostname -I`), the company **timezone**, the **languages** (English or
 Korean; for the web/API, and for the door and till reader screens: Korean on readers only
 if their screens can show Korean letters) and the **first admin's email and password**.
 Or without questions:
 
 ```bash
-sudo bash install-backend.sh --timezone Asia/Pyongyang --language ko \
-     --device-language en --admin-email admin@chonha.com
+sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang \
+     --language ko --device-language en --admin-email admin@chonha.com
 ```
 
 | Option | Meaning |
 |---|---|
+| `--server-ip IP` | The server's address in the company network; stored as `SERVER_IP`, allowed for the web/API, shown in the summary. Warns if the server doesn't have it (yet). The installer's temporary certificate is (re)made for it; a company certificate is never touched |
 | `--timezone Area/City` | Company timezone |
 | `--language en\|ko` | Web/API language when the browser doesn't choose one (`ko` = Korean, DPRK usage) |
 | `--device-language en\|ko` | Language on door and till reader screens |

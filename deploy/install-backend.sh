@@ -18,6 +18,8 @@
 #                            (ko = Korean, DPRK usage) (default: keep current, asked on first install)
 #   --device-language en|ko  language on the door and till reader screens; use ko only if the
 #                            readers can show Korean letters (default: keep current, asked on first install)
+#   --server-ip IP           the server's address in the company network (e.g. 192.168.1.10);
+#                            find it with: hostname -I (default: asked on first install)
 #   --hosts "a,b"            extra host names / IPs clients use to reach the server
 #                            (the server's own IPs and hostname are always allowed)
 #   --admin-email EMAIL      create the first admin with this email (asks for the password)
@@ -31,6 +33,7 @@ set -euo pipefail
 
 TIMEZONE=""
 LANGUAGE=""
+SERVER_IP=""
 DEVICE_LANGUAGE=""
 EXTRA_HOSTS=""
 ADMIN_EMAIL=""
@@ -44,6 +47,7 @@ while (( $# )); do
     case "$1" in
         --timezone) TIMEZONE="$2"; shift 2 ;;
         --language) LANGUAGE="$2"; shift 2 ;;
+        --server-ip) SERVER_IP="$2"; shift 2 ;;
         --device-language) DEVICE_LANGUAGE="$2"; shift 2 ;;
         --hosts) EXTRA_HOSTS="$2"; shift 2 ;;
         --admin-email) ADMIN_EMAIL="$2"; shift 2 ;;
@@ -52,7 +56,7 @@ while (( $# )); do
         --extract-only)
             EXTRACT_ONLY=1; shift
             if (( $# )) && [[ "$1" != -* && "$1" != *.tar.gz ]]; then EXTRACT_DIR="$1"; shift; fi ;;
-        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; exit 2 ;;
         *) BUNDLE_FILE="$1"; shift ;;
     esac
@@ -182,11 +186,47 @@ if [[ -n "$DEVICE_LANGUAGE" ]]; then
     code=$(lang_code "$DEVICE_LANGUAGE"); [[ -n "$code" ]] || die "Unknown language: $DEVICE_LANGUAGE (use en or ko)"
     set_env DEVICE_LANGUAGE "$code"; CHANGED=1
 fi
-HOSTS="localhost,127.0.0.1,$(hostname),$(hostname -I | tr ' ' ',' | sed 's/,*$//')"
+# Server IP: the address clients and doors use. Suggest the one the server's network uses.
+SERVER_IPS=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' || true)
+CURRENT_SERVER_IP=$(grep '^SERVER_IP=' "$ENV_FILE" | cut -d= -f2- || true)
+if [[ -z "$SERVER_IP" ]]; then
+    if (( UPGRADE )) && [[ -n "$CURRENT_SERVER_IP" ]]; then
+        SERVER_IP="$CURRENT_SERVER_IP"
+    else
+        SUGGESTED=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}' || true)
+        [[ -n "$SUGGESTED" ]] || SUGGESTED=$(echo "$SERVER_IPS" | head -1)
+        echo "    this server's IP addresses: $(echo $SERVER_IPS)"
+        SERVER_IP=$(ask "Server IP address that computers and doors will use" "${SUGGESTED:-127.0.0.1}")
+    fi
+fi
+[[ "$SERVER_IP" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || die "Not an IPv4 address: $SERVER_IP (find it with: hostname -I)"
+if ! grep -qx "$SERVER_IP" <<<"$SERVER_IPS"; then
+    echo "    WARNING: $SERVER_IP is not an address of this server right now ($(echo $SERVER_IPS))."
+    echo "             Computers and doors can't reach it until the server has that IP."
+fi
+if [[ "$SERVER_IP" != "$CURRENT_SERVER_IP" ]]; then set_env SERVER_IP "$SERVER_IP"; CHANGED=1; fi
+
+# The installer's temporary self-signed certificate is made for the server IP. A certificate
+# from the company's CA (not self-signed) is never touched.
+CERT=/etc/backend/tls/cert.pem
+if [[ -f "$CERT" ]] \
+    && [[ "$(openssl x509 -in "$CERT" -noout -issuer | cut -d= -f2-)" == "$(openssl x509 -in "$CERT" -noout -subject | cut -d= -f2-)" ]] \
+    && ! openssl x509 -in "$CERT" -noout -ext subjectAltName 2>/dev/null | grep -qw "IP Address:$SERVER_IP"; then
+    openssl req -x509 -newkey rsa:2048 -nodes -days 825 -subj "/CN=$SERVER_IP" \
+        -addext "subjectAltName=IP:$SERVER_IP,DNS:$(hostname),DNS:localhost,IP:127.0.0.1" \
+        -keyout /etc/backend/tls/key.pem -out "$CERT" 2>/dev/null
+    chmod 640 /etc/backend/tls/key.pem
+    chown root:backend /etc/backend/tls/key.pem
+    systemctl reload nginx
+    echo "    temporary certificate made for $SERVER_IP (replace it with the company's one later)"
+fi
+
+HOSTS="localhost,127.0.0.1,$SERVER_IP,$(hostname),$(hostname -I | tr ' ' ',' | sed 's/,*$//')"
 [[ -n "$EXTRA_HOSTS" ]] && HOSTS="$HOSTS,$EXTRA_HOSTS"
 CURRENT_HOSTS=$(grep '^DJANGO_ALLOWED_HOSTS=' "$ENV_FILE" | cut -d= -f2-)
 MERGED=$(printf '%s,%s' "$CURRENT_HOSTS" "$HOSTS" | tr ',' '\n' | sed '/^$/d' | awk '!seen[$0]++' | paste -sd, -)
 if [[ "$MERGED" != "$CURRENT_HOSTS" ]]; then set_env DJANGO_ALLOWED_HOSTS "$MERGED"; CHANGED=1; fi
+echo "    SERVER_IP=$SERVER_IP"
 echo "    TIME_ZONE=$(grep '^TIME_ZONE=' "$ENV_FILE" | cut -d= -f2-)"
 echo "    LANGUAGE_CODE=$(grep '^LANGUAGE_CODE=' "$ENV_FILE" | cut -d= -f2- || true)  (web/API default)"
 echo "    DEVICE_LANGUAGE=$(grep '^DEVICE_LANGUAGE=' "$ENV_FILE" | cut -d= -f2- || true)  (reader screens)"
@@ -238,8 +278,7 @@ else
     printf '    %-26s %s\n' "door listener :9100" "CLOSED"; FAILED=1
 fi
 
-IP=$(hostname -I | awk '{print $1}')
-[[ -n "$IP" ]] || IP=$(hostname)
+IP="$SERVER_IP"
 if (( FAILED )); then
     say "Installed $VERSION, but some checks failed (see above)."
     echo "    Logs: journalctl -u backend-web -u backend-tcp -u backend-ws -n 100"

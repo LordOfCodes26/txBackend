@@ -17,9 +17,19 @@ This folder contains everything needed. The server does **not** need internet ac
   The installer stops on any other system.
 - **Access:** an account that can use `sudo`.
 - **Disk:** at least 10 GB free (application, database and its backups).
-- **Network:** the server's fixed IP address in the company network. Clients reach it on
-  port **443** (HTTPS, also 80); door devices send to TCP port **9100**.
+- **Network:** the server needs a **fixed IP address** in the company network. Clients
+  reach it on port **443** (HTTPS, also 80); door devices send to TCP port **9100**.
+  To see the server's IP, run on the server:
+
+  ```bash
+  hostname -I      # e.g. 192.168.1.10   (ignore 127.0.0.1 and 172.17.x.x)
+  ip -br addr      # the same, per network card
+  ```
+
+  Use the address in your company network (often `192.168.x.x` or `10.x.x.x`). Make it
+  fixed in Ubuntu's network settings (or reserve it in the router) before installing.
 - **Decide before installing:**
+  - the **server IP** (see above);
   - the company **timezone** (e.g. `Asia/Pyongyang`);
   - the **language**: English (`en`) or Korean (`ko`), for the web/API and for the
     reader screens (Korean on readers only if their screens can show Korean letters);
@@ -47,6 +57,8 @@ install it asks:
 ```
 Continue installing <version>? (yes/no) [yes]:
 Company timezone (e.g. Asia/Seoul, Europe/Berlin) [UTC]:
+    this server's IP addresses: 192.168.1.10
+Server IP address that computers and doors will use [192.168.1.10]:
 Default language for the web and API: en = English, ko = Korean [en]:
 Language on door/till reader screens (ko only if they show Korean letters): en / ko [en]:
 Admin email [admin@example.com]:
@@ -56,12 +68,13 @@ Password: / Password (again):
 Or give the answers up front:
 
 ```bash
-sudo bash install-backend.sh --timezone Asia/Pyongyang --language ko \
-     --device-language en --admin-email admin@chonha.com
+sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang \
+     --language ko --device-language en --admin-email admin@chonha.com
 ```
 
 | Option | Meaning |
 |---|---|
+| `--server-ip IP` | The server's IP in the company network (`hostname -I`). Used for the web address, the doors and the temporary certificate |
 | `--timezone Area/City` | Company timezone |
 | `--language en\|ko` | Web/API language when the browser doesn't choose one |
 | `--device-language en\|ko` | Language on door and till reader screens |
@@ -95,7 +108,7 @@ If a check fails, see **9. Problems**.
 
 From a computer in the company network, open `https://<server-ip>/admin/` and sign in
 with the admin account. The browser warns about the certificate the first time: the
-installer made a temporary self-signed one (see step 5).
+installer made a temporary one for the server IP (see step 5).
 
 ## 5. After installing
 
@@ -186,7 +199,7 @@ In each door device's own settings:
 
 | Setting | Value |
 |---|---|
-| Server address | the server's IP, e.g. `192.168.1.10` (`hostname -I` on the server shows it) |
+| Server address | the server IP chosen during the install, e.g. `192.168.1.10` (shown at the end of the install; `grep SERVER_IP /etc/backend/backend.env`) |
 | Port | `9100` |
 | Protocol | TCP, JSON between `$` signs: `${"ID": "Door1", "Type": "in", "UID": "..."}$` |
 | ID | `Door1` (or `Door2`), the same as the `code` in step 3 |
