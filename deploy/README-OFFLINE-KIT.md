@@ -113,7 +113,7 @@ Everything is installed.
   Open in a browser:   https://192.168.1.10/
 ```
 
-If something fails, the message says what; see **14. Problems**.
+If something fails, the message says what; see **15. Problems**.
 
 ## 5. Check it in a browser
 
@@ -136,7 +136,8 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    `<command>` = `create_role_users --domain chonha.com`. Each password is **shown once**.
 3. **Link the accounts:** a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER
    logins to their buildings, DEVELOPER logins to developer profiles (in the web app).
-4. **Doors:** see **9. Connecting the door devices**.
+4. **Doors and tills:** see **9. Connecting the door devices** and **10. Connecting the till
+   readers**.
 5. **Backups to a second place:** set `OFFSITE_DIR=` or `OFFSITE_RSYNC=` in
    `/etc/backend/backup.conf` (backups are made every night into `/var/backups/backend`).
 
@@ -349,7 +350,133 @@ Door screens show English; for Korean, install with `--device-language ko` (or s
 `DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
 the door screens can show Korean letters.
 
-## 10. Keeping the offline server and the internet machine in step
+## 10. Connecting the till readers (payments)
+
+A **till reader** is a card reader plugged into a **seller's PC**. A small **till program** on
+that PC sends every card tap to the server and shows the server's answer. The developer
+pays with their card **and their PIN**, typed on the seller's screen.
+
+Unlike doors, a till reader is recognised by its **serial number (`SN`) and its `ID`**, not
+by its IP, so it can move to another PC without any change here.
+
+Do steps 1–2 once, on the server, in a terminal.
+
+### Step 1. Sign in from the terminal
+
+The same as step 1 of the door section (`SERVER`, `TOKEN` and the `api` helper).
+
+### Step 2. Register each till reader
+
+```bash
+api -X POST "$SERVER/api/v1/rfid/devices/" \
+  -d '{"code": "Reader1", "name": "Cafe till", "purpose": "TILL", "sn": "ZK2024A0001234"}'
+```
+
+- `code` must be exactly the **ID the till program sends** (`Reader1`, `Reader2`, …).
+- `sn` is the reader's **serial number**, exactly as the program sends it (often printed on
+  the reader). Each serial number can be registered once.
+- Keep serial numbers confidential (labels covered): with the SN and ID someone could send
+  fake taps. Nobody can be charged without the developer's PIN.
+
+### Step 3. Set up the till program on the seller's PC
+
+| Setting | Value |
+|---|---|
+| Way to send taps | **TCP**: `<server-ip>:9100`, JSON between `$` signs, like the doors; **or HTTPS**: `POST https://<server-ip>/api/v1/rfid/events/` with JSON (the program must trust the server's certificate) |
+| What to send for each tap | `{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "<card number>"}` (TCP: `${...}$`) |
+| Heartbeat (recommended) | every 30 s: `POST https://<server-ip>/api/v1/rfid/device/heartbeat/` with `{"SN": "...", "ID": "Reader1"}` |
+
+The heartbeat keeps the reader shown as **connected** (heard from in the last 2 minutes),
+so the seller's till page finds it automatically. A tap also counts, but only for 2 minutes;
+TCP has no heartbeat, so a TCP program should still send the heartbeat over HTTPS.
+
+**Firewall:** a TCP program needs port 9100 from the seller's PC. If `prepare-server.sh`
+limited 9100 to the doors' network, allow the PC too:
+`sudo ufw allow from <seller pc ip> to any port 9100 proto tcp`.
+
+### Step 4. Check the reader is connected
+
+```bash
+api "$SERVER/api/v1/rfid/devices/?purpose=TILL"     # "online": true, "last_ip": the seller PC
+```
+
+### Step 5. Try a tap
+
+Tap a developer's card **without** a purchase open. The reader shows **"No open purchase for
+this reader"**: the connection works. (The seller has to start a purchase first.)
+
+### Step 6. A payment, start to finish
+
+1. The seller opens the **Till** page in the web app, picks the counter (the reader on this
+   PC is chosen automatically), adds the goods and clicks **Scan card to buy**.
+2. The developer taps their card. The till program gets the answer at once (below) and
+   shows **"Ada Kim - enter PIN"**; the seller's screen shows who tapped.
+3. The developer types their PIN on the seller's screen; the seller confirms. Done: the
+   screen shows the total and the developer's new balance.
+
+A tap is valid for **2 minutes**; a newer tap replaces it. The card number is never typed in.
+
+### What the server answers to a tap
+
+Every tap gets an answer right away, in the reply to the program's own message.
+
+**Over TCP** (`$...$`):
+
+```json
+{"result": "ACCEPTED", "accepted": true, "direction": "", "message": "Ada Kim - enter PIN",
+ "event_id": 10503, "purchase": 6543}
+```
+
+**Over HTTPS** (status `201`):
+
+```json
+{"id": 10504, "result": "ACCEPTED", "accepted": true, "direction": "",
+ "display_message": "Ada Kim - enter PIN",
+ "developer": {"id": 23125, "employee_number": "E001", "full_name": "Ada Kim", "department": ""},
+ "purchase": 6543, "event_time": "2026-10-02T05:10:28.440673Z", "client_event_id": ""}
+```
+
+**All the answers** (TCP `message` = HTTPS `display_message`):
+
+| The card | `result` | `accepted` | Message on the reader | `purchase` |
+|---|---|---|---|---|
+| **Registered** to an active developer, purchase open | `ACCEPTED` | `true` | `Ada Kim - enter PIN` | the purchase id |
+| Registered, **no purchase open** | `ACCEPTED` | `true` | `No open purchase for this reader` | `null` |
+| Not registered | `UNKNOWN_CARD` | `false` | `Unknown card` | `null` |
+| Registered, not given to anyone | `UNASSIGNED_CARD` | `false` | `Card not assigned` | `null` |
+| Blocked (e.g. lost) | `BLOCKED_CARD` | `false` | `Card blocked` | `null` |
+| Retired | `RETIRED_CARD` | `false` | `Card no longer valid` | `null` |
+| Developer suspended or terminated | `INACTIVE_DEVELOPER` | `false` | `Not active - contact your manager` | `null` |
+
+**Wrong reader `SN` or `ID`:** over TCP
+`{"result": "ERROR", "accepted": false, "error": "Unknown till reader ID or serial number."}`;
+over HTTPS status `401` with
+`{"error": {"code": "AUTHENTICATION_FAILED", "message": "Unknown till reader ID or serial number."}}`.
+After **10 wrong attempts from one PC within 15 minutes**, that PC is blocked for 15 minutes.
+
+**What the till program should do:**
+
+- Show the message; **green light / beep** when `accepted` is `true`, **red** when `false`.
+- `accepted: false` is still a **normal answer**: don't send the tap again.
+- No answer (server unreachable, timeout of about 5 s): show **"Offline - cannot pay right
+  now"** and **drop** the tap. Never store till taps to send later.
+- The seller's screen also shows every tap live, accepted or not.
+
+The messages are in English, or in Korean if the server was installed with
+`--device-language ko` (only if the reader's screen can show Korean letters).
+
+### If a till reader doesn't work
+
+| What you see | Meaning / fix |
+|---|---|
+| "Unknown till reader ID or serial number." | `ID` or `SN` differs from step 2 (check spelling), or the reader is deactivated |
+| No answer at all | The PC doesn't reach the server: address, port 9100 (TCP) or 443 (HTTPS), firewall |
+| "No open purchase for this reader" | The seller hasn't started a purchase, or chose another reader on the till page |
+| The till page doesn't find the reader | No heartbeat: check step 3, and step 4 shows `"online": true` with the PC's IP |
+| "Unknown card" / "Card not assigned" | Register the card and assign it to the developer (door section, step 8) |
+| HTTPS: certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
+
+## 11. Keeping the offline server and the internet machine in step
 
 The code lives in two places: the **offline server** (`~/backend-dev`, `~/frontend-dev`)
 and the **internet machine** (where kits are built, and GitHub). Changes go both ways
@@ -437,7 +564,7 @@ internet machine                      USB stick                    offline serve
 - **Don't rewrite history** (`git rebase`, `git push --force`) of commits that already
   travelled: the other side can't match them up anymore.
 
-## 11. Ports and services
+## 12. Ports and services
 
 | Port | Who listens | Reachable from |
 |---|---|---|
@@ -452,7 +579,7 @@ Services: `frontend`, `backend-web`, `backend-ws`, `backend-tcp`, `backend-worke
 `postgresql`, `redis-server`. Logs: `sudo journalctl -u frontend -n 100` (or the service named).
 Restart all: `sudo systemctl restart frontend backend-web backend-ws backend-tcp backend-worker`.
 
-## 12. Where things are
+## 13. Where things are
 
 | What | Where |
 |---|---|
@@ -464,11 +591,11 @@ Restart all: `sudo systemctl restart frontend backend-web backend-ws backend-tcp
 | Backups | `/var/backups/backend` (settings: `/etc/backend/backup.conf`) |
 | Development copies | `~/backend-dev` (settings `.env`), `~/frontend-dev` (settings `.env.local`) |
 
-## 13. Without development copies
+## 14. Without development copies
 
 For a server that only runs the system: `sudo bash install-all.sh --dev-user none`.
 
-## 14. Problems
+## 15. Problems
 
 | Symptom | What to do |
 |---|---|
@@ -479,3 +606,4 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 | The site doesn't open from other PCs | Firewall (port 443) and the server IP: `hostname -I` |
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |
 | Door scans don't arrive | See section 9, "If a door doesn't work" |
+| A till reader gets no answer or an error | See section 10, "If a till reader doesn't work" |

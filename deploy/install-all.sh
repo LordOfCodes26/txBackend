@@ -213,7 +213,7 @@ if [[ -n "$DEV_USER" ]]; then
             chown -R "$DEV_USER:" "$FE_DEV/.offline-cache/node_modules"
             behind=$(fe_git rev-list --count HEAD..offline/main 2>/dev/null || echo 0)
             note "the kit's frontend code is the branch offline/main ($behind new commits): merge it with  git merge offline/main"
-            note "its npm packages are in .offline-cache/node_modules (see README, section 10 B)"
+            note "its npm packages are in .offline-cache/node_modules (see README, section 11 B)"
         fi
     fi
 else

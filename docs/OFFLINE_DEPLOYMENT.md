@@ -198,7 +198,7 @@ if not: a change that adds a package must be built on a machine with internet.
 Options: `--user NAME`, `--dir PATH`, `--seed-demo`, `--run-tests`, `--yes`. Running it again
 with a newer bundle updates the packages and fetches the new code as `offline/main` without
 touching the developer's work. Step-by-step use for developers: `README-INSTALL.md`,
-section 9.
+section 10 (and the kit's `README.md`, sections 7, 8 and 11).
 
 ## 7. Not included
 
