@@ -198,7 +198,7 @@ if [[ -n "$DEV_USER" ]]; then
         note "frontend copy: $FE_DEV (source, git history, node_modules)..."
         cp -a "$WORK/management-app" "$FE_DEV"
         # Point the development frontend at the development backend (runserver on :8000).
-        printf '# Written by install-all.sh: the development backend (~/backend-dev, port 8000).\nAPI_URL=http://127.0.0.1:8000\n# Live updates in the browser (see docs/FRONTEND_WEBSOCKET_URL.md in the backend).\nNEXT_PUBLIC_WS_URL=ws://127.0.0.1:8000\n' \
+        printf '# Written by install-all.sh: the development backend (~/backend-dev, port 8000).\nAPI_URL=http://127.0.0.1:8000\n' \
             > "$FE_DEV/.env.local"
         chown -R "$DEV_USER:" "$FE_DEV"
         NEW_FE=1

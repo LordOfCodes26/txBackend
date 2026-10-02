@@ -265,14 +265,12 @@ and add the server's IP to `allowedDevOrigins` in `~/frontend-dev/next.config.ts
 (otherwise the page loads but doesn't work). Then open `http://<server-ip>:3000` and
 `http://<server-ip>:8000/admin/`. This is unencrypted and anyone on the network can reach
 the development copies: close the ports again afterwards (`sudo ufw delete allow 3000/tcp`,
-same for 8000). Live updates don't work this way yet (see the note below); use A for them.
+same for 8000).
 
-**Note: live updates and the frontend.** The frontend tells the browser to open live
-updates at its `API_URL`. That address is only right from the server itself (or through
-the tunnel A). The installed system has the same problem (`ws://127.0.0.1:8001`): until the
-frontend is fixed, pages that update live (occupancy, the till screen's card taps) only
-refresh when reloaded or polled. The fix is in the frontend; see
-`docs/FRONTEND_WEBSOCKET_URL.md` in the backend.
+**Live updates when opened directly (B).** The development frontend tells the browser to
+connect live updates to the development backend at `127.0.0.1:8000`, which from another PC
+is that PC itself. For B, add `WS_URL=ws://<server-ip>:8000` to `~/frontend-dev/.env.local`
+and restart `npm run dev`. The tunnel (A) needs nothing.
 
 ### Git (both copies)
 
