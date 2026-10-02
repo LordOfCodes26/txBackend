@@ -132,7 +132,13 @@ def _post_once(
 
 
 def deposit(
-    *, actor, developer: Developer, amount, idempotency_key: str, description: str = "", pin: str | None = None
+    *,
+    actor,
+    developer: Developer,
+    amount,
+    idempotency_key: str,
+    description: str = "",
+    pin: str | None = None,
 ) -> tuple[AccountTransaction, bool]:
     amount = money(amount)
     limit = money(settings.FINANCE_MAX_DEPOSIT)

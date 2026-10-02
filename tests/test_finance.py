@@ -37,7 +37,9 @@ def finance(auth_client, make_user):
 def deposit(client, developer, amount, idem=None, **extra):
     from django.contrib.auth.hashers import make_password
 
-    account = DeveloperAccount.objects.get(developer=developer)
+    from apps.finance.services import open_account
+
+    account = open_account(developer)  # as the real code does: created when missing
     if not account.pin_hash:
         account.pin_hash = make_password("5864")
         account.save(update_fields=["pin_hash"])

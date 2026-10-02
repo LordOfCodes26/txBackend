@@ -631,7 +631,7 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 | POST | `/finance/accounts/{id}/freeze/`, `/unfreeze/`, `/close/`, `/reopen/` | `finance.adjust` | `{reason?}`. Close only with a zero balance |
 | GET | `/finance/transactions/` | `finance.view` | Ledger. Filters: `account`, `developer`, `kind`, `reference`, `created_after`, `created_before` |
 | GET | `/finance/transactions/me/` | logged in | Own ledger |
-| POST | `/finance/deposits/` | `finance.deposit` | `{developer, amount, description?}` + `Idempotency-Key` header |
+| POST | `/finance/deposits/` | `finance.deposit` | `{developer, amount, pin, description?}` + `Idempotency-Key` header. `pin`: the developer's PIN, typed by them at the desk (wrong PIN: `INVALID_PIN`, `PIN_LOCKED`, `PIN_NOT_SET` as at the till) |
 | POST | `/finance/adjustments/` | `finance.adjust` | `{developer, amount, reason}`; amount is signed (`"-5.00"` debits) + `Idempotency-Key` |
 
 - Every developer has exactly one account, created automatically.
