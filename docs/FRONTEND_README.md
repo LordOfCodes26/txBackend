@@ -494,8 +494,8 @@ edit pages, not in list tables.
 | GET | `/rfid/devices/` | `rfid.view` | Doors and till readers. Filters: `purpose`, `building`, `service_position`, `is_active`, `online` |
 | POST / PATCH | `/rfid/devices/`, `/rfid/devices/{id}/` | `rfid.device.manage` | Register or edit a device (see *Devices* below). No DELETE: deactivate with `{"is_active": false}` |
 | POST | `/rfid/devices/{id}/rotate-key/` | `rfid.device.manage` | Returns a new `api_key`; the old one stops working at once |
-| GET | `/rfid/buildings/` | `rfid.view` | Buildings, e.g. `{"code": "B1", "name": "Building 1"}`. Plain array, not paginated |
-| POST / PATCH / DELETE | `/rfid/buildings/`, `/rfid/buildings/{id}/` | `rfid.device.manage` | `{code, name}`. A building with doors can't be deleted |
+| GET | `/rfid/buildings/` | `rfid.view` | Buildings, e.g. `{"id": 1, "code": "B1", "name": "Building 1", "owners": [7], "managers": [9]}` (user ids). Plain array, not paginated. Building managers / owners see only their own |
+| POST / PATCH / DELETE | `/rfid/buildings/`, `/rfid/buildings/{id}/` | `rfid.device.manage` | `{code, name, owners?, managers?}`. `owners` / `managers` replace the whole list and need the BUILDING_OWNER / BUILDING_MANAGER role (see *Assigning buildings to owners and managers*). A building with doors can't be deleted |
 | GET | `/rfid/events/` | `rfid.view` | Raw scan log. Filters: `device`, `card`, `developer`, `result`, `uid`, `event_after`, `event_before` |
 
 - Card `status`: `ACTIVE`, `BLOCKED` (keeps its owner, scans rejected), `RETIRED` (permanent).
@@ -1019,11 +1019,12 @@ before → after table.
 | Developers (list, detail, edit) | `developers/`, `rfid/cards/?developer=`, `attendance/daily/?developer=` | `developer.view` |
 | Cards (list, detail with history and actions) | `rfid/cards/`, `rfid/assignments/?card=` | `rfid.view` |
 | Devices (doors and till readers; register, key dialog, door IP, online status) | `rfid/devices/`, `rfid/devices/?online=false`, `rfid/devices/{id}/rotate-key/` | `rfid.view` (edit: `rfid.device.manage`) |
-| Buildings | `rfid/buildings/` | `rfid.view` (edit: `rfid.device.manage`) |
+| Buildings (with **Owners** and **Managers** multi-selects) | `rfid/buildings/`, `users/?role=BUILDING_OWNER`, `users/?role=BUILDING_MANAGER` | `rfid.view` (edit: `rfid.device.manage`, i.e. ADMIN) |
 | Live door feed | `attendance` messages on `ws/occupancy/` (or poll `rfid/events/?ordering=-event_time`) | `attendance.view` |
 | **Occupancy dashboard** (live count per building and total, live scan feed; click a building for who is inside) | `ws/occupancy/`, `attendance/occupancy/people/?building=` | `attendance.view` |
 | Attendance records and corrections (incl. "mark as left") | `attendance/records/`, `attendance/daily/` | `attendance.view` (corrections: `attendance.correct`) |
 | Users and roles | `users/`, `roles/` | `user.view` |
+| **Statistics dashboard** (BOSS: whole company; building owner: their buildings, named from `buildings`) | `stats/?date_from=&date_to=`, `purchases/performance/` | `stats.view` |
 | Sellers (list, detail with positions) | `sellers/`, `service-positions/?seller=` | `seller.view` |
 | Goods catalogue (list, edit, images, stock dialog, stock history) | `goods/`, `inventory/movements/?good=` | `good.view` |
 | My shop (seller self-service: positions, goods, stock) | `sellers/me/`, `service-positions/`, `goods/`, `inventory/movements/` | active seller |
