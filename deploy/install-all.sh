@@ -111,8 +111,23 @@ say "3. Frontend (build and service)"
 SRC="${FRONTEND_FROM:-$WORK/management-app}"
 [[ -f "$SRC/package.json" && -d "$SRC/node_modules" ]] \
     || die "$SRC is not a frontend folder with node_modules (package.json + node_modules)."
-# safe.directory: the source may belong to a developer, and this runs as root.
-VERSION=$(git -c safe.directory="*" -C "$SRC" rev-parse --short HEAD 2>/dev/null || echo build)-$(date +%Y%m%d%H%M%S)
+src_commit() {  # src_commit DIR: short commit of a git folder, also before git is installed
+    if command -v git >/dev/null; then
+        # safe.directory: the source may belong to a developer, and this runs as root.
+        git -c safe.directory="*" -C "$1" rev-parse --short HEAD 2>/dev/null && return
+    fi
+    local head ref
+    head=$(cat "$1/.git/HEAD" 2>/dev/null) || return 0
+    if [[ "$head" == ref:* ]]; then
+        ref=${head#ref: }
+        if [[ -f "$1/.git/$ref" ]]; then cut -c1-7 "$1/.git/$ref"
+        else grep -s " $ref\$" "$1/.git/packed-refs" | cut -c1-7; fi
+    else
+        echo "${head:0:7}"
+    fi
+}
+COMMIT=$(src_commit "$SRC")
+VERSION=${COMMIT:-build}-$(date +%Y%m%d%H%M%S)
 RELEASE=/opt/frontend/releases/$VERSION
 BUILD="$WORK/build"
 id frontend >/dev/null 2>&1 || useradd --system --home-dir /opt/frontend --shell /usr/sbin/nologin frontend
