@@ -65,3 +65,18 @@ def test_windows_requirements():
     pins = (req / "constraints.txt").read_text().splitlines()
     for name in ("waitress", "tzdata"):
         assert any(p.lower().startswith(f"{name}==") for p in pins), f"{name} isn't pinned"
+
+
+def test_garnet_booleans_have_values():
+    # Garnet rejects a bare boolean flag ("--quiet") and exits at once: the cache was down.
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    garnet = next(line for line in installer.splitlines() if "--bind 127.0.0.1 --port" in line)
+    assert "--lua true" in garnet
+    assert "--quiet" not in garnet
+
+
+def test_winsw_services_run_as_local_system():
+    # Under LocalService WinSW can't report its program's exit to Windows: a crashed program
+    # left the service "Running" and was never restarted.
+    common = (WINDOWS / "common.ps1").read_text()
+    assert "Set-ServiceAccount $Id 'LocalSystem'" in common

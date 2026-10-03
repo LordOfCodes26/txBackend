@@ -277,8 +277,11 @@ function New-WinswXml {
 }
 
 function Install-WinswService {
-    # Create or update a WinSW service: ServicesDir\<id>\<id>.exe + <id>.xml, run as
-    # LocalService (no admin rights, no password). Leaves it stopped.
+    # Create or update a WinSW service: ServicesDir\<id>\<id>.exe + <id>.xml. Leaves it
+    # stopped. Runs as LocalSystem: under a lesser account (LocalService) WinSW can't tell
+    # Windows that its program has exited ("Failed to open the service control manager
+    # database. Access is denied"), so a crashed program left the service "Running" and was
+    # never restarted.
     param([string]$ServicesDir, [string]$WinswExe, [string]$Id, [string]$Xml)
     $dir = Join-Path $ServicesDir $Id
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
@@ -289,7 +292,7 @@ function Install-WinswService {
     if (-not (Get-Service -Name $Id -ErrorAction SilentlyContinue)) {
         Invoke-Native $exe @('install') -Quiet
     }
-    Set-ServiceAccount $Id 'NT AUTHORITY\LocalService'
+    Set-ServiceAccount $Id 'LocalSystem'
 }
 
 function Set-ServiceAccount([string]$Name, [string]$Account) {
@@ -309,16 +312,27 @@ function Stop-ServiceSafely([string]$Name) {
     }
 }
 
-function Start-ServiceChecked([string]$Name, [string]$LogDir) {
+function Start-ServiceChecked([string]$Name, [string]$LogDir, [int]$Port = 0) {
+    # Start a service and make sure its program really runs: "Running" only says the WinSW
+    # wrapper started, so with -Port also wait until the program listens there.
     Start-Service -Name $Name
     Start-Sleep -Seconds 3
     $svc = Get-Service -Name $Name
-    if ($svc.Status -ne 'Running') {
+    $listening = $true
+    if ($Port -and $svc.Status -eq 'Running') {
+        $listening = $false
+        for ($i = 0; $i -lt 60 -and -not $listening; $i++) {
+            $listening = Test-PortInUse $Port
+            if (-not $listening) { Start-Sleep -Seconds 1 }
+        }
+    }
+    if ($svc.Status -ne 'Running' -or -not $listening) {
         if ($LogDir) {
             Get-ChildItem -LiteralPath $LogDir -Filter "$Name*.log" -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime | Select-Object -Last 2 |
+                Sort-Object LastWriteTime | Select-Object -Last 3 |
                 ForEach-Object { Write-Host "    --- $($_.Name)"; Get-Content -LiteralPath $_.FullName -Tail 20 | ForEach-Object { Write-Host "    | $_" } }
         }
+        if ($svc.Status -eq 'Running') { Stop-WithError "The service $Name runs, but nothing listens on port $Port (its program stopped; see its log above)." }
         Stop-WithError "The service $Name did not start (status: $($svc.Status))."
     }
 }

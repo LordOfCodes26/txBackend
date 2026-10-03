@@ -145,14 +145,17 @@ foreach ($setting in @('standby-timeout-ac', 'hibernate-timeout-ac')) {
 }
 Write-Note 'long paths enabled; sleep and hibernation off while on power'
 
-# Folders and who may use them. The services run as LocalService (no admin rights);
-# PostgreSQL as NetworkService. Settings, passwords and backups: administrators only.
+# Folders and who may use them. Settings, passwords and backups: administrators and
+# services only. PostgreSQL runs as NetworkService; the other services as LocalSystem
+# (see Install-WinswService in common.ps1).
 $readAll = @("$($LocalService):(OI)(CI)RX", "$($NetworkService):(OI)(CI)RX", "$($Users):(OI)(CI)RX")
 Set-FolderAccess $Root $readAll
 foreach ($d in @($Runtime, $ServicesDir, "$Root\backend\releases", "$Root\frontend\releases", "$Root\certificate")) {
     if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
-Set-FolderAccess $Etc @("$($LocalService):(OI)(CI)R")
+Set-FolderAccess $Etc @()
+# Earlier kits let LocalService read the settings; the services now run as LocalSystem.
+Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($Etc, '/remove:g', $LocalService, '/T', '/C', '/Q') -Quiet -AllowFailure
 Set-FolderAccess $Private @()
 Set-FolderAccess "$Root\data" @("$($LocalService):(OI)(CI)RX", "$($NetworkService):(RX)")
 Set-FolderAccess "$Root\data\media" @("$($LocalService):(OI)(CI)M")
@@ -213,10 +216,10 @@ Write-Step '4. Cache and realtime messages (Garnet, Redis-compatible)'
 $garnetXml = New-WinswXml -Id $ServiceIds.Garnet -Name 'Management cache (Garnet)' `
     -Description 'Redis-compatible cache and realtime message broker for the management backend.' `
     -Executable "$Runtime\garnet\GarnetServer.exe" `
-    -Arguments "--bind 127.0.0.1 --port $($Ports.Garnet) --lua true --memory 512m --index 64m --quiet" `
+    -Arguments "--bind 127.0.0.1 --port $($Ports.Garnet) --lua true --memory 512m --index 64m" `
     -WorkingDirectory "$Runtime\garnet" -Environment @{ DOTNET_ROOT = "$Runtime\dotnet" } -LogPath $Logs
 Install-WinswService $ServicesDir $Winsw $ServiceIds.Garnet $garnetXml
-Start-ServiceChecked $ServiceIds.Garnet $Logs
+Start-ServiceChecked $ServiceIds.Garnet $Logs -Port $Ports.Garnet
 Write-Note "Garnet on 127.0.0.1:$($Ports.Garnet)"
 
 # ============================================================================ 5. backend
@@ -360,7 +363,9 @@ END `$`$;
             -Arguments $d.Arguments -WorkingDirectory $cur -Environment $pyEnv -DependsOn $deps -LogPath $Logs
         Install-WinswService $ServicesDir $Winsw $d.Id $xml
     }
-    foreach ($svc in $AppServices) { Start-ServiceChecked $svc $Logs }
+    Start-ServiceChecked $ServiceIds.Web $Logs -Port $Ports.Web
+    Start-ServiceChecked $ServiceIds.Ws $Logs -Port $Ports.Ws
+    Start-ServiceChecked $ServiceIds.Tcp $Logs -Port 9100
     Write-Note "backend $version running (services: $($AppServices -join ', '))"
 
     # Keep the last 3 releases.
@@ -433,7 +438,7 @@ $feXml = New-WinswXml -Id $ServiceIds.Frontend -Name 'Management frontend (Next.
         API_URL = "http://127.0.0.1:$($Ports.Internal)"
     }
 Install-WinswService $ServicesDir $Winsw $ServiceIds.Frontend $feXml
-Start-ServiceChecked $ServiceIds.Frontend $Logs
+Start-ServiceChecked $ServiceIds.Frontend $Logs -Port $Ports.Frontend
 Remove-Tree $build
 $activeFe = Get-JunctionTarget "$Root\frontend\current"
 Get-ChildItem -LiteralPath "$Root\frontend\releases" -Directory | Sort-Object LastWriteTime -Descending |
@@ -469,7 +474,7 @@ $caddyXml = New-WinswXml -Id $ServiceIds.Caddy -Name 'Management web server (Cad
     -WorkingDirectory "$Runtime\caddy" -LogPath $Logs -DependsOn @($ServiceIds.Web, $ServiceIds.Frontend) `
     -Environment @{ XDG_DATA_HOME = "$Root\data\caddy\data"; XDG_CONFIG_HOME = "$Root\data\caddy\config" }
 Install-WinswService $ServicesDir $Winsw $ServiceIds.Caddy $caddyXml
-Start-ServiceChecked $ServiceIds.Caddy $Logs
+Start-ServiceChecked $ServiceIds.Caddy $Logs -Port $HttpsPort
 # Caddy's own certificate authority: its root certificate is what the other PCs install.
 $rootCa = "$Root\data\caddy\data\caddy\pki\authorities\local\root.crt"
 if ($tls -eq 'tls internal') {
