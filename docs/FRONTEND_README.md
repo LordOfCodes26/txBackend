@@ -483,7 +483,8 @@ tables. The developer list shows `birthday`.
 | GET | `/rfid/cards/` | `rfid.view` | Filters: `status`, `assigned` (true/false), `developer`. Search: UID, label, holder name |
 | POST | `/rfid/cards/` | `rfid.assign` | `{uid, label?, notes?}`; UID may contain `:`, `-` or spaces |
 | PATCH | `/rfid/cards/{id}/` | `rfid.assign` | `label`, `notes` only |
-| POST | `/rfid/cards/{id}/assign/` | `rfid.assign` | `{developer, pin, pin_confirm}`: assigning a card **also sets the developer's purchase PIN**. Show two masked PIN fields the developer fills in themselves (4–6 digits, not trivial like 1111 / 1234). A bad or mismatched PIN assigns nothing (`VALIDATION_ERROR` on `pin` / `pin_confirm`). A new PIN replaces an old one |
+| POST | `/rfid/cards/{id}/assign/` | `rfid.assign` | `{developer, building?, pin, pin_confirm}` (`building` also sets the developer's home building): assigning a card **also sets the developer's purchase PIN**. Show two masked PIN fields the developer fills in themselves (4–6 digits, not trivial like 1111 / 1234). A bad or mismatched PIN assigns nothing (`VALIDATION_ERROR` on `pin` / `pin_confirm`). A new PIN replaces an old one |
+| GET | `/rfid/card-reads/?device=&after=` | `rfid.assign` or `finance.deposit` | Card assign readers (`devices`) and the newest tap on `device` after tap id `after` (`read`: `uid`, `card` with `status`, `assigned`, `new`, `holder`, `developer`). Poll every ~1 s while waiting: take `cursor` first, then pass it as `after`. Used by New card, Assign card and the deposit desk |
 | POST | `/rfid/cards/{id}/unassign/` | `rfid.assign` | |
 | POST | `/rfid/cards/{id}/replace/` | `rfid.assign` | `{new_card_uid, new_card_label?, reason?}`; returns the **new** card |
 | POST | `/rfid/cards/{id}/block/`, `/unblock/` | `rfid.block` | `{reason?}` |

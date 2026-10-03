@@ -85,6 +85,7 @@ def test_card_reads_fill_the_assign_form(reader, make_user):
         "new": True,
         "assigned": False,
         "holder": None,
+        "developer": None,
     }
 
     b1 = Building.objects.create(code="B1", name="Building 1")
@@ -132,3 +133,21 @@ def test_registering_card_assign_readers_needs_unique_ids(make_user):
     assert "code" in r.json()["error"]["details"]
     r = client.post(DEVICES, {"code": "Master2", "purpose": "TILL"})
     assert "code" in r.json()["error"]["details"]
+
+
+def test_deposit_desk_reads_the_card_holder(reader, make_user):
+    """Finance staff (finance.deposit, no rfid.assign) identify the developer by a tap."""
+    dev = Developer.objects.create(employee_number="E7", full_name="Ada", department="R&D")
+    card = RFIDCard.objects.create(uid="04DD0007")
+    RFIDCardAssignment.objects.create(card=card, developer=dev)
+    client = staff(make_user, Roles.FINANCE_MANAGER)
+    cursor = client.get(READS, {"device": reader.pk}).json()["cursor"]
+    assert tap("04DD0007") == "CARD_OK\r\n"
+    read = client.get(READS, {"device": reader.pk, "after": cursor or 0}).json()["read"]
+    assert read["card"]["developer"] == {
+        "id": dev.pk,
+        "full_name": "Ada",
+        "employee_number": "E7",
+        "department": "R&D",
+        "status": "ACTIVE",
+    }

@@ -10,6 +10,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
@@ -357,16 +358,29 @@ class RFIDEventViewSet(
 NEW_CARD_WINDOW = timedelta(seconds=10)
 
 
+class CardReadPermission(BasePermission):
+    """Card assign staff (`rfid.assign`) and the deposit desk (`finance.deposit`)."""
+
+    def has_permission(self, request, view) -> bool:
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and (user.has_rbac_perm("rfid.assign") or user.has_rbac_perm("finance.deposit"))
+        )
+
+
 class CardReadView(APIView):
-    """The card assign page polls this while staff tap a card on a card assign reader.
+    """The card assign, new card and deposit pages poll this while a card is tapped on a
+    card assign reader.
 
     Returns the active card assign readers, `cursor` (the newest tap id of `device`) and,
     when `after` is given, `read`: the newest tap on `device` after that id (or null).
-    A newly tapped card is already registered, so `read.card` can be assigned directly.
+    A newly tapped card is already registered, so `read.card` can be assigned directly;
+    `read.card.developer` is the holder (for the deposit desk).
     """
 
-    permission_classes = [HasPermissions]
-    required_permissions = {"get": ["rfid.assign"]}
+    permission_classes = [CardReadPermission]
 
     @extend_schema(
         parameters=[
@@ -421,6 +435,15 @@ class CardReadView(APIView):
             "assigned": holder is not None,
             # Holders outside a building manager's buildings stay anonymous.
             "holder": holder.developer.full_name if visible else None,
+            "developer": {
+                "id": holder.developer.pk,
+                "full_name": holder.developer.full_name,
+                "employee_number": holder.developer.employee_number,
+                "department": holder.developer.department,
+                "status": holder.developer.status,
+            }
+            if visible
+            else None,
         }
         return read
 
