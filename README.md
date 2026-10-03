@@ -28,11 +28,17 @@ app on `http://<ip>:8088` and `https://<ip>:8443` (self-signed certificate in
 gunicorn on `127.0.0.1:8089` with `config.settings.staging` from `.env.staging`, and
 `backend-staging-ws` runs uvicorn on `127.0.0.1:8092` for WebSockets (`/ws/`), and
 `backend-staging-tcp` listens on **TCP 9100** for the door devices (`$`-framed JSON, see
-`docs/DEVICE_INTEGRATION.md`).
+`docs/DEVICE_INTEGRATION.md`). The backend's own paths (`/api/v1`, `/admin`, `/health`,
+`/static`, `/test-console`, ...) go to gunicorn; everything else goes to the frontend,
+`frontend-staging` ([deploy/systemd/frontend-staging.service](deploy/systemd/frontend-staging.service)):
+the Next.js standalone build in `../frontend` on `127.0.0.1:3100`.
 Testing only: the HTTP port sends logins unencrypted.
 
 ```bash
 systemctl restart backend-staging backend-staging-ws backend-staging-tcp   # after code changes
+# after frontend changes (in ../frontend):
+npm run build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ \
+  && systemctl restart frontend-staging
 journalctl -u backend-staging -f           # logs
 set -a; . ./.env.staging; set +a; .venv/bin/python manage.py collectstatic --noinput  # after static changes
 ```

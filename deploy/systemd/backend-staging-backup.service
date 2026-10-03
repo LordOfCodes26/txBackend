@@ -5,6 +5,6 @@ Requires=postgresql.service
 
 [Service]
 Type=oneshot
-ExecStart=/root/backend/scripts/backup/nightly.sh
+ExecStart=/root/management/backend/scripts/backup/nightly.sh
 Nice=10
 IOSchedulingClass=idle

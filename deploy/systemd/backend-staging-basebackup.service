@@ -5,6 +5,6 @@ Requires=postgresql.service
 
 [Service]
 Type=oneshot
-ExecStart=/root/backend/scripts/backup/base_backup.sh
+ExecStart=/root/management/backend/scripts/backup/base_backup.sh
 Nice=10
 IOSchedulingClass=idle

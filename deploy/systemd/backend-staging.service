@@ -4,9 +4,9 @@ After=network.target postgresql.service redis-server.service
 Requires=postgresql.service redis-server.service
 
 [Service]
-WorkingDirectory=/root/backend
-EnvironmentFile=/root/backend/.env.staging
-ExecStart=/root/backend/.venv/bin/gunicorn config.wsgi:application \
+WorkingDirectory=/root/management/backend
+EnvironmentFile=/root/management/backend/.env.staging
+ExecStart=/root/management/backend/.venv/bin/gunicorn config.wsgi:application \
     --bind 127.0.0.1:8089 \
     --workers 3 \
     --timeout 30 \
