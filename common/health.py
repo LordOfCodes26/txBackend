@@ -47,7 +47,8 @@ def _parse(ts: str | None):
 @require_GET
 def health_backup(request):
     """Backup freshness: 503 when backups are missing, stale, unverified or WAL archiving
-    fails; 200 with `warnings` (e.g. no off-site copy) otherwise."""
+    fails; 200 with `warnings` (e.g. no off-site copy) otherwise. With
+    BACKUP_REQUIRE_PITR off, base backups and WAL archiving aren't required."""
     errors, warnings = [], []
     try:
         with open(settings.BACKUP_STATUS_FILE) as f:
@@ -65,8 +66,10 @@ def health_backup(request):
     if status and status.get("last_verify_ok") != "true":
         errors.append("last dump failed its restore check")
     base_at = _parse(status.get("last_base_backup_at"))
-    if status and (
-        base_at is None or now - base_at > timedelta(days=settings.BACKUP_MAX_BASE_AGE_DAYS)
+    if (
+        settings.BACKUP_REQUIRE_PITR
+        and status
+        and (base_at is None or now - base_at > timedelta(days=settings.BACKUP_MAX_BASE_AGE_DAYS))
     ):
         errors.append("base backup for point-in-time recovery is missing or too old")
     if status and not status.get("offsite_target"):
@@ -88,12 +91,15 @@ def health_backup(request):
             "failed_count": failed,
             "last_archived_at": last_ok.isoformat() if last_ok else None,
         }
-        if archive_mode != "on":
+        if not settings.BACKUP_REQUIRE_PITR:
+            pass  # nightly dumps only (e.g. the Windows kit): archiving is reported, not required
+        elif archive_mode != "on":
             errors.append("WAL archiving is off (no point-in-time recovery)")
         elif last_fail and (not last_ok or last_fail > last_ok):
             errors.append("WAL archiving is failing")
     except Exception:
-        errors.append("could not read archiver status")
+        if settings.BACKUP_REQUIRE_PITR:
+            errors.append("could not read archiver status")
 
     body = {
         "status": "error" if errors else "ok",

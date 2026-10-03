@@ -7,7 +7,7 @@ import re
 import pytest
 from django.conf import settings
 
-TEMPLATES = [".env.example", "deploy/backend.env.template"]
+TEMPLATES = [".env.example", "deploy/backend.env.template", "deploy/windows/backend.env.template"]
 
 
 @pytest.mark.parametrize("name", TEMPLATES)

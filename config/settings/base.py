@@ -6,8 +6,11 @@ import environ
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env()
-if (BASE_DIR / ".env").exists():
-    environ.Env.read_env(BASE_DIR / ".env", overwrite=False)
+# Settings come from the process environment, then from DJANGO_ENV_FILE (Windows services,
+# which have no EnvironmentFile), then from the project's .env (development).
+for _env_file in (env("DJANGO_ENV_FILE", default=""), BASE_DIR / ".env"):
+    if _env_file and Path(_env_file).exists():
+        environ.Env.read_env(Path(_env_file), overwrite=False)
 
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env.bool("DJANGO_DEBUG", default=False)
@@ -265,6 +268,9 @@ TILL_MATCH_READER_BY_IP = env.bool("TILL_MATCH_READER_BY_IP", default=True)
 BACKUP_STATUS_FILE = env("BACKUP_STATUS_FILE", default="/var/lib/backend/backup-status.json")
 BACKUP_MAX_DUMP_AGE_HOURS = env.int("BACKUP_MAX_DUMP_AGE_HOURS", default=26)
 BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=8)
+# Point-in-time recovery (base backups + WAL archiving) is required on Linux; the Windows
+# kit makes nightly verified dumps only and turns this off.
+BACKUP_REQUIRE_PITR = env.bool("BACKUP_REQUIRE_PITR", default=True)
 
 # --- Test console -------------------------------------------------------------
 # A staging-only page (/test-console/) to exercise doors and tills end to end.

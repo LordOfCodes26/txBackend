@@ -71,3 +71,13 @@ def test_reports_wal_archiver_state(client, status_file):
     # The test database server may or may not archive; either way it is reported.
     if body["wal_archiver"]["archive_mode"] != "on":
         assert "WAL archiving is off (no point-in-time recovery)" in body["errors"]
+
+
+@pytest.mark.django_db
+def test_without_pitr_only_nightly_dumps_are_required(client, status_file, settings):
+    # The Windows kit: verified nightly dumps, no base backups or WAL archiving.
+    settings.BACKUP_REQUIRE_PITR = False
+    status_file(**healthy(last_base_backup_at=""))
+    r = client.get("/health/backup/")
+    assert r.status_code == 200, r.json()
+    assert r.json()["errors"] == []

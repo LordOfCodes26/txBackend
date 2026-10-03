@@ -1,0 +1,10 @@
+# Backup settings on Windows, read by deploy/windows/backup.ps1 (run every night by the
+# scheduled task "Management nightly backup"). Plain KEY=value lines.
+# Where backups live on this machine.
+BACKUP_DIR=__ROOT__/backups
+# Keep nightly dumps (and media archives) this many days.
+KEEP_DAILY_DAYS=14
+# IMPORTANT: a second disk or another machine. Backups on the same disk die with it.
+# A folder on another drive (e.g. D:/Backups/management) or a network share
+# (e.g. //nas/backups/management). The folder is kept an exact copy of BACKUP_DIR.
+OFFSITE_DIR=

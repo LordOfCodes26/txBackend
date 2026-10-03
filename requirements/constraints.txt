@@ -69,6 +69,7 @@ ujson==6.0.0
 uritemplate==4.2.0
 uvicorn==0.54.0
 vine==5.1.0
+waitress==3.0.2
 wcwidth==0.9.1
 websockets==17.1
 whitenoise==6.12.0

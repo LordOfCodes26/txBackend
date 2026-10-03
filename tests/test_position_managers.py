@@ -133,7 +133,9 @@ def test_manager_follows_only_their_counter_live(cafe):
 
 
 def _untracked(position, name):
-    return Good.objects.create(service_position=position, name=name, price="1.00", track_stock=False)
+    return Good.objects.create(
+        service_position=position, name=name, price="1.00", track_stock=False
+    )
 
 
 def test_purchase_takes_only_its_own_positions_goods(auth_client, cafe):

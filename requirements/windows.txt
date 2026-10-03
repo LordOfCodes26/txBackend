@@ -1,0 +1,6 @@
+# Windows (offline kit): waitress serves the API instead of gunicorn (which needs Unix),
+# and tzdata gives Python the timezone database Windows doesn't have.
+-r base.txt
+-c constraints.txt
+waitress>=3.0
+tzdata>=2025.1
