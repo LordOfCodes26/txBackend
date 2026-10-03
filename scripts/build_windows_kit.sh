@@ -39,10 +39,14 @@ BNAME="backend-${VERSION}-windows"
 STAGE="dist/${BNAME}"
 
 say() { printf '\n==> %s\n' "$*"; }
+zip_has() {  # zip_has ZIP REGEX: does the archive hold a matching path? (no unzip needed)
+    python3 -c 'import re, sys, zipfile
+sys.exit(0 if any(re.search(sys.argv[2], n) for n in zipfile.ZipFile(sys.argv[1]).namelist()) else 1)' "$1" "$2"
+}
 die() { echo "ERROR: $*" >&2; exit 1; }
 fetch() {  # fetch URL FILE: download into the cache once
     [[ -s "$CACHE/$2" ]] && return
-    curl -fSL --retry 3 -o "$CACHE/$2.partial" "$1"
+    curl -fsSL --retry 3 -o "$CACHE/$2.partial" "$1"
     mv "$CACHE/$2.partial" "$CACHE/$2"
 }
 
@@ -66,7 +70,7 @@ mkdir -p "$CACHE" "$KIT/runtime" "$STAGE/app" "$STAGE/wheelhouse"
 say "Windows programs (cached in $CACHE)"
 PY_FILE="python-${PYTHON_VERSION}.nupkg"
 fetch "https://api.nuget.org/v3-flatcontainer/python/${PYTHON_VERSION}/python.${PYTHON_VERSION}.nupkg" "$PY_FILE"
-unzip -l "$CACHE/$PY_FILE" | grep -q ' tools/python.exe$' || die "$PY_FILE has no tools/python.exe"
+zip_has "$CACHE/$PY_FILE" '^tools/python\.exe$' || die "$PY_FILE has no tools/python.exe"
 
 PG_RAW="postgresql-${PG_VERSION}-1-windows-x64-binaries.zip"
 fetch "https://get.enterprisedb.com/postgresql/${PG_RAW}" "$PG_RAW"
@@ -135,10 +139,10 @@ print(f"    PostgreSQL: {n} files")
 n = repack(garnet_in, garnet_out, lambda f: f[len("net8.0/"):] if f.startswith("net8.0/") else None)
 print(f"    Garnet (net8.0): {n} files")
 PY
-unzip -l "$KIT/runtime/$PG_FILE" | grep -q ' pgsql/bin/pg_ctl.exe$' || die "PostgreSQL zip has no pgsql/bin/pg_ctl.exe"
-unzip -l "$KIT/runtime/$PG_FILE" | grep -q 'btree_gist.control$' || die "PostgreSQL zip has no btree_gist extension"
-unzip -l "$KIT/runtime/$GARNET_FILE" | grep -q ' GarnetServer.exe$' || die "Garnet zip has no GarnetServer.exe"
-unzip -l "$CACHE/$CADDY_FILE" | grep -q ' caddy.exe$' || die "Caddy zip has no caddy.exe"
+zip_has "$KIT/runtime/$PG_FILE" '^pgsql/bin/pg_ctl\.exe$' || die "PostgreSQL zip has no pgsql/bin/pg_ctl.exe"
+zip_has "$KIT/runtime/$PG_FILE" 'btree_gist\.control$' || die "PostgreSQL zip has no btree_gist extension"
+zip_has "$KIT/runtime/$GARNET_FILE" '^GarnetServer\.exe$' || die "Garnet zip has no GarnetServer.exe"
+zip_has "$CACHE/$CADDY_FILE" '^caddy\.exe$' || die "Caddy zip has no caddy.exe"
 cp "$CACHE/$PY_FILE" "$CACHE/$DOTNET_FILE" "$CACHE/$CADDY_FILE" "$CACHE/$GIT_FILE" "$KIT/runtime/"
 cp "$CACHE/$WINSW_FILE" "$KIT/runtime/$WINSW_FILE"
 tar -xzf "$FRONTEND_PKG" -C "$KIT/runtime" "$NODE_ZIP"
