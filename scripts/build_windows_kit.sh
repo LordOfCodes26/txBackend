@@ -178,11 +178,27 @@ done
 echo "$VERSION" > "$STAGE/VERSION"
 echo "Windows 10/11 x64, Python ${PYTHON_VERSION}" > "$STAGE/BUILT_FOR"
 python3 -m venv "$STAGE/.buildenv"
-"$STAGE/.buildenv/bin/pip" install --quiet --upgrade pip
-"$STAGE/.buildenv/bin/pip" download --quiet --dest "$STAGE/wheelhouse" \
+"$STAGE/.buildenv/bin/pip" install --quiet --upgrade pip uv
+# Resolve the package list FOR WINDOWS first: `pip download --platform` still evaluates
+# markers such as `sys_platform == "win32"` for this Linux machine, so Windows-only
+# dependencies (colorama, needed by pytest) would be left out. uv resolves for the target.
+"$STAGE/.buildenv/bin/uv" pip compile --quiet --no-header \
+    --python-platform x86_64-pc-windows-msvc --python-version 3.12 \
+    -c requirements/constraints.txt requirements/windows.txt requirements/dev.txt \
+    -o "$STAGE/windows-requirements.txt"
+"$STAGE/.buildenv/bin/pip" download --quiet --no-deps --dest "$STAGE/wheelhouse" \
     --platform win_amd64 --python-version 3.12 --implementation cp --only-binary=:all: \
-    -r requirements/windows.txt -r requirements/dev.txt
-rm -rf "$STAGE/.buildenv"
+    -r "$STAGE/windows-requirements.txt"
+# Every resolved package must have its wheel (what the offline installs will ask for).
+python3 - "$STAGE/windows-requirements.txt" "$STAGE/wheelhouse" <<'PY'
+import os, re, sys
+norm = lambda n: re.sub(r"[-_.]+", "-", n).lower()
+wanted = {norm(l.split("==")[0]) for l in open(sys.argv[1]) if "==" in l and not l.lstrip().startswith("#")}
+have = {norm(f.split("-")[0]) for f in os.listdir(sys.argv[2]) if f.endswith(".whl")}
+missing = sorted(wanted - have)
+sys.exit(f"Windows wheels missing: {missing}" if missing else 0)
+PY
+rm -rf "$STAGE/.buildenv" "$STAGE/windows-requirements.txt"
 echo "    $(ls "$STAGE/wheelhouse" | wc -l) Windows wheels (running and development)"
 tar -czf "$KIT/${BNAME}.tar.gz" -C dist "$BNAME"
 rm -rf "$STAGE"
