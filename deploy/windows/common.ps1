@@ -7,7 +7,9 @@
 # - With $ErrorActionPreference = 'Stop', a native program's stderr output becomes a
 #   terminating error: Invoke-Native runs programs with 'Continue' and checks the exit code.
 
-Set-StrictMode -Version 2.0
+# No Set-StrictMode: on Windows PowerShell 5.1 it makes `.Count` of a single value and any
+# property of $null fatal ("The property 'Count' cannot be found on this object"), which
+# broke the installer on a PC with one IP address. Values are checked explicitly instead.
 
 # Names shared by the scripts. Service ids are what `Get-Service` and the Services app show.
 $Script:ServiceIds = @{
@@ -374,8 +376,10 @@ function Get-HttpCode([string]$Url) {
 
 function Get-ServerIPv4Candidates {
     # The machine's IPv4 addresses, the one with the default route first.
-    $routeIf = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
-            Sort-Object RouteMetric | Select-Object -First 1).InterfaceIndex
+    # An offline network may have no default gateway (no route): then no interface comes first.
+    $routeIf = $null
+    $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+    if ($route) { $routeIf = $route.InterfaceIndex }
     $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' }
     $first = @($addrs | Where-Object { $_.InterfaceIndex -eq $routeIf } | ForEach-Object { $_.IPAddress })

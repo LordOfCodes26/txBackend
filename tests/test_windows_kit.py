@@ -80,3 +80,16 @@ def test_winsw_services_run_as_local_system():
     # left the service "Running" and was never restarted.
     common = (WINDOWS / "common.ps1").read_text()
     assert "Set-ServiceAccount $Id 'LocalSystem'" in common
+
+
+def test_no_strict_mode():
+    # Windows PowerShell 5.1 + Set-StrictMode: `.Count` of a single value is fatal ("Count is
+    # unknown"), e.g. on a PC with one IP address. PowerShell 7 (used to check here) allows it.
+    for path in SCRIPTS:
+        assert "Set-StrictMode -Version" not in path.read_text(), path.name
+
+
+def test_ip_candidates_stay_a_list():
+    # A one-item list comes back as the bare item: with one IP, $ips[0] was its first character.
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    assert "$ips = @(Get-ServerIPv4Candidates)" in installer

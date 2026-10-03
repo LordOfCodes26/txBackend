@@ -305,7 +305,9 @@ END `$`$;
             [void](Set-EnvValue $EnvFile $pair[0] $code)
         }
     }
-    $ips = Get-ServerIPv4Candidates
+    # @(): Windows PowerShell returns a one-item list as the bare item; with one IP address
+    # $ips would be a string ($ips[0] its first character).
+    $ips = @(Get-ServerIPv4Candidates)
     if (-not $ServerIp) {
         if ($Upgrade -and $current.Contains('SERVER_IP') -and $current['SERVER_IP']) { $ServerIp = $current['SERVER_IP'] }
         else {

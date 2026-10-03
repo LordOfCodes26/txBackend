@@ -47,7 +47,9 @@ if (-not (Test-Path -LiteralPath "$Root\etc\backend.env")) { Stop-WithError "The
 try {
     $sid = (New-Object Security.Principal.NTAccount($DevUser)).Translate([Security.Principal.SecurityIdentifier]).Value
 } catch { Stop-WithError "No such Windows user: $DevUser" }
-$profileDir = (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid } | Select-Object -First 1).LocalPath
+$userProfile = Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid } | Select-Object -First 1
+$profileDir = $null
+if ($userProfile) { $profileDir = $userProfile.LocalPath }
 if (-not $profileDir) { Stop-WithError "$DevUser has no user profile yet: sign in to Windows as $DevUser once, then run this again." }
 $BackendDev = "$profileDir\backend-dev"
 $FrontendDev = "$profileDir\frontend-dev"
