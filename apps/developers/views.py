@@ -19,7 +19,7 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     Building managers see and manage only developers of their buildings.
     """
 
-    queryset = Developer.objects.select_related("manager", "building")
+    queryset = Developer.objects.select_related("building")
     serializer_class = DeveloperSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
@@ -67,7 +67,7 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     @extend_schema(responses=MyDeveloperProfileSerializer)
     @action(detail=False, methods=["get"])
     def me(self, request):
-        developer = Developer.objects.select_related("manager").filter(user=request.user).first()
+        developer = Developer.objects.filter(user=request.user).first()
         if developer is None:
             raise DeveloperProfileNotFound()
         return Response(MyDeveloperProfileSerializer(developer).data, status=status.HTTP_200_OK)

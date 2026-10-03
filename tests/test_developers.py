@@ -127,31 +127,13 @@ def test_soft_deleted_developer_frees_identifiers(manager_client, make_developer
     assert AuditLog.objects.filter(action="developer.deleted", entity_id=str(old.pk)).exists()
 
 
-def test_cannot_delete_developer_with_reports(manager_client, make_developer):
-    admin = make_developer()
-    make_developer(manager=admin)
-    response = manager_client.delete(f"{URL}{admin.pk}/")
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "DEVELOPER_HAS_REPORTS"
-
-
-def test_manager_cycle_is_rejected(manager_client, make_developer):
-    top = make_developer()
-    middle = make_developer(manager=top)
-    bottom = make_developer(manager=middle)
-
-    # Self-management and an indirect cycle (top → bottom → middle → top).
-    for new_manager in (top, bottom):
-        response = manager_client.patch(f"{URL}{top.pk}/", {"manager": new_manager.pk})
-        assert response.status_code == 400, new_manager
-        assert "manager" in response.json()["error"]["details"]
-
-
-def test_deleted_developer_cannot_be_manager(manager_client, make_developer):
-    gone = make_developer()
-    gone.soft_delete()
-    response = manager_client.post(URL, payload(1, manager=gone.pk))
-    assert response.status_code == 400
+def test_developers_have_no_manager(manager_client, make_developer):
+    dev = make_developer()
+    assert "manager" not in manager_client.get(f"{URL}{dev.pk}/").json()
+    other = make_developer()
+    response = manager_client.patch(f"{URL}{dev.pk}/", {"manager": other.pk})
+    assert response.status_code == 200 and "manager" not in response.json()
+    assert manager_client.delete(f"{URL}{other.pk}/").status_code == 204
 
 
 def test_update_audits_only_changed_fields(manager_client, make_developer):

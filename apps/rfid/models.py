@@ -100,6 +100,14 @@ class RFIDCardAssignment(models.Model):
 class DevicePurpose(models.TextChoices):
     ATTENDANCE = "ATTENDANCE", "Attendance reader"
     TILL = "TILL", "Till card reader (program on a seller's computer)"
+    # Sends {"SN": ..., "ID": "Master", "UID": ...}: staff tap a card to fill the assign form.
+    ENROLL = "ENROLL", "Card assign reader"
+
+
+# Readers that authenticate by serial number (`SN`) instead of a key or fixed IP.
+SN_PURPOSES = (DevicePurpose.TILL, DevicePurpose.ENROLL)
+# Card assign readers send this fixed `ID`; their SN alone identifies them.
+ENROLL_ID = "master"
 
 
 class Building(TimeStampedModel):
@@ -162,7 +170,10 @@ class RFIDDevice(TimeStampedModel):
     sn = models.CharField(
         max_length=100,
         blank=True,
-        help_text="TILL readers: serial number they send as `SN`; with `ID` it authenticates them.",
+        help_text=(
+            "TILL and card assign readers: serial number they send as `SN`. Tills also send "
+            'their code as `ID`; card assign readers send `ID` "Master".'
+        ),
     )
     allowed_ip = models.GenericIPAddressField(
         null=True,
@@ -190,8 +201,8 @@ class RFIDDevice(TimeStampedModel):
                 name="rfid_only_attendance_devices_use_ip_auth",
             ),
             models.CheckConstraint(
-                condition=Q(purpose=DevicePurpose.TILL) | Q(sn=""),
-                name="rfid_only_till_devices_have_sn",
+                condition=Q(purpose__in=SN_PURPOSES) | Q(sn=""),
+                name="rfid_only_sn_devices_have_sn",
             ),
             models.UniqueConstraint("sn", condition=~Q(sn=""), name="rfid_device_sn_unique"),
         ]

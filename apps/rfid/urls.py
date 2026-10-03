@@ -12,5 +12,6 @@ router.register("rfid/buildings", views.BuildingViewSet, basename="rfid-building
 
 urlpatterns = [
     path("rfid/device/heartbeat/", views.DeviceHeartbeatView.as_view(), name="rfid-heartbeat"),
+    path("rfid/card-reads/", views.CardReadView.as_view(), name="rfid-card-reads"),
     *router.urls,
 ]

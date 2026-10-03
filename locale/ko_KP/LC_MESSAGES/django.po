@@ -331,6 +331,9 @@ msgstr "출근(ATTENDANCE) 출입문장치만 IP주소로 인증할수 있습니
 msgid "Only TILL readers authenticate by serial number."
 msgstr "판매대(TILL) 판독기만 일련번호로 인증할수 있습니다."
 
+msgid "Only till and card assign readers authenticate by serial number."
+msgstr "판매대 판독기와 카드배정 판독기만 일련번호로 인증할수 있습니다."
+
 msgid "Another device already has this serial number."
 msgstr "다른 장치가 이미 이 일련번호를 가지고있습니다."
 
@@ -354,6 +357,10 @@ msgstr "등록되지 않은 카드"
 
 msgid "Card not assigned"
 msgstr "배정되지 않은 카드"
+
+#, python-format
+msgid "Card read: %(uid)s"
+msgstr "카드를 읽었습니다: %(uid)s"
 
 msgid "Card blocked"
 msgstr "차단된 카드"

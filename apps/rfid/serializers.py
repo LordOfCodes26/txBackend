@@ -11,6 +11,8 @@ from apps.developers.serializers import DeveloperSummarySerializer
 from apps.finance.serializers import NewPinSerializer
 
 from .models import (
+    ENROLL_ID,
+    SN_PURPOSES,
     Building,
     DevicePurpose,
     RFIDCard,
@@ -80,6 +82,11 @@ class CardAssignSerializer(NewPinSerializer):
     twice on the assigning staff member's screen."""
 
     developer = serializers.PrimaryKeyRelatedField(queryset=Developer.objects.all())
+    building = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.all(),
+        required=False,
+        help_text="Also set the developer's home building. Leave out to keep it unchanged.",
+    )
 
 
 class CardReasonSerializer(serializers.Serializer):
@@ -166,9 +173,9 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
         sn = RFIDDevice.normalize_sn(attrs.get("sn", "") or "")
         if "sn" in attrs:
             attrs["sn"] = sn
-        if sn and purpose != DevicePurpose.TILL:
+        if sn and purpose not in SN_PURPOSES:
             raise serializers.ValidationError(
-                {"sn": [_("Only TILL readers authenticate by serial number.")]}
+                {"sn": [_("Only till and card assign readers authenticate by serial number.")]}
             )
         if sn:
             clash = RFIDDevice.objects.filter(sn=sn)
@@ -309,7 +316,10 @@ class ScanSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
     def validate_device_id(self, value):
-        if value.strip().lower() != self.context["device"].code.lower():
+        device = self.context["device"]
+        if device.purpose == DevicePurpose.ENROLL and value.strip().lower() == ENROLL_ID:
+            return value
+        if value.strip().lower() != device.code.lower():
             raise serializers.ValidationError(_("Does not match the authenticated device."))
         return value
 
@@ -320,6 +330,9 @@ class ScanSerializer(serializers.Serializer):
         purpose = self.context["device"].purpose
         if purpose == DevicePurpose.TILL and kind not in ("", PAY):
             raise serializers.ValidationError({"type": [_("Till readers send `pay`.")]})
+        if purpose == DevicePurpose.ENROLL:
+            attrs["direction"] = ""  # card assign readers only read the UID
+            return attrs
         if purpose == DevicePurpose.ATTENDANCE and kind == PAY:
             raise serializers.ValidationError({"type": [_("Door devices send `in` or `out`.")]})
         attrs["direction"] = kind if kind in ScanDirection.values else ""
@@ -372,6 +385,8 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         return obj.result in ("ACCEPTED", "DUPLICATE")
 
     def get_display_message(self, obj) -> str:
+        if obj.device.purpose == DevicePurpose.ENROLL:
+            return _("Card read: %(uid)s") % {"uid": obj.uid}
         if obj.result in ("ACCEPTED", "DUPLICATE") and obj.developer is not None:
             if obj.device.purpose == DevicePurpose.TILL:
                 if self.get_purchase(obj) is None:
@@ -400,7 +415,8 @@ class HeartbeatSerializer(serializers.Serializer):
         required=False, help_text="Device code; needed for key-less doors and till readers."
     )
     SN = serializers.CharField(
-        required=False, help_text="Till readers without a key: their serial number."
+        required=False,
+        help_text="Till and card assign readers without a key: their serial number.",
     )
 
 

@@ -7,7 +7,7 @@ from rest_framework.exceptions import AuthenticationFailed
 
 from common.middleware import client_ip
 
-from .models import DevicePurpose, RFIDDevice
+from .models import ENROLL_ID, DevicePurpose, RFIDDevice
 
 
 def device_for_key(key: str) -> RFIDDevice | None:
@@ -113,8 +113,9 @@ def _fail_key(ip: str) -> str:
     return f"rfid-sn-fail:{ip}"
 
 
-def till_for_sn(code: str, sn: str, ip: str | None) -> RFIDDevice | None:
-    """The active TILL device named `code` whose serial number is `sn`, else None.
+def device_for_sn(code: str, sn: str, ip: str | None) -> RFIDDevice | None:
+    """The active TILL device named `code` whose serial number is `sn`, or, when `code` is
+    "Master", the active card assign (ENROLL) reader with serial number `sn`. Else None.
 
     Serial numbers are not secret-grade (often printed on the device), so repeated
     failures from one address lock that address out (RFID_SN_MAX_FAILURES within
@@ -123,9 +124,14 @@ def till_for_sn(code: str, sn: str, ip: str | None) -> RFIDDevice | None:
     key = _fail_key(ip or "unknown")
     if cache.get(key, 0) >= settings.RFID_SN_MAX_FAILURES:
         raise SNLockedOut()
-    device = RFIDDevice.objects.filter(
-        code__iexact=code, is_active=True, purpose=DevicePurpose.TILL
-    ).first()
+    if code.strip().lower() == ENROLL_ID:
+        device = RFIDDevice.objects.filter(
+            sn=RFIDDevice.normalize_sn(sn), is_active=True, purpose=DevicePurpose.ENROLL
+        ).first()
+    else:
+        device = RFIDDevice.objects.filter(
+            code__iexact=code, is_active=True, purpose=DevicePurpose.TILL
+        ).first()
     if device is not None and device.check_sn(sn):
         return device
     try:
@@ -150,7 +156,8 @@ def _body_value(request, *names: str) -> str:
 
 class DeviceSNAuthentication(BaseAuthentication):
     """Key-less authentication for till readers: the body carries `SN` (the reader's serial
-    number) and `ID` (its code). Used only when there is no Authorization header."""
+    number) and `ID` (its code, or "Master" for card assign readers). Used only when there
+    is no Authorization header."""
 
     def authenticate(self, request):
         if get_authorization_header(request) or request.method != "POST":
@@ -160,7 +167,7 @@ class DeviceSNAuthentication(BaseAuthentication):
             return None
         code = _body_value(request, "id", "device_id")
         try:
-            device = till_for_sn(code, sn, client_ip(request))
+            device = device_for_sn(code, sn, client_ip(request))
         except SNLockedOut as exc:
             raise AuthenticationFailed(_("Too many failed attempts; try again later.")) from exc
         if device is None:

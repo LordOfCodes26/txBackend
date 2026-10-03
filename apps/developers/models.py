@@ -45,9 +45,6 @@ class Developer(TimeStampedModel, SoftDeleteModel):
         related_name="developers",
     )
     position_title = models.CharField(max_length=100, blank=True)
-    manager = models.ForeignKey(
-        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="reports"
-    )
     start_date = models.DateField(null=True, blank=True)
     out_date = models.DateField(
         null=True, blank=True, help_text="Last working day (set when the developer leaves)."
@@ -63,9 +60,6 @@ class Developer(TimeStampedModel, SoftDeleteModel):
                 "employee_number", condition=ALIVE, name="developer_employee_number_unique"
             ),
             models.UniqueConstraint("user", condition=ALIVE, name="developer_user_unique"),
-            models.CheckConstraint(
-                condition=~Q(manager=models.F("id")), name="developer_not_own_manager"
-            ),
             models.CheckConstraint(
                 condition=Q(out_date__isnull=True)
                 | Q(start_date__isnull=True)

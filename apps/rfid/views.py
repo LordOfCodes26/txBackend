@@ -1,9 +1,12 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import translation
 from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -11,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import APIView
 
+from apps.developers.services import update_developer
 from apps.finance.services import give_pin, open_account, validate_pin_format
 from common.context import get_request_context
 from common.middleware import client_ip
@@ -125,8 +129,13 @@ class RFIDCardViewSet(
         card = self.get_object()
         developer = serializer.validated_data["developer"]
         ensure_in_scope(request.user, "rfid.assign", developer.building_id, field="developer")
+        building = serializer.validated_data.get("building")
+        if building is not None:
+            ensure_in_scope(request.user, "rfid.assign", building.pk)
         validate_pin_format(serializer.validated_data["pin"])
         with transaction.atomic():
+            if building is not None and building.pk != developer.building_id:
+                update_developer(actor=request.user, developer=developer, building=building)
             services.assign_card(actor=request.user, card=card, developer=developer)
             give_pin(
                 actor=request.user,
@@ -345,6 +354,84 @@ class RFIDEventViewSet(
             for e, created in results
         ]
         return Response(BatchResultSerializer(data, many=True).data)
+
+
+NEW_CARD_WINDOW = timedelta(seconds=10)
+
+
+class CardReadView(APIView):
+    """The card assign page polls this while staff tap a card on a card assign reader.
+
+    Returns the active card assign readers, `cursor` (the newest tap id of `device`) and,
+    when `after` is given, `read`: the newest tap on `device` after that id (or null).
+    A newly tapped card is already registered, so `read.card` can be assigned directly.
+    """
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["rfid.assign"]}
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("device", int, description="Card assign reader id."),
+            OpenApiParameter("after", int, description="Only taps newer than this tap id."),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request):
+        readers = RFIDDevice.objects.filter(purpose=DevicePurpose.ENROLL, is_active=True)
+        body = {
+            "devices": [
+                {"id": d.pk, "code": d.code, "name": d.name, "is_online": d.is_online}
+                for d in readers
+            ],
+            "cursor": None,
+            "read": None,
+        }
+        device = readers.filter(pk=_int_param(request, "device")).first()
+        if device is None:
+            return Response(body)
+        taps = RFIDEvent.objects.filter(device=device).order_by("-pk")
+        body["cursor"] = taps.values_list("pk", flat=True).first()
+        after = _int_param(request, "after")
+        if after is not None:
+            tap = taps.filter(pk__gt=after).first()
+            if tap is not None:
+                body["read"] = self._read(request, tap)
+        return Response(body)
+
+    def _read(self, request, tap: RFIDEvent) -> dict:
+        card = RFIDCard.objects.filter(uid=tap.uid).first()
+        read = {"event": tap.pk, "uid": tap.uid, "event_time": tap.event_time, "card": None}
+        if card is None:
+            return read
+        holder = (
+            RFIDCardAssignment.objects.filter(card=card, unassigned_at__isnull=True)
+            .select_related("developer")
+            .first()
+        )
+        scope = building_scope(request.user, "rfid.assign")
+        visible = holder is not None and (scope is None or holder.developer.building_id in scope)
+        read["card"] = {
+            "id": card.pk,
+            "status": card.status,
+            "label": card.label,
+            "notes": card.notes,
+            # Registered by this tap (see services._register_tapped_card): created just now
+            # and never assigned.
+            "new": abs(card.created_at - tap.received_at) <= NEW_CARD_WINDOW
+            and not RFIDCardAssignment.objects.filter(card=card).exists(),
+            "assigned": holder is not None,
+            # Holders outside a building manager's buildings stay anonymous.
+            "holder": holder.developer.full_name if visible else None,
+        }
+        return read
+
+
+def _int_param(request, name: str) -> int | None:
+    try:
+        return int(request.query_params[name])
+    except (KeyError, ValueError):
+        return None
 
 
 class DeviceHeartbeatView(DeviceLanguageMixin, APIView):

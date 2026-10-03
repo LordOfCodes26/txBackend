@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from apps.rfid.scope import building_scope
 from common.permissions import HasPermissions
 
-from .services import company_stats
+from .services import company_stats, finance_stats
 
 MAX_DAYS = 366
 
@@ -50,3 +50,21 @@ class CompanyStatsView(APIView):
         data = period.validated_data
         buildings = building_scope(request.user, "stats.view")  # building owners: theirs
         return Response(company_stats(data["date_from"], data["date_to"], buildings))
+
+
+class FinanceStatsView(APIView):
+    """Finance dashboard (`finance.view` + `seller_finance.view`): developer money
+    (balances, deposits, spending), seller money and a per-seller comparison of sales,
+    bookings, earnings, payouts and balances, for a period of company-local days.
+    Building owners get the figures of their buildings (`buildings`)."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["finance.view", "seller_finance.view"]}
+
+    @extend_schema(parameters=[PeriodSerializer], responses=OpenApiTypes.OBJECT)
+    def get(self, request):
+        period = PeriodSerializer(data=request.query_params)
+        period.is_valid(raise_exception=True)
+        data = period.validated_data
+        buildings = building_scope(request.user, "seller_finance.view")
+        return Response(finance_stats(data["date_from"], data["date_to"], buildings))

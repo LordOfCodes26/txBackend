@@ -351,7 +351,7 @@ owner can't also be a position manager.
 | 500 | `INTERNAL_ERROR` | Generic error; quote the `X-Request-ID` response header in bug reports |
 
 Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASSIGNED`,
-`DEVELOPER_HAS_REPORTS`, `CARD_NOT_ACTIVE`, `CARD_ALREADY_ASSIGNED`,
+`CARD_NOT_ACTIVE`, `CARD_ALREADY_ASSIGNED`,
 `DEVELOPER_ALREADY_HAS_CARD`, `CARD_NOT_ASSIGNED`, `DEVELOPER_NOT_ASSIGNABLE`,
 `INVALID_CARD_TRANSITION`, `RECORD_ALREADY_VOID`, `POSITION_HAS_GOODS`, `INSUFFICIENT_STOCK`
 (`details: {available, requested}`), `STOCK_NOT_TRACKED`, `NO_STOCK_CHANGE`,
@@ -467,16 +467,14 @@ Users can't grant roles with more permissions than they have themselves
 | GET | `/developers/me/` | logged in | Own profile |
 
 Fields: `employee_number`, `full_name`, `phone`, `home_address`, `birthday`, `department`,
-`position_title`, `building` (optional home building; read-only `building_name`), `manager`,
+`position_title`, `building` (optional home building; read-only `building_name`),
 `start_date`, `out_date` (last working day), `status`, `user`.
 Developers have **no email field**; a developer's login email lives on their user account.
 Dates are `YYYY-MM-DD`. `out_date` can't be before `start_date`, and `birthday` can't be in
-the future. `home_address` and `birthday` are personal data: show them only on detail and
-edit pages, not in list tables.
+the future. `home_address` is personal data: show it only on detail and edit pages, not in list
+tables. The developer list shows `birthday`.
 
-`status`: `ACTIVE`, `ON_LEAVE`, `SUSPENDED`, `TERMINATED`. Responses include
-`manager_detail` (`{id, employee_number, full_name, department}`) for display, while
-`manager` is the id you send.
+`status`: `ACTIVE`, `ON_LEAVE`, `SUSPENDED`, `TERMINATED`.
 
 ### RFID
 

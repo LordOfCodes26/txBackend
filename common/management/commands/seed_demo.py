@@ -116,7 +116,6 @@ class Command(BaseCommand):
                 - timedelta(days=random.randint(0, 300)),
                 department=dept,
                 position_title="Team lead" if dept not in leads else "Developer",
-                manager=leads.get(dept),
                 start_date=timezone.localdate() - timedelta(days=random.randint(30, 2000)),
                 status=DeveloperStatus.ON_LEAVE if i == 7 else DeveloperStatus.ACTIVE,
             )

@@ -20,10 +20,6 @@ class DeveloperSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(), required=False, allow_null=True
     )
-    manager = serializers.PrimaryKeyRelatedField(
-        queryset=Developer.objects.all(), required=False, allow_null=True
-    )
-    manager_detail = DeveloperSummarySerializer(source="manager", read_only=True)
     building = serializers.PrimaryKeyRelatedField(
         queryset=Building.objects.all(),
         required=False,
@@ -46,8 +42,6 @@ class DeveloperSerializer(serializers.ModelSerializer):
             "position_title",
             "building",
             "building_name",
-            "manager",
-            "manager_detail",
             "start_date",
             "out_date",
             "status",
@@ -78,19 +72,6 @@ class DeveloperSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("This user is linked to another developer."))
         return user
 
-    def validate_manager(self, manager):
-        if manager is None or self.instance is None:
-            return manager
-        # Walk up the chain: the new manager must not report (directly or not) to us.
-        seen = set()
-        node = manager
-        while node is not None and node.pk not in seen:
-            if node.pk == self.instance.pk:
-                raise serializers.ValidationError(_("A developer cannot report to themselves."))
-            seen.add(node.pk)
-            node = node.manager
-        return manager
-
     def validate(self, attrs):
         start = attrs.get("start_date", getattr(self.instance, "start_date", None))
         out = attrs.get("out_date", getattr(self.instance, "out_date", None))
@@ -102,8 +83,6 @@ class DeveloperSerializer(serializers.ModelSerializer):
 
 
 class MyDeveloperProfileSerializer(serializers.ModelSerializer):
-    manager = DeveloperSummarySerializer(read_only=True)
-
     class Meta:
         model = Developer
         fields = [
@@ -115,7 +94,6 @@ class MyDeveloperProfileSerializer(serializers.ModelSerializer):
             "birthday",
             "department",
             "position_title",
-            "manager",
             "start_date",
             "out_date",
             "status",

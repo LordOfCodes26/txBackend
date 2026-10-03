@@ -15,6 +15,8 @@ Authentication:
   is the real sender.
 - till readers: the frame carries `SN` (serial number) and `ID`; both must match an
   active TILL device (same rule as key-less HTTP, with lockout after repeated failures).
+- card assign readers: `${"SN": "...", "ID": "Master", "UID": "..."}$`; the SN must match
+  an active ENROLL device.
 
 Scans go through `services.record_scan`, exactly like HTTP scans (attendance, occupancy,
 live dashboard events).
@@ -92,7 +94,7 @@ def _handle_frame(frame: bytes, peer_ip: str) -> dict:
     from rest_framework.exceptions import ValidationError
 
     from . import services
-    from .authentication import SNLockedOut, till_for_sn
+    from .authentication import SNLockedOut, device_for_sn
     from .models import DevicePurpose, RFIDDevice
     from .serializers import ScanResponseSerializer, ScanSerializer
 
@@ -109,9 +111,9 @@ def _handle_frame(frame: bytes, peer_ip: str) -> dict:
         return _error(_("Missing ID."))
     sn = str(fields.get("sn") or "").strip()
     if sn:
-        # Till readers: serial number + ID.
+        # Till readers: serial number + ID. Card assign readers: serial number + "Master".
         try:
-            device = till_for_sn(code, sn, peer_ip)
+            device = device_for_sn(code, sn, peer_ip)
         except SNLockedOut:
             return _error(_("Too many failed attempts; try again later."))
         if device is None:

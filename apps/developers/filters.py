@@ -16,4 +16,4 @@ class DeveloperFilter(django_filters.FilterSet):
 
     class Meta:
         model = Developer
-        fields = ["status", "department", "manager", "building"]
+        fields = ["status", "department", "building"]

@@ -4,7 +4,7 @@ from django.db import IntegrityError, transaction
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
-from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
+from apps.rfid.models import Building, CardStatus, RFIDCard, RFIDCardAssignment
 
 pytestmark = pytest.mark.django_db
 
@@ -228,6 +228,31 @@ def test_assigning_a_card_sets_the_pin(client, make_developer, make_card):
     finance.verify_pin(account=account, pin="4826")  # no error
     log = AuditLog.objects.get(action="finance.pin_set_at_card_assignment")
     assert "4826" not in str(log.new_values) and "4826" not in str(log.old_values)
+
+
+def test_assigning_a_card_can_set_the_home_building(client, make_developer, make_card):
+    b1 = Building.objects.create(code="B1", name="Building 1")
+    dev, card = make_developer(), make_card()
+    response = client.post(
+        f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, "building": b1.pk, **NEW_PIN}
+    )
+    assert response.status_code == 200
+    dev.refresh_from_db()
+    assert dev.building == b1
+    log = AuditLog.objects.get(action="developer.updated", entity_id=str(dev.pk))
+    assert log.new_values == {"building": b1.pk}
+
+
+def test_assigning_a_card_without_building_keeps_it(client, make_developer, make_card):
+    b1 = Building.objects.create(code="B1", name="Building 1")
+    dev, card = make_developer(building=b1), make_card()
+    assert (
+        client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN}).status_code
+        == 200
+    )
+    dev.refresh_from_db()
+    assert dev.building == b1
+    assert not AuditLog.objects.filter(action="developer.updated").exists()
 
 
 @pytest.mark.parametrize(

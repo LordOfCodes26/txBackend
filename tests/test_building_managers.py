@@ -149,6 +149,11 @@ def test_cards_of_own_developers_and_spare_cards(client, site):
     r = client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": site.bob.pk, **NEW_PIN})
     assert "developer" in r.json()["error"]["details"]
     dee = Developer.objects.create(employee_number="E4", full_name="Dee", building=site.b1)
+    # Moving a developer to another building at assignment is out of scope too.
+    r = client.post(
+        f"{CARDS}{site.spare.pk}/assign/", {"developer": dee.pk, "building": site.b2.pk, **NEW_PIN}
+    )
+    assert "building" in r.json()["error"]["details"]
     assert (
         client.post(f"{CARDS}{site.spare.pk}/assign/", {"developer": dee.pk, **NEW_PIN}).status_code
         == 200

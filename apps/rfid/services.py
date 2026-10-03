@@ -262,6 +262,8 @@ def record_scan(
         existing = RFIDEvent.objects.filter(device=device, client_event_id=client_event_id).first()
         if existing:
             return existing, False
+    if device.purpose == DevicePurpose.ENROLL:
+        _register_tapped_card(device, uid)
     try:
         with transaction.atomic():
             event = _classify_and_store(
@@ -296,6 +298,17 @@ def record_scan(
 
         notify_card_tapped(event)
     return event, True
+
+
+def _register_tapped_card(device: RFIDDevice, uid: str) -> None:
+    """A new card tapped on a card assign reader is registered, ready to be assigned."""
+    if RFIDCard.objects.filter(uid=uid).exists():
+        return
+    try:
+        with transaction.atomic():
+            register_card(actor=None, uid=uid, notes=f"Registered by tapping on {device.code}")
+    except IntegrityError:
+        pass  # registered by a concurrent tap
 
 
 def _classify_and_store(

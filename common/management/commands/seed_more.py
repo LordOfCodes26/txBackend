@@ -133,7 +133,6 @@ class Command(BaseCommand):
                     birthday=date(1975 + i % 25, 1 + i % 12, 1 + i % 28),
                     department=dept,
                     position_title="Team lead" if dept not in leads else "Developer",
-                    manager=leads.get(dept),
                     start_date=today - timedelta(days=random.randint(20, 3000)),
                     status=DeveloperStatus.ON_LEAVE if i % 37 == 0 else DeveloperStatus.ACTIVE,
                 )

@@ -15,7 +15,7 @@ class DeveloperAdmin(admin.ModelAdmin):
     ]
     list_filter = ["status", "department"]
     search_fields = ["employee_number", "full_name", "phone"]
-    raw_id_fields = ["user", "manager"]
+    raw_id_fields = ["user"]
 
     def get_queryset(self, request):
         return Developer.all_objects.all()

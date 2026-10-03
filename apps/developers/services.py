@@ -6,7 +6,6 @@ from apps.finance.services import open_account
 from apps.rfid.models import AssignmentEndReason
 from apps.rfid.services import end_developer_assignment
 
-from .exceptions import DeveloperHasReports
 from .models import Developer, DeveloperStatus
 
 AUDITED_FIELDS = [
@@ -19,7 +18,6 @@ AUDITED_FIELDS = [
     "birthday",
     "department",
     "position_title",
-    "manager",
     "start_date",
     "out_date",
     "status",
@@ -61,8 +59,6 @@ def update_developer(*, actor, developer: Developer, **changes) -> Developer:
 @transaction.atomic
 def delete_developer(*, actor, developer: Developer) -> None:
     developer = Developer.objects.select_for_update().get(pk=developer.pk)
-    if developer.reports.exists():
-        raise DeveloperHasReports()
     developer.deleted_at = timezone.now()
     developer.save(update_fields=["deleted_at", "updated_at"])
     end_developer_assignment(
