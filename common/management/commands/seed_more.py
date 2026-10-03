@@ -192,19 +192,14 @@ class Command(BaseCommand):
 
     def _readers(self):
         """Till readers aren't tied to counters (they're plugged into sellers' PCs, which
-        choose their reader); just make sure Reader1-4 exist with serial numbers."""
+        choose their reader); just make sure Reader1-4 exist."""
         for n in range(1, 5):
-            code, sn = f"Reader{n}", f"SN-DEMO-{n:04d}"
+            code = f"Reader{n}"
             if not RFIDDevice.objects.filter(code=code).exists():
                 rfid.register_device(
-                    actor=None,
-                    code=code,
-                    name=f"Till reader {n}",
-                    purpose=DevicePurpose.TILL,
-                    sn=sn,
+                    actor=None, code=code, name=f"Till reader {n}", purpose=DevicePurpose.TILL
                 )
-                self.stdout.write(f"Till reader {code} ({sn})")
-        RFIDDevice.objects.filter(code="Reader1", sn="").update(sn="SN-DEMO-0001")
+                self.stdout.write(f"Till reader {code}")
 
     # -- activity ------------------------------------------------------------------------
 

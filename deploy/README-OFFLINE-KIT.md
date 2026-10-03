@@ -309,10 +309,34 @@ without internet: add them on a machine with internet and bring a new kit.
 
 ## 10. Connecting the door devices (attendance)
 
-Right after installing, the door service (`backend-tcp`) already listens on **TCP port
-9100**, and doors that send `in` / `out` are understood. But the server **rejects every
-door until it is registered**: a door is accepted only when its **ID** (`Door1`, `Door2`)
-is registered **and** its scans come from that door's **fixed IP address**.
+All devices (doors, till readers, card assign readers) talk to the server over **TCP port
+9100** (service `backend-tcp`, running right after the install). Each tap is one packet
+between `$` signs, and the server answers every packet with one line:
+
+| Device | Packet | Answers |
+|---|---|---|
+| Door, way in | `$ID:Door1,TYPE:Input,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO`, `CARD_DENIED` |
+| Door, way out | `$ID:Door1,TYPE:Output,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO`, `CARD_DENIED` |
+| Till reader | `$ID:Reader1,TYPE:Pay,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO` |
+| Card assign reader | `$ID:Master1,TYPE:Master,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO` |
+
+Each answer ends with a line break (`\r\n`). The server **rejects every device until it is
+registered** (answer `CARD_NO`).
+
+A door is accepted only when its **ID** is registered **and** the packet comes from that
+unit's **fixed IP address**. A door usually has **several units** (readers) that all send the
+same ID, for example Door1:
+
+| Unit | IP | Sends |
+|---|---|---|
+| Door1-1 | 192.168.100.151 | `ID:Door1,TYPE:Input` |
+| Door1-2 | 192.168.100.152 | `ID:Door1,TYPE:Input` |
+| Door1-3 | 192.168.100.153 | `ID:Door1,TYPE:Output` |
+| Door1-4 | 192.168.100.154 | `ID:Door1,TYPE:Output` |
+
+Each unit is registered as **its own device**: the same `code` (`Door1`), its own `name`
+(`Door1-1`) and its own `allowed_ip`. The direction (in / out) comes from each packet's
+`TYPE`.
 
 Do these steps once, on the server (a terminal on the server itself).
 
@@ -341,230 +365,185 @@ api -X POST "$SERVER/api/v1/rfid/buildings/" -d '{"code": "B2", "name": "Buildin
 api "$SERVER/api/v1/rfid/buildings/"   # note each building's "id"
 ```
 
-(Buildings can also be created in the admin: `https://<server-ip>/admin/` → RFID → Buildings.)
+(Buildings can also be created in the web app: Readers → Buildings.)
 
-### Step 3. Register the doors
+### Step 3. Register every door unit
 
-One door device per door, with the building it belongs to (use the ids from step 2):
+One device per **unit**, with the door's ID as `code`, the unit's name, its building (ids
+from step 2) and its fixed IP:
 
 ```bash
-api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Building 1 door", "building": 1}'
-api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door2", "name": "Building 2 door", "building": 2}'
-api "$SERVER/api/v1/rfid/devices/?purpose=ATTENDANCE"   # note each door's "id"
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Door1-1", "building": 1, "allowed_ip": "192.168.100.151"}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Door1-2", "building": 1, "allowed_ip": "192.168.100.152"}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Door1-3", "building": 1, "allowed_ip": "192.168.100.153"}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Door1", "name": "Door1-4", "building": 1, "allowed_ip": "192.168.100.154"}'
+# ...and Door2-1 ... Door2-6 (192.168.100.201 ... .206) with "code": "Door2", "building": 2
+api "$SERVER/api/v1/rfid/devices/?purpose=ATTENDANCE"
 ```
 
-The `code` must be exactly the **ID the door sends** (`Door1`, `Door2`). The answer also
-shows an `api_key`: doors don't need it (they are recognised by their IP), ignore it.
+(Or in the web app: Readers → New device, kind **Attendance door**.)
 
-### Step 4. Point each door at the server
+- `code` must be exactly the **ID the door sends** (`Door1`, `Door2`).
+- Units sharing an ID each need **their own IP**; the same IP can't be used twice for one ID.
+- The answer also shows an `api_key`: TCP doors don't need it, ignore it.
 
-In each door device's own settings:
+### Step 4. Point each unit at the server
+
+In each door unit's own settings:
 
 | Setting | Value |
 |---|---|
-| Server address | the server IP chosen during the install, e.g. `192.168.1.10` (shown at the end of the install; `grep SERVER_IP /etc/backend/backend.env`) |
+| Server address | the server IP chosen during the install, e.g. `192.168.100.10` (shown at the end of the install; `grep SERVER_IP /etc/backend/backend.env`) |
 | Port | `9100` |
-| Protocol | TCP, JSON between `$` signs: `${"ID": "Door1", "Type": "in", "UID": "..."}$` |
 | ID | `Door1` (or `Door2`), the same as the `code` in step 3 |
+| Own IP | fixed, the same as `allowed_ip` in step 3 (set it in the unit or reserve it in the router) |
 
-### Step 5. Find each door's IP address
+### Step 5. Check each unit reaches the server
 
-Watch the door log and tap any card on the door:
+Watch the device log and tap any card on a unit:
 
 ```bash
 sudo journalctl -u backend-tcp -f
 ```
 
-A line like this appears (press Ctrl+C to stop watching):
+The unit answers `CARD_NO` for a card that isn't registered yet: the connection works. If
+the unit isn't registered with this IP, a line like this appears (Ctrl+C stops watching):
 
 ```
-RFID TCP: rejected ID='Door1' from 192.168.1.50 (no matching door/IP)
+RFID TCP: rejected ID='Door1' from 192.168.100.155 (no such device/IP)
 ```
 
-`192.168.1.50` is that door's IP. Nothing appears? The door doesn't reach the server: check
-step 4, the network cable, and the firewall (step 7 of this section). Give each door a **fixed IP** in the
-door's settings or the router, otherwise it stops working when its address changes.
+`192.168.100.155` is the address the unit really uses: fix the unit's IP, or register that
+address (step 3). Nothing appears at all? The unit doesn't reach the server: check step 4,
+the network cable and the firewall (step 6 of this section).
 
-### Step 6. Allow each door by its IP
+### Step 6. Firewall (if the server has one)
 
-Use the door's id from step 3 and the IP from step 5:
+Allow port 9100 from the device network only:
 
 ```bash
-api -X PATCH "$SERVER/api/v1/rfid/devices/1/" -d '{"allowed_ip": "192.168.1.50"}'
-api -X PATCH "$SERVER/api/v1/rfid/devices/2/" -d '{"allowed_ip": "192.168.1.51"}'
+sudo ufw allow from 192.168.100.0/24 to any port 9100 proto tcp
 ```
 
-Tap a card again: the door now gets an answer from the server. With a card that isn't
-registered yet the door shows **"Unknown card"**: the connection works.
+### Step 7. Register developers and their cards
 
-### Step 7. Firewall (if the server has one)
-
-Allow port 9100 only from the doors:
+A door opens only for a card assigned to an active developer. Usually in the web app:
+**Cards → Assign card** with a card assign reader (section 11), or by command for a first test:
 
 ```bash
-sudo ufw allow from 192.168.1.50 to any port 9100 proto tcp
-sudo ufw allow from 192.168.1.51 to any port 9100 proto tcp
-```
-
-### Step 8. Register developers and their cards
-
-A tap is counted only for a card assigned to a developer. For each developer (usually from
-the web app; by command for a first test):
-
-```bash
-api -X POST "$SERVER/api/v1/developers/" -d '{"employee_number": "E001", "full_name": "Ada Kim", "building": 1}'
-api -X POST "$SERVER/api/v1/rfid/cards/" -d '{"uid": "04A2B3C4"}'          # the card's number
+api -X POST "$SERVER/api/v1/developers/" -d '{"employee_number": "E001", "full_name": "Ada Kim"}'
+api -X POST "$SERVER/api/v1/rfid/cards/" -d '{"uid": "DC62B3E3"}'          # the card's number
 api -X POST "$SERVER/api/v1/rfid/cards/<card id>/assign/" \
-  -d '{"developer": <developer id>, "pin": "<PIN typed by the developer>", "pin_confirm": "<same PIN>"}'
+  -d '{"developer": <developer id>, "building": 1, "pin": "<PIN typed by the developer>", "pin_confirm": "<same PIN>"}'
 ```
 
-(Assigning a card also sets the developer's purchase PIN: 4–6 digits, not 1111 or 1234.)
-Don't know a card's number (UID)? Tap it on a door, then list the latest unknown cards:
-`api "$SERVER/api/v1/rfid/events/?result=UNKNOWN_CARD&ordering=-event_time"` → `"uid"`.
+(Assigning a card also sets the developer's home building and purchase PIN: 4–6 digits, not
+1111 or 1234.) Don't know a card's number (UID)? Tap it on a door, then list the latest
+unknown cards: `api "$SERVER/api/v1/rfid/events/?result=UNKNOWN_CARD&ordering=-event_time"` → `"uid"`.
 
-### Step 9. Check it
+### Step 8. Check it
 
-Tap the developer's card on the door: it shows **"Welcome, Ada Kim"** (or "Goodbye, …"
-on the way out). Then:
+Tap the developer's card on a unit: it answers `CARD_OK` (the door opens). Then:
 
 ```bash
 api "$SERVER/api/v1/attendance/occupancy/"                    # who is inside, per building
 api "$SERVER/api/v1/rfid/events/?ordering=-event_time"        # the latest taps
 ```
 
+### What a door answers
+
+| The card | Answer |
+|---|---|
+| Assigned to an active developer (also a repeated tap) | `CARD_OK` |
+| Not registered | `CARD_NO` |
+| Registered but not given to anyone, blocked, retired, or the developer is suspended / terminated | `CARD_DENIED` |
+| The packet can't be used (unknown ID or IP, wrong `TYPE`, bad UID) | `CARD_NO` and a log line |
+
 ### If a door doesn't work
-
-| Log line (`sudo journalctl -u backend-tcp -f`) | Meaning / fix |
-|---|---|
-| nothing when tapping | The door doesn't reach the server: step 4, network, firewall (step 7 of this section) |
-| `rejected ID='Door1' from <ip>` | Door not registered, wrong ID, or another IP than `allowed_ip`: steps 3 and 6 |
-| `rejected ID='door 1' ...` | The door sends a different ID than the `code`: make them the same |
-| door shows "Unknown card" / "Card not assigned" | Connection is fine; register / assign the card (step 8) |
-| door shows "Card blocked" | The card was blocked; unblock it or give a new card |
-
-Door screens show English; for Korean, install with `--device-language ko` (or set
-`DEVICE_LANGUAGE=ko-kp` in `/etc/backend/backend.env` and restart the services), only if
-the door screens can show Korean letters.
-
-## 11. Connecting the till readers (payments)
-
-A **till reader** is a card reader plugged into a **seller's PC**. A small **till program** on
-that PC sends every card tap to the server and shows the server's answer. The developer
-pays with their card **and their PIN**, typed on the seller's screen.
-
-Unlike doors, a till reader is recognised by its **serial number (`SN`) and its `ID`**, not
-by its IP, so it can move to another PC without any change here.
-
-Do steps 1–2 once, on the server, in a terminal.
-
-### Step 1. Sign in from the terminal
-
-The same as step 1 of the door section (`SERVER`, `TOKEN` and the `api` helper).
-
-### Step 2. Register each till reader
-
-```bash
-api -X POST "$SERVER/api/v1/rfid/devices/" \
-  -d '{"code": "Reader1", "name": "Cafe till", "purpose": "TILL", "sn": "ZK2024A0001234"}'
-```
-
-- `code` must be exactly the **ID the till program sends** (`Reader1`, `Reader2`, …).
-- `sn` is the reader's **serial number**, exactly as the program sends it (often printed on
-  the reader). Each serial number can be registered once.
-- Keep serial numbers confidential (labels covered): with the SN and ID someone could send
-  fake taps. Nobody can be charged without the developer's PIN.
-
-### Step 3. Set up the till program on the seller's PC
-
-| Setting | Value |
-|---|---|
-Till programs talk to the server over **HTTPS** (port 443). The TCP port 9100 is only for
-the doors.
-
-| Setting | Value |
-|---|---|
-| Each tap | `POST https://<server-ip>/api/v1/rfid/events/`, `Content-Type: application/json`, body `{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "<card number>"}` |
-| Heartbeat | every 30 s: `POST https://<server-ip>/api/v1/rfid/device/heartbeat/`, body `{"SN": "ZK2024A0001234", "ID": "Reader1"}` |
-| Certificate | the program must trust the server's certificate (install the company's one on the server: "After installing", item 1; never switch verification off) |
-| Timeout | about 5 seconds per request |
-
-No API key is needed: `SN` + `ID` identify the reader. The heartbeat keeps the reader shown
-as **connected** (heard from in the last 2 minutes), so the seller's till page finds it
-automatically.
-
-**Firewall:** the seller's PC needs port **443** to the server (opened by `prepare-server.sh`).
-
-### Step 4. Check the reader is connected
-
-```bash
-api "$SERVER/api/v1/rfid/devices/?purpose=TILL"     # "online": true, "last_ip": the seller PC
-```
-
-### Step 5. Try a tap
-
-Tap a developer's card **without** a purchase open. The reader shows **"No open purchase for
-this reader"**: the connection works. (The seller has to start a purchase first.)
-
-### Step 6. A payment, start to finish
-
-1. The seller opens the **Till** page in the web app, picks the counter (the reader on this
-   PC is chosen automatically), adds the goods and clicks **Scan card to buy**.
-2. The developer taps their card. The till program gets the answer at once (below) and
-   shows **"Ada Kim - enter PIN"**; the seller's screen shows who tapped.
-3. The developer types their PIN on the seller's screen; the seller confirms. Done: the
-   screen shows the total and the developer's new balance.
-
-A tap is valid for **2 minutes**; a newer tap replaces it. The card number is never typed in.
-
-### What the server answers to a tap
-
-Every tap gets an answer right away, in the reply to the program's own request
-(status `201`). For a registered card with a purchase open:
-
-```json
-{"id": 10504, "result": "ACCEPTED", "accepted": true, "direction": "",
- "display_message": "Ada Kim - enter PIN",
- "developer": {"id": 23125, "employee_number": "E001", "full_name": "Ada Kim", "department": ""},
- "purchase": 6543, "event_time": "2026-10-02T05:10:28.440673Z", "client_event_id": ""}
-```
-
-**All the answers** (the reader shows `display_message`):
-
-| The card | `result` | `accepted` | Message on the reader | `purchase` |
-|---|---|---|---|---|
-| **Registered** to an active developer, purchase open | `ACCEPTED` | `true` | `Ada Kim - enter PIN` | the purchase id |
-| Registered, **no purchase open** | `ACCEPTED` | `true` | `No open purchase for this reader` | `null` |
-| Not registered | `UNKNOWN_CARD` | `false` | `Unknown card` | `null` |
-| Registered, not given to anyone | `UNASSIGNED_CARD` | `false` | `Card not assigned` | `null` |
-| Blocked (e.g. lost) | `BLOCKED_CARD` | `false` | `Card blocked` | `null` |
-| Retired | `RETIRED_CARD` | `false` | `Card no longer valid` | `null` |
-| Developer suspended or terminated | `INACTIVE_DEVELOPER` | `false` | `Not active - contact your manager` | `null` |
-
-**Wrong reader `SN` or `ID`:** status `401` with
-`{"error": {"code": "AUTHENTICATION_FAILED", "message": "Unknown till reader ID or serial number."}}`.
-After **10 wrong attempts from one PC within 15 minutes**, that PC is blocked for 15 minutes.
-
-**What the till program should do:**
-
-- Show the message; **green light / beep** when `accepted` is `true`, **red** when `false`.
-- `accepted: false` is still a **normal answer**: don't send the tap again.
-- No answer (server unreachable, timeout of about 5 s): show **"Offline - cannot pay right
-  now"** and **drop** the tap. Never store till taps to send later.
-- The seller's screen also shows every tap live, accepted or not.
-
-The messages are in English, or in Korean if the server was installed with
-`--device-language ko` (only if the reader's screen can show Korean letters).
-
-### If a till reader doesn't work
 
 | What you see | Meaning / fix |
 |---|---|
-| "Unknown till reader ID or serial number." | `ID` or `SN` differs from step 2 (check spelling), or the reader is deactivated |
-| No answer at all | The PC doesn't reach the server: address, port 443, firewall |
-| "No open purchase for this reader" | The seller hasn't started a purchase, or chose another reader on the till page |
-| The till page doesn't find the reader | No heartbeat: check step 3, and step 4 shows `"online": true` with the PC's IP |
-| "Unknown card" / "Card not assigned" | Register the card and assign it to the developer (door section, step 8) |
-| Certificate error in the till program | Install the company certificate on the server (and trust it on the PC) |
+| nothing in the log when tapping | The unit doesn't reach the server: step 4, network, firewall (step 6) |
+| `rejected ID='Door1' from <ip>` | That ID isn't registered with this IP: steps 3 and 4 |
+| `rejected ID='door 1' ...` | The unit sends a different ID than the `code`: make them the same |
+| `invalid frame from <ip>` | Wrong `TYPE` for the device (doors send `Input` / `Output`) or a bad UID |
+| `CARD_NO` for a developer's card | The card isn't registered: step 7 |
+| `CARD_DENIED` | The card isn't assigned, is blocked or retired, or the developer isn't active |
+
+## 11. Connecting the till readers and card assign readers
+
+These readers also use **TCP port 9100** (section 10). They are recognised by their **ID
+alone** (`Reader1`, `Master1`, …), from any address, so a reader can move to another PC
+without any change here. Each ID can be registered once.
+
+- A **till reader** is plugged into a **seller's PC**. The developer pays with their card
+  **and their PIN**, typed on the seller's screen.
+- A **card assign reader** is used by staff to read new cards: registering a card and
+  assigning it to a developer in the web app.
+
+Sign in as in step 1 of section 10.
+
+### Step 1. Register the readers
+
+```bash
+api "$SERVER/api/v1/sellers/"           # note each seller's "id"
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Reader1", "name": "Cafe till", "purpose": "TILL", "seller": 1}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Reader2", "name": "Shop till", "purpose": "TILL", "seller": 2}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Master1", "name": "Front desk", "purpose": "ENROLL"}'
+api -X POST "$SERVER/api/v1/rfid/devices/" -d '{"code": "Master2", "name": "Office", "purpose": "ENROLL"}'
+```
+
+(Or in the web app: Readers → New device, kind **Till reader** with its **Seller**, or **Card
+assign reader**.) `code` must be exactly the **ID the reader sends**. A till reader belongs
+to one seller (a seller can have several); only that seller's purchases use it.
+
+### Step 2. Point each reader at the server
+
+Server address and port `9100`, as for the doors (section 10, step 4). The reader sends:
+
+| Reader | Packet |
+|---|---|
+| Till reader | `$ID:Reader1,TYPE:Pay,UID=DC62B3E3$` (`ID:ID:Reader1` works too) |
+| Card assign reader | `$ID:Master1,TYPE:Master,UID=DC62B3E3$` |
+
+### Step 3. A payment, start to finish
+
+1. The seller opens the **Till** page in the web app, picks the counter (the seller's till
+   reader is used; a seller with several picks one), adds the goods and clicks **Scan card
+   to buy**.
+2. The developer taps their card within 2 minutes. The reader gets `CARD_OK`; the seller's
+   screen shows who tapped.
+3. The developer types their PIN on the seller's screen; the seller confirms. Done: the
+   screen shows the total and the developer's new balance.
+
+Only a purchase waiting for a card (**Scan card to buy** pressed, not yet tapped, at most 2
+minutes ago) takes a tap; old unpaid purchases never do. A tap is valid for **2 minutes**; to
+take another card, click **Scan card to buy** again. The card number is never typed in.
+
+### Step 4. Registering and assigning cards with a card assign reader
+
+In the web app, **Cards → New** (register only) or **Cards → Assign card**: pick the reader,
+tap the card. Its number appears on the page at once; a new card is registered by the tap.
+Then choose the developer, their building, and the developer types their PIN twice.
+
+### What the readers answer
+
+| Reader | The card | Answer |
+|---|---|---|
+| Till | Assigned to an active developer, and a purchase is waiting for a card on this reader | `CARD_OK` |
+| Till | Anything else (no purchase waiting, not registered, not assigned, blocked, retired, developer not active) | `CARD_NO` |
+| Card assign | Already registered | `CARD_OK` |
+| Card assign | New: registered by this tap | `CARD_NO` |
+| Any | The packet can't be used (unknown ID, wrong `TYPE`, bad UID) | `CARD_NO` and a log line |
+
+### If a reader doesn't work
+
+| What you see | Meaning / fix |
+|---|---|
+| nothing in `sudo journalctl -u backend-tcp -f` when tapping | The reader doesn't reach the server: address, port 9100, firewall |
+| `rejected ID='Reader1' from <ip>` | The ID isn't registered (or the reader is deactivated): step 1, check the spelling |
+| `invalid frame from <ip>` | Wrong `TYPE` (tills send `Pay`, card assign readers `Master`) or a bad UID |
+| Till: `CARD_NO` for a developer's card | No purchase is waiting: click **Scan card to buy** first (and check the purchase uses this reader); or register the card and assign it |
 
 ## 12. Keeping the offline server and the internet machine in step
 
@@ -659,7 +638,7 @@ internet machine                      USB stick                    offline serve
 | Port | Who listens | Reachable from |
 |---|---|---|
 | 443 (80 redirects) | nginx: the frontend, and the backend's `/api/v1`, `/admin`, `/ws`, `/health` | the company network |
-| 9100 | door devices (backend-tcp) | the doors |
+| 9100 | RFID devices: doors, till and card assign readers (backend-tcp) | the devices |
 | 3100 | the installed frontend (Next.js) | this server only |
 | 8001 | the backend for the frontend server (nginx, no TLS) | this server only |
 | 5432 / 5433 | PostgreSQL: installed system / development copies | this server only |
@@ -696,4 +675,4 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 | The site doesn't open from other PCs | Firewall (port 443) and the server IP: `hostname -I` |
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |
 | Door scans don't arrive | See section 10, "If a door doesn't work" |
-| A till reader gets no answer or an error | See section 11, "If a till reader doesn't work" |
+| A till or card assign reader gets no answer or `CARD_NO` | See section 11, "If a reader doesn't work" |

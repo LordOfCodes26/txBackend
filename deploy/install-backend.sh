@@ -300,8 +300,8 @@ Next steps (see docs/OFFLINE_DEPLOYMENT.md in $APP):
   1. Install your internal TLS certificate: /etc/backend/tls/cert.pem + key.pem, then
      systemctl reload nginx (the current one is self-signed).
   2. Set an off-site backup target (OFFSITE_DIR or OFFSITE_RSYNC) in /etc/backend/backup.conf.
-  3. Create buildings, then register the doors (Door1, Door2) and set each door's IP
-     (journalctl -u backend-tcp shows "rejected ID='Door1' from <ip>" after a tap).
-  4. Register the till readers (Reader1, ...) with their serial numbers.
-  5. Firewall: allow 443 (and 80), and 9100 only from the doors.
+  3. Create buildings, then register every door unit (code Door1, name Door1-1, its fixed
+     IP) - journalctl -u backend-tcp shows "rejected ID='Door1' from <ip>" after a tap.
+  4. Register the till readers (Reader1, ...) and card assign readers (Master1, ...).
+  5. Firewall: allow 443 (and 80), and 9100 only from the devices' network.
 EOF

@@ -173,3 +173,29 @@ def test_setting_the_ip_is_audited(auth_client, make_user, doors):
         {"allowed_ip": DOOR1_IP},
         {"allowed_ip": "10.20.0.21"},
     )
+
+
+def test_door_units_may_share_an_id_with_their_own_ips(auth_client, make_user, doors):
+    """Door1 with four units: each is a device with its own IP (they all send ID:Door1)."""
+    client = auth_client(make_user(Roles.MANAGER))
+    unit = {"code": "Door1", "building": doors["door1"].building_id, "purpose": "ATTENDANCE"}
+    r = client.post("/api/v1/rfid/devices/", unit | {"name": "Door1-2", "allowed_ip": "10.20.0.31"})
+    assert r.status_code == 201, r.json()
+    for ip, field in [(None, "allowed_ip"), ("10.20.0.31", "allowed_ip")]:
+        body = unit | ({"allowed_ip": ip} if ip else {})
+        r = client.post("/api/v1/rfid/devices/", body)
+        assert field in r.json()["error"]["details"], (ip, r.json())
+    # A till can't take a door's ID, and a door can't take a till's.
+    rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    r = client.post("/api/v1/rfid/devices/", {"code": "Door1", "purpose": "TILL"})
+    assert "code" in r.json()["error"]["details"]
+    r = client.post("/api/v1/rfid/devices/", unit | {"code": "Reader1", "allowed_ip": "10.20.0.40"})
+    assert "code" in r.json()["error"]["details"]
+    with pytest.raises(IntegrityError), transaction.atomic():
+        RFIDDevice.objects.create(
+            code="Door1",
+            building=doors["door1"].building,
+            allowed_ip="10.20.0.31",
+            api_key_hash="x",
+            api_key_prefix="y",
+        )

@@ -4,7 +4,8 @@ Enabled by TEST_CONSOLE_ENABLED (off by default; never enable it in production).
 The page itself is static; it talks to the normal API. Browsers can't open raw TCP
 connections, so door scans go through `door_scan` below, which skips only the transport
 authentication (fixed IP) and otherwise runs the same validation and pipeline as a real
-door. Till taps from the page use the real device endpoint with SN + ID.
+door. Till taps run the real pipeline on the purchase's reader (`SimulateTapView`), as if
+the seller pressed "Scan card to buy" and the developer tapped.
 """
 
 from django.conf import settings
@@ -88,11 +89,16 @@ def _purchase_for(request, purchase_id) -> Purchase:
     return purchase
 
 
-def _simulator_reader(user) -> RFIDDevice:
-    """A personal simulated till reader, so concurrent testers don't get each other's taps."""
+def _simulator_reader(user, seller) -> RFIDDevice:
+    """A personal simulated till reader of the purchase's seller, so concurrent testers
+    don't get each other's taps."""
     reader, created = RFIDDevice.objects.get_or_create(
-        code=f"SIM-{user.pk}",
-        defaults={"purpose": DevicePurpose.TILL, "name": f"Simulated reader of {user.email}"},
+        code=f"SIM-{user.pk}-{seller.pk}",
+        defaults={
+            "purpose": DevicePurpose.TILL,
+            "seller": seller,
+            "name": f"Simulated reader of {user.email}",
+        },
     )
     if created:
         reader.set_new_api_key()
@@ -142,8 +148,9 @@ class SimulateTapView(APIView):
             uid = assignment.card.uid
         reader = purchase.reader
         if reader is None:
-            reader = _simulator_reader(request.user)
+            reader = _simulator_reader(request.user, purchase.seller)
             purchases.set_reader(purchase=purchase, reader=reader)
+        purchases.wait_for_card(purchase=purchase)  # the seller pressed "Scan card to buy"
         event, _created = services.record_scan(device=reader, uid=normalize_uid(uid))
         return Response(ScanResponseSerializer(event).data, status=201)
 

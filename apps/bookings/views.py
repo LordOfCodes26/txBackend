@@ -169,8 +169,10 @@ class BookingCheckoutViewSet(
         "retrieve": ["purchase.view"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
+        "wait": ["purchase.create"],
+        "stop_waiting": ["purchase.create"],
     }
-    seller_actions = ("create", "retrieve", "confirm", "cancel")
+    seller_actions = ("create", "retrieve", "confirm", "cancel", "wait", "stop_waiting")
     scope_permission = "purchase.view"
     position_lookup = "service_position"
     building_lookup = "service_position__building"
@@ -235,3 +237,16 @@ class BookingCheckoutViewSet(
         """Abandon the checkout before paying."""
         purchase = purchase_services.cancel_purchase(actor=request.user, purchase=self.get_object())
         return self._respond(purchase)
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"])
+    def wait(self, request, pk=None):
+        """ "Scan card to book": the next tap on the desk's reader (within 2 minutes) goes to
+        this booking."""
+        return self._respond(purchase_services.wait_for_card(purchase=self.get_object()))
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="stop-waiting")
+    def stop_waiting(self, request, pk=None):
+        """The desk closed the scan dialog: taps no longer go to this booking."""
+        return self._respond(purchase_services.stop_waiting(purchase=self.get_object()))

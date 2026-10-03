@@ -221,17 +221,13 @@ RFID_HEARTBEAT_SECONDS = env.int("RFID_HEARTBEAT_SECONDS", default=30)
 RFID_DEVICE_OFFLINE_AFTER_SECONDS = env.int("RFID_DEVICE_OFFLINE_AFTER_SECONDS", default=120)
 # Maximum scans in one buffered batch upload.
 RFID_BATCH_MAX_EVENTS = env.int("RFID_BATCH_MAX_EVENTS", default=500)
-# Raw TCP listener for doors that can't speak HTTP ($-framed JSON; manage.py run_rfid_tcp).
+# Raw TCP listener for the devices ($ID:...,TYPE:...,UID=...$ frames; manage.py run_rfid_tcp).
 RFID_TCP_HOST = env("RFID_TCP_HOST", default="0.0.0.0")
 RFID_TCP_PORT = env.int("RFID_TCP_PORT", default=9100)
 RFID_TCP_MAX_FRAME_BYTES = env.int("RFID_TCP_MAX_FRAME_BYTES", default=2048)
 RFID_TCP_IDLE_TIMEOUT_SECONDS = env.int("RFID_TCP_IDLE_TIMEOUT_SECONDS", default=300)
 RFID_TCP_MAX_CONNECTIONS = env.int("RFID_TCP_MAX_CONNECTIONS", default=200)
 RFID_TCP_MAX_CONNECTIONS_PER_IP = env.int("RFID_TCP_MAX_CONNECTIONS_PER_IP", default=10)
-# Till readers authenticate by serial number (SN) + ID; lock an address out after this
-# many failures within RFID_SN_LOCKOUT_SECONDS.
-RFID_SN_MAX_FAILURES = env.int("RFID_SN_MAX_FAILURES", default=10)
-RFID_SN_LOCKOUT_SECONDS = env.int("RFID_SN_LOCKOUT_SECONDS", default=900)
 
 # --- Attendance -------------------------------------------------------------
 # How scans become IN/OUT: "none" (first/last scan only), "toggle" (alternate IN/OUT),
@@ -258,10 +254,6 @@ PURCHASE_CARD_PRESENTATION_SECONDS = env.int("PURCHASE_CARD_PRESENTATION_SECONDS
 # Allow the browser to send a typed card UID at checkout. Off: the card must come from the
 # counter's TILL device, so a seller cannot charge an arbitrary card number.
 PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", default=False)
-# Match a till reader to the seller's PC by network address (the reader and the browser run
-# on the same PC). Needs each PC to have its own address as seen by the server (true on a
-# LAN; not when many PCs share one router/NAT address).
-TILL_MATCH_READER_BY_IP = env.bool("TILL_MATCH_READER_BY_IP", default=True)
 
 # --- Backups ------------------------------------------------------------------
 # Written by scripts/backup/*.sh, read by GET /health/backup/.

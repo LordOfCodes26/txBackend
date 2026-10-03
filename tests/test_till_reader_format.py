@@ -34,7 +34,7 @@ def till(make_user):
     tea = Good.objects.create(
         service_position=counter, name="Tea", price="2.50", kind="SERVICE", track_stock=False
     )
-    _, key = rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    _, key = rfid.register_device(actor=None, code="Reader1", purpose="TILL", seller=seller)
     dev = Developer.objects.create(employee_number="E1", full_name="Ada Lovelace")
     RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04A2B3C4"), developer=dev)
     account = finance.open_account(dev)
@@ -57,6 +57,7 @@ def test_till_reader_payload_pays_for_the_open_purchase(till):
         "/api/v1/purchases/", {"service_position": till["counter"].pk, "reader": "Reader1"}
     ).json()["id"]
     seller.post(f"/api/v1/purchases/{pid}/items/", {"good": till["tea"].pk, "quantity": 2})
+    seller.post(f"/api/v1/purchases/{pid}/wait/")  # Scan card to buy
 
     r = till["reader"].post(
         EVENTS, {"ID": "Reader1", "TYPE": "pay", "UID": "04A2B3C4"}, format="json"

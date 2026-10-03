@@ -142,7 +142,7 @@ def test_device_texts_use_device_language_over_tcp(door, settings):
     assert handle_frame(frame, "10.20.0.11")["message"] == "어서 오십시오, 김철"
     unknown = json.dumps({"ID": "Door1", "Type": "in", "UID": "04FFFFFF"}).encode()
     assert handle_frame(unknown, "10.20.0.11")["message"] == "등록되지 않은 카드"
-    assert handle_frame(b"not json", "10.20.0.11")["error"] == "프레임이 옳은 JSON이 아닙니다."
+    assert handle_frame(b"{not json", "10.20.0.11")["error"] == "프레임이 옳은 JSON이 아닙니다."
 
 
 def test_device_texts_default_to_english_over_tcp(door):

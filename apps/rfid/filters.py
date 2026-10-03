@@ -49,7 +49,7 @@ class RFIDDeviceFilter(django_filters.FilterSet):
 
     class Meta:
         model = RFIDDevice
-        fields = ["is_active", "purpose", "building", "online"]
+        fields = ["is_active", "purpose", "building", "seller", "online"]
 
     def filter_online(self, queryset, name, value):
         from datetime import timedelta

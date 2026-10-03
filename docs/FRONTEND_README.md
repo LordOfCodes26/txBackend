@@ -510,25 +510,29 @@ tables. The developer list shows `birthday`.
 - Raw scans have `direction` (`IN` / `OUT` from doors, empty for till taps) and the
   `device_code`, so a live scan monitor can show "Door2 · in · Ada Lovelace".
 
-**Devices.** There are two kinds; the registration form depends on `purpose`:
+**Devices.** There are three kinds; the registration form depends on `purpose`. All the
+real devices send their taps over TCP (`$ID:...,TYPE:...,UID=...$`, see
+`DEVICE_INTEGRATION.md`):
 
-| `purpose` | Examples | Required / allowed fields | Authentication |
+| `purpose` | Examples | Required / allowed fields | Identified by |
 |---|---|---|---|
-| `ATTENDANCE` | `Door1` (Building 1), `Door2` (Building 2) | `code`, `building`; optional `allowed_ip`, `name`, `location` | Fixed IP (`allowed_ip`) or API key |
-| `TILL` | `Reader1`, `Reader2`, … | `code`, `sn` (the reader's serial number); no `building`, no `allowed_ip`. **Not tied to a counter or seller** | **Serial number + ID** (`sn`), or API key |
+| `ATTENDANCE` | door units `Door1` (Building 1), `Door2` (Building 2) | `code`, `building`, `allowed_ip`; optional `name`, `location`, `direction` | `code` + fixed IP (`allowed_ip`); several units share a `code`, each with its own IP |
+| `TILL` | `Reader1`, `Reader2`, … | `code`; no `building`, no `allowed_ip`. **Not tied to a counter or seller** | `code` alone (unique) |
+| `ENROLL` | card assign readers `Master1`, `Master2` | `code`; no `building`, no `allowed_ip` | `code` alone (unique) |
 
 ```json
-POST /rfid/devices/  {"code": "Door1", "purpose": "ATTENDANCE", "building": 1, "allowed_ip": "10.20.0.11"}
-POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL", "sn": "ZK2024A0001234"}
+POST /rfid/devices/  {"code": "Door1", "name": "Door1-1", "purpose": "ATTENDANCE", "building": 1, "allowed_ip": "192.168.100.151"}
+POST /rfid/devices/  {"code": "Reader2", "purpose": "TILL"}
+POST /rfid/devices/  {"code": "Master1", "purpose": "ENROLL"}
 ```
 
 - `code` must be exactly what the hardware sends as `ID` (`Door1`, `Reader2`, …).
-- Validation errors to show next to the fields: a till with a `building` or `allowed_ip`, an
-  attendance device with an `sn`, or a serial number already used by another device.
-- `sn` is shown in full (upper-case) and can be edited; changes are audited.
+- Validation errors to show next to the fields: a till or card assign reader with a
+  `building` or `allowed_ip`; a `code` already used (tills and card assign readers: any
+  device; door units: another unit with the same IP, or without an IP).
 - Doors that authenticate by IP don't need their key, but registration still returns one.
   Show it anyway (the door may support it later).
-- Device list columns: `code`, `purpose`, building (doors), `sn` (tills), `allowed_ip`
+- Device list columns: `code`, `name`, `purpose`, building (doors), `allowed_ip`
   (doors), `online` (heard from in the last 2 minutes), `last_seen_at`, `last_ip`,
   `app_version`, `is_active`.
   `?online=false` lists devices needing attention.
@@ -648,10 +652,11 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/purchases/detected-reader/` | own seller, or `purchase.create` | Readers connected to this PC: `{ip, reader, candidates}` (empty when none) |
-| GET | `/purchases/readers/` | own seller, or `purchase.create` | All till readers: `[{code, name, online, last_seen_at}]` |
-| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position, reader?}`: opens a DRAFT bucket. Without `reader`, the reader connected to this PC is used (detected by address) |
-| POST | `/purchases/{id}/reader/` | same | `{reader}`: switch the draft to another reader (a tap on the old one no longer counts) |
+| GET | `/purchases/readers/?service_position=` | own seller, or `purchase.create` | The till readers of the counter's seller: `[{code, name, online, last_seen_at}]` |
+| POST | `/purchases/` | own seller, or `purchase.create` | `{service_position, reader?}`: opens a DRAFT bucket. `reader` must be one of the seller's; left out, the seller's only reader is used (none when it has several) |
+| POST | `/purchases/{id}/reader/` | same | `{reader}`: switch the draft to another of the seller's readers (a tap on the old one no longer counts) |
+| POST | `/purchases/{id}/wait/` | same | **Scan card to buy**: the next tap on the purchase's reader within 2 minutes goes to this purchase (`waiting_for_card: true`). Needs a reader (`NO_TILL_READER`) |
+| POST | `/purchases/{id}/stop-waiting/` | same | The scan dialog was closed: taps no longer go to this purchase |
 | POST | `/purchases/{id}/items/` | same | `{good, quantity?}`; adding a good already in the bucket increases its quantity |
 | PATCH / DELETE | `/purchases/{id}/items/{item_id}/` | same | PATCH `{quantity}` / DELETE removes the line |
 | POST | `/purchases/{id}/confirm/` | own seller, or `purchase.confirm` | `{pin}` + `Idempotency-Key`: charges the card tapped on the counter's reader |
@@ -665,39 +670,32 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
 Every item/confirm/cancel call returns the **whole purchase**, so re-render the bucket from
 the response.
 
-**Which till reader?** A till reader is plugged into the **seller's PC** and can be moved to
-another PC, so it isn't tied to a counter. The server finds the reader **by the PC's network
-address**: the reader program and the seller's browser run on the same PC, so they reach the
-server from the same IP.
+**Which till reader?** Each till reader is **assigned to a seller** (Readers → the reader's
+**Seller**). A purchase uses one of its seller's readers: automatically when the seller has
+exactly one, otherwise the till screen lets the seller choose
+(`GET /purchases/readers/?service_position=`, then `reader` on `POST /purchases/` or
+`POST /purchases/{id}/reader/`). Remember the choice in the browser for the next purchase.
 
-- `GET /purchases/detected-reader/` → `{ip, reader, candidates}`: the readers **connected to
-  this PC** (same address, heard from in the last 2 minutes). Show them as the reader
-  choice. **If none is connected, show an empty choice** ("No till reader connected to this
-  PC") and don't offer taps. Refresh it when the till screen opens and every ~30 s.
-- `POST /purchases/` without `reader`: if exactly one reader is connected, the purchase uses
-  it. If none is connected yet, the **first tap from this PC's address** links the reader to
-  the purchase. You may still send `reader` explicitly (e.g. two readers on one PC).
-- A tap goes to the newest open purchase that names the reader, else to the newest open
-  purchase created from the same address. The purchase keeps `reader` afterwards, as the
-  record of which till was used.
-- **Limitation:** this needs each PC to reach the server with its own address, which is
-  true on the company LAN (production). It isn't true when many PCs share one router
-  address (e.g. reaching the staging server over the internet): there, with several sellers
-  active at once, a tap goes to the newer purchase. The PIN still prevents a wrong payment.
+**Which purchase gets a tap?** Only the one **waiting for a card** on that reader: the seller
+pressed **Scan card to buy** (`POST /purchases/{id}/wait/`) in the last 2 minutes. One
+purchase waits per reader (a new wait replaces the old one); old drafts never catch taps.
+The tap ends the wait: to take another card, scan again. The reader answers `CARD_OK` only
+when a waiting purchase took the tap, otherwise `CARD_NO`.
 
 **Till flow:**
 1. Seller picks their service position → `POST /purchases/` with `{service_position}` (plus
-   `reader` if the screen chose one); keep the returned `id`.
+   `reader` when the seller has several); keep the returned `id`.
 2. Seller adds goods → `POST /purchases/{id}/items/`. `total` and `unit_price` show current prices.
-3. The developer taps their card on the **till reader** of this PC. The reader sends the tap
-   straight to the server (see `DEVICE_INTEGRATION.md`), which attaches it to this purchase
-   (matched by reader or by this PC's address). **The web app never reads or sends card numbers.**
+3. The seller clicks **Scan card to buy** → `POST /purchases/{id}/wait/`, and the developer
+   taps their card on the purchase's **till reader**. The reader sends the tap straight to the
+   server (see `DEVICE_INTEGRATION.md`), which attaches it to this waiting purchase. Closing the
+   dialog → `POST /purchases/{id}/stop-waiting/`. **The web app never reads or sends card numbers.**
 4. Wait for the tap: listen on the counter's WebSocket (section *Realtime* below) for
    `card_tapped`, or as a fallback poll `GET /purchases/{id}/` every ~1 s until
    `presented_card` is set:
    `{"developer": {...}, "presented_at": "...", "expires_at": "..."}`. Show
-   "**Ada Lovelace** - enter your PIN". A newer tap replaces it; after `expires_at` it
-   becomes `null` again (ask for another tap).
+   "**Ada Lovelace** - enter your PIN". After `expires_at` it becomes `null` again (scan
+   again for another tap).
 5. The developer types their PIN. Mask it, never store or log it, and clear it after each
    attempt. `POST /purchases/{id}/confirm/` with `{"pin": "..."}` and a **new**
    `Idempotency-Key` generated when the confirm step starts; reuse it only for automatic

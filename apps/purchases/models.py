@@ -51,9 +51,11 @@ class Purchase(TimeStampedModel):
         related_name="purchases",
         limit_choices_to={"purpose": "TILL"},
     )
-    # Address of the seller's PC that created the purchase. A tap from a reader at the same
-    # address goes to this purchase when no purchase names that reader explicitly.
+    # Address of the seller's PC that created the purchase (for the record).
     client_ip = models.GenericIPAddressField(null=True, blank=True)
+    # Set when the seller presses "Scan card to buy": only a purchase waiting on its reader
+    # (within PURCHASE_CARD_PRESENTATION_SECONDS) receives the next tap. One per reader.
+    waiting_since = models.DateTimeField(null=True, blank=True)
     # Last card tapped on that reader while the purchase was a draft.
     presented_event = models.ForeignKey(
         "rfid.RFIDEvent",
@@ -102,7 +104,7 @@ class Purchase(TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=["reader", "status", "created_at"]),
-            models.Index(fields=["client_ip", "status", "created_at"]),
+            models.Index(fields=["reader", "status", "waiting_since"]),
             models.Index(fields=["seller", "status", "created_at"]),
             models.Index(fields=["developer", "confirmed_at"]),
         ]

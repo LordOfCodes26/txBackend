@@ -1,25 +1,33 @@
-"""Raw TCP listener for door devices that can't speak HTTP.
+"""Raw TCP listener for the RFID devices (doors, till readers, card assign readers).
 
-Wire format (both directions): JSON framed by a "$" at the start and the end:
+Every frame starts and ends with "$". The devices send text frames and get a text reply
+(CR LF terminated):
 
-    ${"ID": "Door1", "Type": "in", "UID": "04A2B3C4"}$
+    $ID:Door1,TYPE:Input,UID=DC62B3E3$      doors: TYPE Input (in) or Output (out)
+    $ID:Reader1,TYPE:Pay,UID=DC62B3E3$      till readers (`ID:ID:Reader1` is accepted too)
+    $ID:Master1,TYPE:Master,UID=DC62B3E3$   card assign readers
 
-A connection may carry one scan or many (kept open). The server answers every frame:
+    CARD_OK       accepted: door opens; till: a purchase waiting for a card took it;
+                  card assign: card known
+    CARD_NO       unknown card; till: also any card no purchase took; card assign: new
+                  card (registered by this tap)
+    CARD_DENIED   doors only: known card that may not enter (blocked, retired, not
+                  assigned, developer not active)
 
-    ${"result": "ACCEPTED", "accepted": true, "direction": "IN", "message": "Welcome, Ada"}$
-    ${"result": "ERROR", "accepted": false, "error": "..."}$
+A frame the server can't use (unknown device, bad UID, ...) gets CARD_NO and a log line.
+JSON frames (`${"ID": "Door1", "Type": "in", "UID": "04A2B3C4"}$`) are still accepted and
+get a JSON reply (`${"result": "ACCEPTED", "accepted": true, ...}$`).
 
-Authentication:
-- doors: fixed IP. The peer address must equal the `allowed_ip` of the active ATTENDANCE
-  device whose code is `ID`. There is no proxy in front of this port, so the peer address
-  is the real sender.
-- till readers: the frame carries `SN` (serial number) and `ID`; both must match an
-  active TILL device (same rule as key-less HTTP, with lockout after repeated failures).
-- card assign readers: `${"SN": "...", "ID": "Master", "UID": "..."}$`; the SN must match
-  an active ENROLL device.
+A connection may carry one scan or many (kept open). Bytes outside frames (such as CR LF)
+are ignored.
+
+Identification (no keys): a door by its `ID` and the sender's address, which must equal
+the device's `allowed_ip`; several door units may share an ID, each registered as its own
+device with its own IP. There is no proxy in front of this port, so the peer address is the
+real sender. Till and card assign readers by their `ID` alone.
 
 Scans go through `services.record_scan`, exactly like HTTP scans (attendance, occupancy,
-live dashboard events).
+live dashboard events, till payments).
 """
 
 import asyncio
@@ -83,20 +91,101 @@ def _error(message: str) -> dict:
         return {"result": "ERROR", "accepted": False, "error": str(message)}
 
 
-def handle_frame(frame: bytes, peer_ip: str) -> dict:
-    """Authenticate, validate and record one frame. Returns the reply payload, with texts
-    in DEVICE_LANGUAGE."""
+# Replies to the devices' text frames (each followed by CR LF).
+CARD_OK = "CARD_OK"  # accepted: the door opens, the till takes the card, the card is known
+CARD_NO = "CARD_NO"  # unknown card (or the frame/device could not be used)
+CARD_DENIED = "CARD_DENIED"  # doors: a known card that may not enter
+
+
+def parse_text_frame(frame: bytes) -> dict[str, str]:
+    """`ID:Door1,TYPE:Input,UID=DC62B3E3` -> {"id": "Door1", "type": "Input", "uid": ...}.
+
+    Each field is `key:value` or `key=value`. Some readers repeat the key in the value
+    (`ID:ID:Reader1`); the repeat is dropped.
+    """
+    fields = {}
+    for part in frame.decode("utf-8", errors="replace").split(","):
+        cut = min((i for i in (part.find(":"), part.find("=")) if i >= 0), default=-1)
+        if cut < 0:
+            continue
+        key, value = part[:cut].strip().lower(), part[cut + 1 :].strip()
+        while value[: len(key) + 1].lower() in (f"{key}:", f"{key}="):
+            value = value[len(key) + 1 :].strip()
+        if key:
+            fields[key] = value
+    return fields
+
+
+def handle_frame(frame: bytes, peer_ip: str) -> dict | str:
+    """Authenticate, validate and record one frame.
+
+    A JSON frame (`{...}`) gets a JSON reply payload, with texts in DEVICE_LANGUAGE. A
+    text frame (`ID:...,TYPE:...,UID=...`) gets CARD_OK, CARD_NO or CARD_DENIED.
+    """
     with translation.override(settings.DEVICE_LANGUAGE):
-        return _handle_frame(frame, peer_ip)
+        if frame.lstrip().startswith(b"{"):
+            return _handle_json_frame(frame, peer_ip)
+        return _handle_text_frame(frame, peer_ip) + "\r\n"
 
 
-def _handle_frame(frame: bytes, peer_ip: str) -> dict:
+def _record(device, data: dict, peer_ip: str):
+    """Validate `data` for `device` and record the scan. Returns the event."""
+    from . import services
+    from .serializers import ScanSerializer
+
+    serializer = ScanSerializer(data=data, context={"device": device})
+    serializer.is_valid(raise_exception=True)
+    event, _created = services.record_scan(
+        device=device,
+        uid=serializer.validated_data["uid"],
+        event_time=serializer.validated_data.get("event_time"),
+        client_event_id=serializer.validated_data["client_event_id"],
+        direction=serializer.validated_data["direction"],
+        source_ip=peer_ip,
+    )
+    return event
+
+
+def _handle_text_frame(frame: bytes, peer_ip: str) -> str:
     from rest_framework.exceptions import ValidationError
 
-    from . import services
-    from .authentication import SNLockedOut, device_for_sn
-    from .models import DevicePurpose, RFIDDevice
-    from .serializers import ScanResponseSerializer, ScanSerializer
+    from .authentication import device_for_id
+    from .models import DevicePurpose, RFIDCard, ScanResult, normalize_uid
+
+    fields = parse_text_frame(frame)
+    code = fields.get("id", "")
+    device = device_for_id(code, peer_ip)
+    if device is None:
+        logger.warning("RFID TCP: rejected ID=%r from %s (no such device/IP)", code, peer_ip)
+        return CARD_NO
+    known = RFIDCard.objects.filter(uid=normalize_uid(fields.get("uid", ""))).exists()
+    try:
+        event = _record(device, fields, peer_ip)
+    except ValidationError as exc:
+        logger.warning("RFID TCP: invalid frame from %s (%s): %s", peer_ip, code, exc.detail)
+        return CARD_NO
+
+    if device.purpose == DevicePurpose.ENROLL:
+        return CARD_OK if known else CARD_NO  # a new card is registered by this tap
+    if device.purpose == DevicePurpose.TILL:
+        from apps.purchases.models import Purchase
+
+        # OK only when a purchase waiting for a card took the tap.
+        taken = Purchase.objects.filter(presented_event=event).exists()
+        return CARD_OK if taken else CARD_NO
+    if event.result in (ScanResult.ACCEPTED, ScanResult.DUPLICATE):
+        return CARD_OK
+    if device.purpose == DevicePurpose.ATTENDANCE and event.result != ScanResult.UNKNOWN_CARD:
+        return CARD_DENIED  # blocked, retired, not assigned or developer not active
+    return CARD_NO
+
+
+def _handle_json_frame(frame: bytes, peer_ip: str) -> dict:
+    from rest_framework.exceptions import ValidationError
+
+    from .authentication import device_for_id
+    from .models import DevicePurpose
+    from .serializers import ScanResponseSerializer
 
     try:
         data = json.loads(frame.decode("utf-8"))
@@ -109,41 +198,14 @@ def _handle_frame(frame: bytes, peer_ip: str) -> dict:
     code = str(fields.get("id") or fields.get("device_id") or "").strip()
     if not code:
         return _error(_("Missing ID."))
-    sn = str(fields.get("sn") or "").strip()
-    if sn:
-        # Till readers: serial number + ID. Card assign readers: serial number + "Master".
-        try:
-            device = device_for_sn(code, sn, peer_ip)
-        except SNLockedOut:
-            return _error(_("Too many failed attempts; try again later."))
-        if device is None:
-            logger.warning("RFID TCP: rejected till ID=%r from %s (wrong SN)", code, peer_ip)
-            return _error(_("Unknown till reader ID or serial number."))
-    else:
-        # Doors: fixed IP + ID.
-        device = RFIDDevice.objects.filter(
-            code__iexact=code,
-            allowed_ip=peer_ip,
-            is_active=True,
-            purpose=DevicePurpose.ATTENDANCE,
-        ).first()
-        if device is None:
-            logger.warning("RFID TCP: rejected ID=%r from %s (no matching door/IP)", code, peer_ip)
-            return _error(_("No door device with this ID is registered for this IP."))
-
-    serializer = ScanSerializer(data=data, context={"device": device})
+    device = device_for_id(code, peer_ip)
+    if device is None:
+        logger.warning("RFID TCP: rejected ID=%r from %s (no such device/IP)", code, peer_ip)
+        return _error(_("No door device with this ID is registered for this IP."))
     try:
-        serializer.is_valid(raise_exception=True)
+        event = _record(device, data, peer_ip)
     except ValidationError as exc:
         return _error(json.dumps(exc.detail, default=str))
-    event, _created = services.record_scan(
-        device=device,
-        uid=serializer.validated_data["uid"],
-        event_time=serializer.validated_data.get("event_time"),
-        client_event_id=serializer.validated_data["client_event_id"],
-        direction=serializer.validated_data["direction"],
-        source_ip=peer_ip,
-    )
     body = ScanResponseSerializer(event).data
     reply = {
         "result": body["result"],
@@ -207,12 +269,13 @@ class DoorTCPServer:
                     writer.write(encode(_error(_("Frame too large."))))
                     break
                 for frame in frames:
+                    text = not frame.lstrip().startswith(b"{")
                     try:
                         reply = await self._handle_frame(frame, peer_ip)
                     except Exception:
                         logger.exception("RFID TCP: error handling frame from %s", peer_ip)
-                        reply = _error(_("Server error."))
-                    writer.write(encode(reply))
+                        reply = CARD_NO + "\r\n" if text else _error(_("Server error."))
+                    writer.write(reply.encode() if isinstance(reply, str) else encode(reply))
                     await writer.drain()
         except (ConnectionResetError, BrokenPipeError):
             pass

@@ -127,14 +127,14 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    (a second disk, NAS or another machine). See `BACKUP_AND_RESTORE.md`.
 5. **Devices** (see `DEVICE_INTEGRATION.md`):
    - Buildings: create `Building 1` / `Building 2`.
-   - Doors: register `Door1` / `Door2` with their building, point them at
-     `<server-ip>:9100`, tap a card, read each door's IP from
-     `journalctl -u backend-tcp` (`rejected ID='Door1' from …`) and set it as `allowed_ip`.
-   - Till readers: register `Reader1`, `Reader2`, … with their serial number (`sn`); the
-     till program on each seller's PC sends `{"SN","ID","TYPE":"pay","UID"}` and a heartbeat
-     every 30 s to `https://<server-ip>/api/v1/rfid/events/`.
+   - All devices send `$ID:...,TYPE:...,UID=...$` packets to `<server-ip>:9100` (TCP) and
+     get `CARD_OK` / `CARD_NO` / `CARD_DENIED` back.
+   - Doors: register every unit (`Door1` with name `Door1-1` … and its own fixed IP as
+     `allowed_ip`, plus its building). Units of one door share the ID.
+   - Till readers (`Reader1`, …) and card assign readers (`Master1`, …): register the ID;
+     they're recognised by it alone.
 6. **Firewall:** allow only what's needed, e.g. 22 (admin), 443 (and 80 for the redirect),
-   and 9100 from the doors' addresses.
+   and 9100 from the devices' network.
 7. **Data:** developers (or import them), sellers, positions and goods. The demo data
    commands (`seed_*`) refuse to run here (they need `DEBUG=true`), by design.
 

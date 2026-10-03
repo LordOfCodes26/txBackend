@@ -101,14 +101,9 @@
     <h2>Till <span><span id="tillDot" class="dot"></span><small id="tillState" class="muted">no counter</small></span></h2>
     <div class="row">
       <div><label>Counter</label><select id="counter"></select></div>
-      <div><label>Till reader connected to this PC</label><select id="readerSel"></select></div>
+      <div><label>Till reader (the seller's)</label><select id="readerSel"></select></div>
     </div>
     <small class="muted" id="readerInfo"></small>
-    <div class="row" style="margin-top:6px">
-      <div><label>Test tool: plug a reader into this PC</label><select id="simReader"></select></div>
-      <button class="secondary" id="simConnect">Simulate connecting it</button>
-      <button class="secondary" id="refreshReader">Refresh</button>
-    </div>
     <div class="row" style="margin-top:10px">
       <button id="newPurchase">New purchase</button>
       <button class="danger" id="cancelPurchase" disabled>Cancel</button>
@@ -129,10 +124,10 @@
     <input id="simUid" placeholder="04FFFFFF" autocomplete="off">
     <div class="row" style="margin-top:10px">
       <button id="simTap" disabled>Simulate tap (no reader needed)</button>
-      <button class="secondary" id="tap" disabled>Tap on connected reader</button>
+      <button class="secondary" id="tap" disabled>Tap on the purchase's reader</button>
     </div>
     <small class="muted">"Simulate tap" works on any open purchase: it uses your personal simulated reader
-      if the purchase has none. "Tap on connected reader" sends exactly what a real reader sends.</small>
+      if the purchase has none. "Tap on the purchase's reader" presses Scan card to buy and taps, through the real pipeline.</small>
     <div id="presented" class="status hidden"></div>
     <div id="pinBox" class="hidden">
       <label>Developer's PIN</label>
@@ -151,7 +146,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const API = "/api/v1";
-const state = { access: null, refresh: null, me: null, cards: [], doors: [], readers: [],
+const state = { access: null, refresh: null, me: null, cards: [], doors: [], readers: [], sellerReaders: [],
                 positions: [], purchase: null, occWs: null, tillWs: null };
 
 // ---------------------------------------------------------------- helpers
@@ -264,8 +259,6 @@ async function loadData() {
   const cardOpts = state.cards.map(c => `<option value="${esc(c.uid)}">${esc(c.current_assignment.developer.full_name)} (${esc(c.current_assignment.developer.employee_number)}) · ${esc(c.uid)}</option>`).join("");
   $("doorCard").innerHTML = cardOpts;
   loadTestCards("");
-  $("simReader").innerHTML = state.readers.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.name ? " · " + esc(r.name) : ""}</option>`).join("");
-  showReader();
   $("counter").innerHTML = `<option value="">— choose —</option>` + state.positions
     .map(p => `<option value="${p.id}">${esc(p.seller_detail.name)} / ${esc(p.name)}</option>`).join("");
   log("info", `${state.doors.length} doors, ${state.readers.length} till readers, ${state.cards.length} cards, ${state.positions.length} counters`);
@@ -318,18 +311,16 @@ $("loadInside").onclick = async () => {
 };
 
 // ---------------------------------------------------------------- till
-// Only readers connected to this PC (same address, heard from recently) can be used.
-const reader = () => state.readers.find(r => r.code === $("readerSel").value) || null;
+// Till readers are assigned to a seller: only the counter's seller's readers can be used.
+const reader = () => state.sellerReaders.find(r => r.code === $("readerSel").value) || null;
 async function showReader() {
-  const d = await api("/purchases/detected-reader/");
-  const list = d.ok ? d.data.candidates : [];
-  const keep = $("readerSel").value;
-  $("readerSel").innerHTML = list.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.online ? "" : " (offline)"}</option>`).join("");
-  if (list.some(r => r.code === keep)) $("readerSel").value = keep;
-  const ip = d.ok ? d.data.ip : "?";
-  $("readerInfo").textContent = list.length
-    ? `Connected to this PC (${ip}): ${list.map(r => r.code).join(", ")}`
-    : `No till reader connected to this PC (${ip}).`;
+  const counter = $("counter").value;
+  const d = counter ? await api(`/purchases/readers/?service_position=${counter}`) : { ok: true, data: [] };
+  state.sellerReaders = d.ok ? d.data : [];
+  $("readerSel").innerHTML = state.sellerReaders.map(r => `<option value="${esc(r.code)}">${esc(r.code)}${r.online ? "" : " (offline)"}</option>`).join("");
+  $("readerInfo").textContent = !counter ? "" : state.sellerReaders.length
+    ? `The seller's till readers: ${state.sellerReaders.map(r => r.code).join(", ")}`
+    : "This seller has no till reader: assign one under Readers (a simulated tap uses SIM-…).";
   renderBucket();
 }
 $("readerSel").onchange = async () => {
@@ -339,17 +330,8 @@ $("readerSel").onchange = async () => {
     if (r.ok) { state.purchase = r.data; renderBucket(); }
   }
 };
-$("refreshReader").onclick = showReader;
-$("simConnect").onclick = async () => {
-  // What the reader program on this PC does: a heartbeat with its SN + ID, no key.
-  const rd = state.readers.find(r => r.code === $("simReader").value);
-  const r = await fetch(`${API}/rfid/device/heartbeat/`, { method: "POST",
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ SN: rd.sn, ID: rd.code, app_version: "test-console" }) });
-  log(r.ok ? "reader" : "error", `${rd.code} heartbeat from this PC → ${r.status}`);
-  await showReader();
-};
 $("counter").onchange = async () => {
-  state.purchase = null; renderBucket();
+  state.purchase = null; await showReader();
   const goods = $("counter").value ? await getAll(`/goods/?service_position=${$("counter").value}&is_active=true&page_size=200`) : [];
   $("goods").innerHTML = goods.filter(g => g.kind !== "RENTAL").map(g =>
     `<button data-id="${g.id}" title="${g.track_stock ? "stock " + g.quantity : "no stock tracking"}">${esc(g.name)} · ${esc(g.price)}</button>`).join("")
@@ -411,13 +393,12 @@ $("cancelPurchase").onclick = async () => {
 };
 $("tap").onclick = async () => {
   const rd = reader();
-  // Exactly what the reader sends: no Authorization header, SN + ID identify it.
+  // What the reader sends over TCP ($ID:Reader1,TYPE:Pay,UID=...$), run on the purchase's reader.
   const uid = payingUid();
   if (!uid) return alert("Choose a developer or enter a UID");
-  const body = { SN: rd.sn, ID: rd.code, TYPE: "pay", UID: uid };
-  const r = await fetch(`${API}/rfid/events/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await r.json();
-  log(r.ok ? "reader" : "error", `${rd.code} tap → ${r.status}`, r.ok ? { result: data.result, message: data.display_message, purchase: data.purchase } : data);
+  const r = await api("/test-console/simulate-tap/", { method: "POST", body: { purchase: state.purchase.id, uid } });
+  const data = r.data;
+  log(r.ok ? "reader" : "error", `${rd.code} tap`, r.ok ? { result: data.result, message: data.display_message, purchase: data.purchase } : data);
   if (!r.ok) status($("presented"), false, esc(errText(data)));
 };
 // ---------------------------------------------------------------- simulated taps

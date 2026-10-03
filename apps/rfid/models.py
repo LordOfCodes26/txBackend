@@ -100,14 +100,8 @@ class RFIDCardAssignment(models.Model):
 class DevicePurpose(models.TextChoices):
     ATTENDANCE = "ATTENDANCE", "Attendance reader"
     TILL = "TILL", "Till card reader (program on a seller's computer)"
-    # Sends {"SN": ..., "ID": "Master", "UID": ...}: staff tap a card to fill the assign form.
+    # Sends $ID:Master1,TYPE:Master,UID=...$: staff tap a card to fill the assign form.
     ENROLL = "ENROLL", "Card assign reader"
-
-
-# Readers that authenticate by serial number (`SN`) instead of a key or fixed IP.
-SN_PURPOSES = (DevicePurpose.TILL, DevicePurpose.ENROLL)
-# Card assign readers send this fixed `ID`; their SN alone identifies them.
-ENROLL_ID = "master"
 
 
 class Building(TimeStampedModel):
@@ -144,7 +138,13 @@ class RFIDDevice(TimeStampedModel):
     password hash adds nothing); the plaintext is shown once on creation/rotation.
     """
 
-    code = models.CharField(max_length=50, unique=True, help_text="e.g. READER-001")
+    code = models.CharField(
+        max_length=50,
+        help_text=(
+            "The ID the device sends, e.g. Door1, Reader1, Master1. Several door units may "
+            "share one ID; each is then a separate device told apart by its allowed IP."
+        ),
+    )
     name = models.CharField(max_length=100, blank=True)
     location = models.CharField(max_length=255, blank=True)
     purpose = models.CharField(
@@ -167,13 +167,13 @@ class RFIDDevice(TimeStampedModel):
         related_name="devices",
         help_text="ATTENDANCE devices: the building whose door this is (for occupancy).",
     )
-    sn = models.CharField(
-        max_length=100,
+    # TILL readers: the seller (store) they belong to. Only that seller's purchases use them.
+    seller = models.ForeignKey(
+        "sellers.Seller",
+        on_delete=models.PROTECT,
+        null=True,
         blank=True,
-        help_text=(
-            "TILL and card assign readers: serial number they send as `SN`. Tills also send "
-            'their code as `ID`; card assign readers send `ID` "Master".'
-        ),
+        related_name="till_readers",
     )
     allowed_ip = models.GenericIPAddressField(
         null=True,
@@ -201,10 +201,23 @@ class RFIDDevice(TimeStampedModel):
                 name="rfid_only_attendance_devices_use_ip_auth",
             ),
             models.CheckConstraint(
-                condition=Q(purpose__in=SN_PURPOSES) | Q(sn=""),
-                name="rfid_only_sn_devices_have_sn",
+                condition=Q(purpose=DevicePurpose.TILL) | Q(seller__isnull=True),
+                name="rfid_only_tills_have_a_seller",
             ),
-            models.UniqueConstraint("sn", condition=~Q(sn=""), name="rfid_device_sn_unique"),
+            # Tills and card assign readers are identified by their ID alone.
+            models.UniqueConstraint(
+                "code",
+                condition=~Q(purpose=DevicePurpose.ATTENDANCE),
+                name="rfid_device_code_unique",
+            ),
+            # Door units sharing an ID are told apart by IP (a missing IP counts once).
+            models.UniqueConstraint(
+                "code",
+                "allowed_ip",
+                condition=Q(purpose=DevicePurpose.ATTENDANCE),
+                nulls_distinct=False,
+                name="rfid_door_code_ip_unique",
+            ),
         ]
         verbose_name = "RFID device"
 
@@ -230,19 +243,6 @@ class RFIDDevice(TimeStampedModel):
 
     def check_api_key(self, key: str) -> bool:
         return secrets.compare_digest(self.api_key_hash, self.hash_key(key))
-
-    @staticmethod
-    def normalize_sn(sn: str) -> str:
-        return str(sn).strip().upper()
-
-    def check_sn(self, sn: str) -> bool:
-        if not self.sn or not sn:
-            return False
-        return secrets.compare_digest(self.sn.encode(), self.normalize_sn(sn).encode())
-
-    def save(self, *args, **kwargs):
-        self.sn = self.normalize_sn(self.sn or "")
-        super().save(*args, **kwargs)
 
 
 class ScanDirection(models.TextChoices):

@@ -169,43 +169,48 @@ or `C:\Management\manage.cmd createsuperuser`.
 
 ## 8. Doors (attendance)
 
-The door listener already runs on **TCP 9100**, but it **rejects every door until it is
-registered**: a door is accepted only when its **ID** (`Door1`, `Door2`, ...) is registered
-**and** its scans come from that door's **fixed IP**.
+All devices (doors, till readers, card assign readers) send to **TCP 9100** on this PC. Each
+tap is one packet between `$` signs, answered with `CARD_OK`, `CARD_NO` or (doors)
+`CARD_DENIED`. The listener **rejects every device until it is registered**.
+
+A door usually has **several units** (readers) that all send the same ID, e.g. Door1-1 …
+Door1-4 at 192.168.100.151 … .154, all sending `$ID:Door1,TYPE:Input,UID=...$` (or
+`TYPE:Output` on the way out). Each unit is registered as **its own device**: the same code,
+its own name and its own fixed IP.
 
 1. In the web app, **Buildings > New**: create each building.
-2. Set each door device (its own settings screen or tool) to send to **`<this PC's IP>`, port
-   `9100`**, with its ID (`Door1`, ...). Give each door a fixed IP.
-3. Tap a card on the door. It's rejected, and `C:\Management\logs\mgmt-tcp.out.log` shows
-   `rejected ID='Door1' from 192.168.1.51`: that's the door's IP.
-4. **Readers > New**: code `Door1` (exactly the door's ID), purpose **Attendance**, its
-   building, direction (in/out, or as the door reports it) and **allowed IP** `192.168.1.51`.
-5. **Cards > New** for each card, then open the card and **assign** it to its developer.
-6. Tap again: the door shows **Welcome, <name>**, and **Occupancy** in the web app updates live.
+2. Set each door unit (its own settings screen or tool) to send to **`<this PC's IP>`, port
+   `9100`**, with its door ID (`Door1`, ...). Give each unit a fixed IP.
+3. **Readers > New** for every unit: kind **Attendance door**, code `Door1` (exactly the ID
+   the unit sends), name `Door1-1`, its building and **allowed IP** `192.168.100.151`.
+4. Tap a card: an unregistered card gets `CARD_NO`, so the connection works. A unit that
+   isn't registered with its IP shows up in `C:\Management\logs\mgmt-tcp.out.log` as
+   `rejected ID='Door1' from 192.168.100.155`: that's the address the unit really uses.
+5. **Cards > Assign card** (with a card assign reader, section 9) or **Cards > New**, then
+   assign each card to its developer and their building.
+6. Tap again: the unit answers `CARD_OK` (the door opens), and **Occupancy** in the web app
+   updates live. A registered card that may not enter (not assigned, blocked, developer not
+   active) gets `CARD_DENIED`.
 
 The full device protocol is in `C:\Management\backend\current\docs\DEVICE_INTEGRATION.md`.
 
-## 9. Till readers (payments)
+## 9. Till readers and card assign readers
 
-A **till reader** is a card reader on a **seller's PC**, with a small till program that sends
-every tap to this server. The developer pays with their card **and their PIN**.
+These readers also send to **TCP 9100** and are recognised by their **ID alone** (each ID
+once), so they can move to another PC.
 
-1. **Readers > New**: code `Reader1` (exactly the ID the till program sends), purpose
-   **Till**, and its **serial number** (`SN`, often printed on the reader). Keep serial
-   numbers confidential.
-2. Set up the till program on the seller's PC:
-
-| Setting | Value |
-|---|---|
-| Each tap | `POST https://<server-ip>/api/v1/rfid/events/`, `Content-Type: application/json`, body `{"SN": "ZK2024A0001234", "ID": "Reader1", "TYPE": "pay", "UID": "<card number>"}` |
-| Heartbeat | every 30 s: `POST https://<server-ip>/api/v1/rfid/device/heartbeat/`, body `{"SN": "...", "ID": "Reader1"}` |
-| Certificate | install `management-root-ca.crt` on the seller's PC (section 5); never switch verification off |
-| Timeout | about 5 seconds per request |
-
-3. Tap a card without a purchase open: the reader shows **"No open purchase for this
-   reader"**, so the connection works.
-4. A payment: the seller opens the till page, picks the counter, adds goods, clicks **Scan
-   card to buy**; the developer taps and types their PIN; the seller confirms.
+1. **Readers > New**: code `Reader1` (exactly the ID the reader sends), kind **Till reader**
+   and its **Seller** (a seller can have several readers); code `Master1`, kind **Card assign
+   reader**.
+2. Point each reader at **`<this PC's IP>`, port `9100`**. They send
+   `$ID:Reader1,TYPE:Pay,UID=...$` and `$ID:Master1,TYPE:Master,UID=...$`.
+3. A payment: the seller opens the till page, picks the counter (the seller's reader is
+   used), adds goods, clicks **Scan card to buy**; within 2 minutes the developer taps (the
+   reader gets `CARD_OK`) and types their PIN; the seller confirms. A tap with no purchase
+   waiting, or a card that can't pay, gets `CARD_NO`.
+4. A card assign reader: in the web app, **Cards > New** or **Cards > Assign card**, pick the
+   reader and tap the card. A new card gets `CARD_NO` and is registered by the tap; a known
+   card gets `CARD_OK`.
 
 ## 10. Backups and restoring
 

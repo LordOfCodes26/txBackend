@@ -100,6 +100,9 @@ class PurchaseSerializer(serializers.ModelSerializer):
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
     items = PurchaseItemSerializer(many=True, read_only=True)
     presented_card = serializers.SerializerMethodField()
+    waiting_for_card = serializers.SerializerMethodField(
+        help_text="The seller pressed Scan card to buy: the next tap on the reader goes here."
+    )
     total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
     balance_after = serializers.DecimalField(
@@ -124,6 +127,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "total",
             "currency",
             "presented_card",
+            "waiting_for_card",
             "developer",
             "card_uid",
             "balance_after",
@@ -143,6 +147,12 @@ class PurchaseSerializer(serializers.ModelSerializer):
         if purchase.presented_at < timezone.now() - window:
             return None
         return PresentedCardSerializer(purchase).data
+
+    def get_waiting_for_card(self, purchase) -> bool:
+        if purchase.status != "DRAFT" or purchase.waiting_since is None:
+            return False
+        window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+        return purchase.waiting_since >= timezone.now() - window
 
     def get_total(self, purchase) -> str:
         if purchase.total is not None:
@@ -178,8 +188,8 @@ class PurchaseCreateSerializer(serializers.Serializer):
     reader = ReaderField(
         required=False,
         allow_null=True,
-        help_text="Code of the till reader plugged into this PC (e.g. Reader2); taps on it "
-        "pay this purchase.",
+        help_text="Code of one of the seller's till readers (e.g. Reader2). Left out: the "
+        "seller's only reader, if it has exactly one.",
     )
 
     def validate_service_position(self, position):
@@ -203,10 +213,10 @@ class TillReaderSerializer(serializers.Serializer):
     last_seen_at = serializers.DateTimeField()
 
 
-class DetectedReaderSerializer(serializers.Serializer):
-    ip = serializers.IPAddressField(allow_null=True)
-    reader = TillReaderSerializer(allow_null=True)
-    candidates = TillReaderSerializer(many=True)
+class ReadersQuerySerializer(PurchaseCreateSerializer):
+    """`?service_position=`: the counter whose seller's readers are listed."""
+
+    reader = None
 
 
 class ItemAddSerializer(serializers.Serializer):

@@ -1,5 +1,3 @@
-from django.conf import settings
-from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
@@ -7,7 +5,7 @@ from rest_framework.exceptions import AuthenticationFailed
 
 from common.middleware import client_ip
 
-from .models import ENROLL_ID, DevicePurpose, RFIDDevice
+from .models import DevicePurpose, RFIDDevice
 
 
 def device_for_key(key: str) -> RFIDDevice | None:
@@ -105,77 +103,22 @@ def _device_code_from_body(request) -> str:
     return ""
 
 
-class SNLockedOut(Exception):
-    pass
+def device_for_id(code: str, ip: str | None) -> RFIDDevice | None:
+    """The active device a key-less TCP frame comes from, or None.
 
-
-def _fail_key(ip: str) -> str:
-    return f"rfid-sn-fail:{ip}"
-
-
-def device_for_sn(code: str, sn: str, ip: str | None) -> RFIDDevice | None:
-    """The active TILL device named `code` whose serial number is `sn`, or, when `code` is
-    "Master", the active card assign (ENROLL) reader with serial number `sn`. Else None.
-
-    Serial numbers are not secret-grade (often printed on the device), so repeated
-    failures from one address lock that address out (RFID_SN_MAX_FAILURES within
-    RFID_SN_LOCKOUT_SECONDS) to stop guessing.
+    Doors (ATTENDANCE): `ID` plus the sender's address. Several door units may share an
+    ID; each is its own device with its own `allowed_ip`. Till and card assign readers:
+    their `ID` alone (unique among them), from any address.
     """
-    key = _fail_key(ip or "unknown")
-    if cache.get(key, 0) >= settings.RFID_SN_MAX_FAILURES:
-        raise SNLockedOut()
-    if code.strip().lower() == ENROLL_ID:
-        device = RFIDDevice.objects.filter(
-            sn=RFIDDevice.normalize_sn(sn), is_active=True, purpose=DevicePurpose.ENROLL
-        ).first()
-    else:
-        device = RFIDDevice.objects.filter(
-            code__iexact=code, is_active=True, purpose=DevicePurpose.TILL
-        ).first()
-    if device is not None and device.check_sn(sn):
-        return device
-    try:
-        cache.incr(key)
-    except ValueError:
-        cache.set(key, 1, timeout=settings.RFID_SN_LOCKOUT_SECONDS)
-    return None
-
-
-def _body_value(request, *names: str) -> str:
-    try:
-        data = request.data
-    except Exception:  # unparsable body: let the view report it
-        return ""
-    if not hasattr(data, "items"):
-        return ""
-    for key, value in data.items():
-        if str(key).lower() in names and isinstance(value, str | int):
-            return str(value).strip()
-    return ""
-
-
-class DeviceSNAuthentication(BaseAuthentication):
-    """Key-less authentication for till readers: the body carries `SN` (the reader's serial
-    number) and `ID` (its code, or "Master" for card assign readers). Used only when there
-    is no Authorization header."""
-
-    def authenticate(self, request):
-        if get_authorization_header(request) or request.method != "POST":
-            return None
-        sn = _body_value(request, "sn")
-        if not sn:
-            return None
-        code = _body_value(request, "id", "device_id")
-        try:
-            device = device_for_sn(code, sn, client_ip(request))
-        except SNLockedOut as exc:
-            raise AuthenticationFailed(_("Too many failed attempts; try again later.")) from exc
-        if device is None:
-            raise AuthenticationFailed(_("Unknown till reader ID or serial number."))
-        return DevicePrincipal(device), device
-
-    def authenticate_header(self, request):
-        return "Device"
+    code = code.strip()
+    if not code:
+        return None
+    active = RFIDDevice.objects.filter(code__iexact=code, is_active=True)
+    if ip:
+        door = active.filter(purpose=DevicePurpose.ATTENDANCE, allowed_ip=ip).first()
+        if door is not None:
+            return door
+    return active.exclude(purpose=DevicePurpose.ATTENDANCE).first()
 
 
 class DeviceAuthenticationScheme(OpenApiAuthenticationExtension):

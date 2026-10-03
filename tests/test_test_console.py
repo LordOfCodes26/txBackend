@@ -117,7 +117,8 @@ def test_simulated_tap_pays_a_purchase_end_to_end(till):
     assert (r.json()["result"], r.json()["purchase"]) == ("ACCEPTED", pid)
     assert r.json()["display_message"] == "Ada Lovelace - enter PIN"
     purchase = Purchase.objects.get(pk=pid)
-    assert purchase.reader.code == f"SIM-{till['seller_user'].pk}"
+    assert purchase.reader.code == f"SIM-{till['seller_user'].pk}-{purchase.seller_id}"
+    assert purchase.reader.seller_id == purchase.seller_id  # simulated readers are the seller's
 
     detail = till["client"].get(f"/api/v1/purchases/{pid}/").json()
     assert detail["presented_card"]["developer"]["full_name"] == "Ada Lovelace"
@@ -155,7 +156,8 @@ def test_testers_get_separate_simulated_readers(till, make_user):
 
 
 def test_explicit_reader_is_kept(till):
-    rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    cafe = Seller.objects.get(name="Cafe")
+    rfid.register_device(actor=None, code="Reader1", purpose="TILL", seller=cafe)
     pid = new_purchase(till, reader="Reader1")
     till["client"].post(TAP, {"purchase": pid, "developer": till["dev"].pk})
     assert Purchase.objects.get(pk=pid).reader.code == "Reader1"

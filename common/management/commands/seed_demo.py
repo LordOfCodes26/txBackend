@@ -63,9 +63,8 @@ class Command(BaseCommand):
                 code="Reader1",
                 name="Till reader 1",
                 purpose="TILL",
-                sn="SN-DEMO-0001",
             )
-            self.stdout.write(self.style.SUCCESS("Demo till reader Reader1 (SN-DEMO-0001)."))
+            self.stdout.write(self.style.SUCCESS("Demo till reader Reader1."))
             created = True
         if not AccountTransaction.objects.filter(idempotency_key__startswith="demo-").exists():
             self._deposits()

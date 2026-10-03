@@ -37,7 +37,7 @@ DEVICE_FIELDS = [
     "direction",
     "building",
     "allowed_ip",
-    "sn",
+    "seller",
     "is_active",
 ]
 REJECTED_DEVELOPER_STATUSES = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
@@ -285,7 +285,7 @@ def record_scan(
         Q(last_seen_at__isnull=True) | Q(last_seen_at__lt=now - timedelta(seconds=60))
     ).update(last_seen_at=now)
     if source_ip and device.last_ip != source_ip:
-        # Till readers are matched to sellers' PCs by address, so keep it current.
+        # Shown on the reader list (where the device was last heard from).
         RFIDDevice.objects.filter(pk=device.pk).update(last_ip=source_ip, last_seen_at=now)
     if device.purpose == DevicePurpose.TILL and event.result == ScanResult.ACCEPTED:
         # Separate transaction, after the card lock is released: checkout locks the

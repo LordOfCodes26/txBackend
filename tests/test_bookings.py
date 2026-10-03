@@ -759,9 +759,14 @@ def test_checkout_input_validation(desk, world):
 def test_booking_with_a_tapped_card(desk, world, settings):
     """Production flow: no typed UID; the developer taps the card on the desk's reader."""
     settings.PURCHASE_ALLOW_MANUAL_CARD_UID = False
-    reader, _key = rfid.register_device(actor=None, code="Reader1", purpose="TILL")
+    reader, _key = rfid.register_device(
+        actor=None, code="Reader1", purpose="TILL", seller=world.position.seller
+    )
     pid, r = add_booking(desk, world, tomorrow_at(10), reader="Reader1")
     assert r.json()["reader"] == "Reader1"
+    rfid.record_scan(device=reader, uid=UID)  # before Scan card to book: not taken
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"] is None
+    assert desk.post(f"{CHECKOUT}{pid}/wait/").json()["waiting_for_card"] is True
 
     r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
     assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"

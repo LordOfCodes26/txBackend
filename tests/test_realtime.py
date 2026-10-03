@@ -30,7 +30,7 @@ def shop(make_user):
     tea = Good.objects.create(
         service_position=counter, name="Tea", price="2.50", kind="SERVICE", track_stock=False
     )
-    till, till_key = rfid.register_device(actor=None, code="TILL-1", purpose="TILL")
+    till, till_key = rfid.register_device(actor=None, code="TILL-1", purpose="TILL", seller=seller)
     dev = Developer.objects.create(employee_number="E1", full_name="Ada Lovelace")
     card = RFIDCard.objects.create(uid="04AA000001")
     RFIDCardAssignment.objects.create(card=card, developer=dev)
@@ -85,6 +85,7 @@ def test_seller_screen_receives_tap_update_and_confirmation(shop):
             actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
         )
         await sync_to_async(purchases.add_item)(purchase=purchase, good=shop["tea"], quantity=2)
+        await sync_to_async(purchases.wait_for_card)(purchase=purchase)
         updated = await comm.receive_json_from(timeout=3)
         assert updated["type"] == "purchase_updated"
         assert (updated["data"]["id"], updated["data"]["total"]) == (purchase.pk, "5.00")
@@ -113,9 +114,10 @@ def test_seller_screen_receives_tap_update_and_confirmation(shop):
 
 def test_rejected_tap_is_pushed_too(shop):
     RFIDCard.objects.filter(pk=shop["card"].pk).update(status="BLOCKED")
-    purchases.create_purchase(
+    purchase = purchases.create_purchase(
         actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
     )
+    purchases.wait_for_card(purchase=purchase)
     ticket = issue_ticket(shop["seller_user"])
 
     async def scenario():
@@ -208,6 +210,7 @@ def test_purchase_succeeds_when_realtime_is_down(shop, monkeypatch):
         actor=shop["seller_user"], service_position=shop["counter"], reader=shop["till"]
     )
     purchases.add_item(purchase=purchase, good=shop["tea"], quantity=1)
+    purchases.wait_for_card(purchase=purchase)
     rfid.record_scan(device=shop["till"], uid=shop["card"].uid)
     purchase, created = purchases.confirm_purchase(
         actor=shop["seller_user"], purchase=purchase, pin=PIN, idempotency_key=str(uuid.uuid4())

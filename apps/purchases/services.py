@@ -26,6 +26,7 @@ from .exceptions import (
     DeveloperNotActive,
     GoodNotAvailable,
     ManualCardEntryDisabled,
+    NoTillReader,
     PurchaseEmpty,
     PurchaseNotDraft,
     SelfPurchaseForbidden,
@@ -73,17 +74,18 @@ def _ensure_seller_active(position: ServicePosition) -> None:
 # --- Draft bucket -------------------------------------------------------------------
 
 
-def readers_at(ip: str | None):
-    """Till readers connected to the PC at `ip`: active, last heard from that address, and
-    heard from recently (within RFID_DEVICE_OFFLINE_AFTER_SECONDS). Most recent first."""
+def seller_readers(seller_id: int):
+    """The till readers assigned to this seller (store), active ones only."""
     from apps.rfid.models import DevicePurpose, RFIDDevice
 
-    if not ip:
-        return RFIDDevice.objects.none()
-    since = timezone.now() - timedelta(seconds=settings.RFID_DEVICE_OFFLINE_AFTER_SECONDS)
     return RFIDDevice.objects.filter(
-        purpose=DevicePurpose.TILL, is_active=True, last_ip=ip, last_seen_at__gte=since
-    ).order_by("-last_seen_at")
+        purpose=DevicePurpose.TILL, is_active=True, seller_id=seller_id
+    ).order_by("code")
+
+
+def _check_reader(seller_id: int, reader) -> None:
+    if reader is not None and reader.seller_id != seller_id:
+        raise ValidationError({"reader": [_("This till reader belongs to another seller.")]})
 
 
 @transaction.atomic
@@ -95,13 +97,15 @@ def create_purchase(
     client_ip: str | None = None,
     kind: str = PurchaseKind.SALE,
 ) -> Purchase:
-    """`reader` may be given explicitly. Otherwise, if exactly one till reader was last heard
-    from the seller's PC address, it's used; else the first tap from that address decides."""
+    """`reader` must be one of the seller's till readers. Left out, the seller's only reader
+    is used; a seller with several chooses one (`set_reader`) before scanning."""
     _ensure_seller_active(service_position)
-    if reader is None and settings.TILL_MATCH_READER_BY_IP and client_ip:
-        detected = list(readers_at(client_ip)[:2])
-        if len(detected) == 1:
-            reader = detected[0]
+    seller_id = service_position.seller_id
+    _check_reader(seller_id, reader)
+    if reader is None:
+        own = list(seller_readers(seller_id)[:2])
+        if len(own) == 1:
+            reader = own[0]
     return Purchase.objects.create(
         seller=service_position.seller,
         service_position=service_position,
@@ -114,15 +118,57 @@ def create_purchase(
 
 @transaction.atomic
 def set_reader(*, purchase: Purchase, reader) -> Purchase:
-    """Switch the till reader of a draft (e.g. the reader was plugged into another PC).
-    A card tapped on the previous reader no longer counts."""
+    """Use another of the seller's till readers for this draft. A card tapped on the
+    previous reader no longer counts, and the purchase stops waiting for a card."""
     purchase = _lock_draft(purchase)
+    _check_reader(purchase.seller_id, reader)
     if purchase.reader_id != getattr(reader, "pk", None):
         purchase.reader = reader
         purchase.presented_event = None
         purchase.presented_at = None
-        purchase.save(update_fields=["reader", "presented_event", "presented_at", "updated_at"])
+        purchase.waiting_since = None
+        purchase.save(
+            update_fields=[
+                "reader",
+                "presented_event",
+                "presented_at",
+                "waiting_since",
+                "updated_at",
+            ]
+        )
         notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
+    return purchase
+
+
+@transaction.atomic
+def wait_for_card(*, purchase: Purchase) -> Purchase:
+    """The seller pressed "Scan card to buy": the next tap on the purchase's reader (within
+    PURCHASE_CARD_PRESENTATION_SECONDS) goes to this purchase. Any other purchase waiting on
+    the same reader stops waiting."""
+    purchase = _lock_draft(purchase)
+    if purchase.reader_id is None:
+        raise NoTillReader()
+    displaced = list(
+        Purchase.objects.select_for_update()
+        .filter(reader_id=purchase.reader_id, waiting_since__isnull=False)
+        .exclude(pk=purchase.pk)
+    )
+    for other in displaced:  # its screen learns it no longer gets the tap
+        other.waiting_since = None
+        other.save(update_fields=["waiting_since", "updated_at"])
+        notify_purchase(other.pk, other.service_position_id, "purchase_updated")
+    purchase.waiting_since = timezone.now()
+    purchase.save(update_fields=["waiting_since", "updated_at"])
+    return purchase
+
+
+@transaction.atomic
+def stop_waiting(*, purchase: Purchase) -> Purchase:
+    """The seller closed the scan dialog: taps no longer go to this purchase."""
+    purchase = _lock_draft(purchase)
+    if purchase.waiting_since is not None:
+        purchase.waiting_since = None
+        purchase.save(update_fields=["waiting_since", "updated_at"])
     return purchase
 
 
@@ -201,40 +247,38 @@ def cancel_purchase(*, actor, purchase: Purchase) -> Purchase:
 
 
 def present_card(event) -> Purchase | None:
-    """Attach an accepted TILL scan to the newest draft purchase using that reader.
+    """Attach an accepted TILL tap to the purchase waiting for a card on that reader.
 
-    The seller's screen polls the purchase and shows who tapped; checkout then charges
-    that card. A newer tap replaces an older one. Stale scans (e.g. replayed late) are
-    ignored. Returns the purchase, or None when no open draft uses this reader.
+    Only a purchase whose seller pressed "Scan card to buy" in the last
+    PURCHASE_CARD_PRESENTATION_SECONDS gets the tap; old drafts never do. The tap ends the
+    wait (to tap again, the seller scans again). Stale taps (replayed late) are ignored.
+    Returns the purchase, or None when no purchase is waiting on this reader.
     """
     window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
     if event.event_time < timezone.now() - window:
         return None
     with transaction.atomic():
-        purchase = draft_for_reader(event.device_id, event.source_ip, lock=True)
+        purchase = draft_for_reader(event.device_id, lock=True)
         if purchase is None:
             return None
         purchase.presented_event = event
         purchase.presented_at = timezone.now()
-        fields = ["presented_event", "presented_at", "updated_at"]
-        if purchase.reader_id is None:
-            purchase.reader_id = event.device_id  # matched by address: remember the reader
-            fields.append("reader")
-        purchase.save(update_fields=fields)
+        purchase.waiting_since = None
+        purchase.save(
+            update_fields=["presented_event", "presented_at", "waiting_since", "updated_at"]
+        )
     return purchase
 
 
-def draft_for_reader(reader_id: int, source_ip: str | None, lock: bool = False):
-    """The open purchase a tap on this reader belongs to:
-    1. the newest draft that names this reader, else
-    2. the newest draft without a reader created from the same address as the tap
-       (the reader and the seller's browser are on the same PC)."""
+def draft_for_reader(reader_id: int, lock: bool = False):
+    """The draft purchase waiting for a card on this reader (at most one), or None."""
+    since = timezone.now() - timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
     qs = Purchase.objects.select_for_update() if lock else Purchase.objects.all()
-    drafts = qs.filter(status=PurchaseStatus.DRAFT).order_by("-created_at", "-id")
-    purchase = drafts.filter(reader_id=reader_id).first()
-    if purchase is None and source_ip and settings.TILL_MATCH_READER_BY_IP:
-        purchase = drafts.filter(reader__isnull=True, client_ip=source_ip).first()
-    return purchase
+    return (
+        qs.filter(status=PurchaseStatus.DRAFT, reader_id=reader_id, waiting_since__gte=since)
+        .order_by("-waiting_since", "-id")
+        .first()
+    )
 
 
 def _presented_uid(purchase: Purchase) -> str:

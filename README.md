@@ -57,17 +57,16 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
   user with `rfid.device.manage` and `purchase.*` (e.g. the superuser). It lets you:
   - simulate door scans (`in`/`out`, any card or UID, random scans and bursts) and watch the
     live building counts, door feed and who is inside;
-  - run the till: pick a counter, build a purchase, tap a card on the counter's reader (the
-    page sends exactly what the reader sends: `SN`, `ID`, `TYPE: pay`, `UID`), enter the
-    PIN and confirm.
+  - run the till: pick a counter, build a purchase, tap a card on the purchase's reader,
+    enter the PIN and confirm.
 
-  Door scans go through `/api/v1/test-console/door-scan/`, which skips only the door's IP
-  check (browsers can't open raw TCP connections); everything after that is the real
-  pipeline.
+  Browsers can't open raw TCP connections, so the page goes through
+  `/api/v1/test-console/door-scan/` and `/simulate-tap/`, which skip only the transport
+  (the device's IP / TCP connection); everything after that is the real pipeline.
 - **Sample data:** `manage.py seed_demo`, then `manage.py seed_more` (DEBUG only; each part
   runs once). This adds 200 more developers with cards and balances, a demo PIN for every
-  demo developer (printed once), Demo Bakery, till readers `Reader1`–`Reader4`
-  (`SN-DEMO-0001`…`0004`), today's door scans and past purchases. Then
+  demo developer (printed once), Demo Bakery, till readers `Reader1`–`Reader4`,
+  today's door scans and past purchases. Then
   `manage.py seed_attendance_month [--days 30]` adds a month of realistic door history up
   to yesterday (arrivals, lunch breaks, building changes, absences, forgotten scan-outs) and
   rebuilds attendance from it; days that already have attendance are skipped. Then

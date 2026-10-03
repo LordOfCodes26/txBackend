@@ -55,3 +55,8 @@ class ManualCardEntryDisabled(DomainError):
     default_detail = _(
         "Typed card numbers are not accepted; the card must be tapped on the reader."
     )
+
+
+class NoTillReader(PurchaseConflict):
+    code = "NO_TILL_READER"
+    default_detail = _("Choose one of the seller's till readers first.")

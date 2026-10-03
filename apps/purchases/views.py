@@ -19,12 +19,12 @@ from .filters import PurchaseFilter
 from .models import Purchase, PurchaseKind, PurchaseStatus
 from .serializers import (
     ConfirmSerializer,
-    DetectedReaderSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
     PerformanceSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
+    ReadersQuerySerializer,
     SetReaderSerializer,
     TillReaderSerializer,
 )
@@ -41,7 +41,8 @@ SELLER_ACTIONS = (
     "item",
     "set_reader",
     "readers",
-    "detected_reader",
+    "wait",
+    "stop_waiting",
     "confirm",
     "cancel",
 )
@@ -81,7 +82,8 @@ class PurchaseViewSet(
         "item": ["purchase.create"],
         "set_reader": ["purchase.create"],
         "readers": ["purchase.create"],
-        "detected_reader": ["purchase.create"],
+        "wait": ["purchase.create"],
+        "stop_waiting": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
         "me": [],
@@ -168,41 +170,47 @@ class PurchaseViewSet(
         ]
         return Response(PerformanceSerializer(data, many=True).data)
 
-    @extend_schema(responses=DetectedReaderSerializer)
-    @action(detail=False, methods=["get"], url_path="detected-reader")
-    def detected_reader(self, request):
-        """Till readers connected to the caller's PC (same network address, heard from in the
-        last 2 minutes). `reader` is set when exactly one is connected; `candidates` is empty
-        when none is."""
-        ip = client_ip(request)
-        candidates = list(services.readers_at(ip)[:5])
-        return Response(
-            DetectedReaderSerializer(
-                {
-                    "ip": ip,
-                    "reader": candidates[0] if len(candidates) == 1 else None,
-                    "candidates": candidates,
-                }
-            ).data
-        )
-
-    @extend_schema(responses=TillReaderSerializer(many=True))
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("service_position", int, required=True, description="Counter id."),
+        ],
+        responses=TillReaderSerializer(many=True),
+    )
     @action(detail=False, methods=["get"])
     def readers(self, request):
-        """Till readers to choose from ("which reader is plugged into this PC?")."""
-        from .serializers import _readers
-
-        return Response(TillReaderSerializer(_readers().order_by("code"), many=True).data)
+        """The till readers of the counter's seller, to choose from on the till page."""
+        serializer = ReadersQuerySerializer(
+            data=request.query_params, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        position = serializer.validated_data["service_position"]
+        readers = services.seller_readers(position.seller_id)
+        return Response(TillReaderSerializer(readers, many=True).data)
 
     @extend_schema(request=SetReaderSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="reader")
     def set_reader(self, request, pk=None):
-        """Use another till reader for this draft (the reader moved to another PC)."""
+        """Use another of the seller's till readers for this draft."""
         purchase = self.get_object()
         serializer = SetReaderSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         services.set_reader(purchase=purchase, reader=serializer.validated_data["reader"])
         return self._respond(purchase)
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"])
+    def wait(self, request, pk=None):
+        """ "Scan card to buy": the next tap on the purchase's reader (within 2 minutes) goes
+        to this purchase; another purchase waiting on that reader stops waiting."""
+        services.wait_for_card(purchase=self.get_object())
+        return self._respond(self.get_object())
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="stop-waiting")
+    def stop_waiting(self, request, pk=None):
+        """The seller closed the scan dialog: taps no longer go to this purchase."""
+        services.stop_waiting(purchase=self.get_object())
+        return self._respond(self.get_object())
 
     @extend_schema(request=ItemAddSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="items")

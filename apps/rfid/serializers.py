@@ -11,8 +11,6 @@ from apps.developers.serializers import DeveloperSummarySerializer
 from apps.finance.serializers import NewPinSerializer
 
 from .models import (
-    ENROLL_ID,
-    SN_PURPOSES,
     Building,
     DevicePurpose,
     RFIDCard,
@@ -121,12 +119,7 @@ class RFIDCardAssignmentSerializer(serializers.ModelSerializer):
 
 class RFIDDeviceSerializer(serializers.ModelSerializer):
     online = serializers.BooleanField(source="is_online", read_only=True)
-    sn = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        max_length=100,
-        help_text="TILL readers: the serial number they send as `SN` (stored upper-case).",
-    )
+    seller_name = serializers.CharField(source="seller.name", read_only=True, default=None)
 
     class Meta:
         model = RFIDDevice
@@ -139,7 +132,8 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "building",
             "direction",
             "allowed_ip",
-            "sn",
+            "seller",
+            "seller_name",
             "is_active",
             "online",
             "last_seen_at",
@@ -170,22 +164,48 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"allowed_ip": [_("Only ATTENDANCE door devices may authenticate by IP.")]}
             )
-        sn = RFIDDevice.normalize_sn(attrs.get("sn", "") or "")
-        if "sn" in attrs:
-            attrs["sn"] = sn
-        if sn and purpose not in SN_PURPOSES:
+        seller = attrs.get("seller", getattr(self.instance, "seller", None))
+        if purpose != DevicePurpose.TILL and seller is not None:
             raise serializers.ValidationError(
-                {"sn": [_("Only till and card assign readers authenticate by serial number.")]}
+                {"seller": [_("Only till readers belong to a seller.")]}
             )
-        if sn:
-            clash = RFIDDevice.objects.filter(sn=sn)
-            if self.instance is not None:
-                clash = clash.exclude(pk=self.instance.pk)
-            if clash.exists():
-                raise serializers.ValidationError(
-                    {"sn": [_("Another device already has this serial number.")]}
-                )
+        code = attrs.get("code", getattr(self.instance, "code", ""))
+        self._check_code(code.strip(), purpose, allowed_ip)
         return attrs
+
+    def _check_code(self, code, purpose, allowed_ip):
+        """Tills and card assign readers are found by their ID alone, so it is unique.
+        Door units may share an ID (several devices of one door), each with its own IP."""
+        same = RFIDDevice.objects.filter(code__iexact=code)
+        if self.instance is not None:
+            same = same.exclude(pk=self.instance.pk)
+        if (
+            purpose != DevicePurpose.ATTENDANCE
+            or same.exclude(purpose=DevicePurpose.ATTENDANCE).exists()
+        ):
+            if same.exists():
+                raise serializers.ValidationError(
+                    {"code": [_("Another device already uses this ID.")]}
+                )
+            return
+        if not same.exists():
+            return
+        if not allowed_ip:
+            raise serializers.ValidationError(
+                {
+                    "allowed_ip": [
+                        _("Door units that share an ID need their own fixed IP to tell them apart.")
+                    ]
+                }
+            )
+        if same.filter(allowed_ip__isnull=True).exists():
+            raise serializers.ValidationError(
+                {"code": [_("Another unit with this ID has no fixed IP yet; give it one first.")]}
+            )
+        if same.filter(allowed_ip=allowed_ip).exists():
+            raise serializers.ValidationError(
+                {"allowed_ip": [_("Another unit of this door already uses this IP.")]}
+            )
 
 
 class BuildingSerializer(serializers.ModelSerializer):
@@ -267,6 +287,9 @@ class RFIDEventSerializer(serializers.ModelSerializer):
 _DEVICE_FIELD_ALIASES = {"id": "device_id", "direction": "type"}
 
 PAY = "PAY"
+MASTER = "MASTER"
+# The devices' own words for the scan type: TYPE:Input / TYPE:Output at doors.
+_TYPE_ALIASES = {"INPUT": "IN", "OUTPUT": "OUT"}
 
 
 class DirectionField(serializers.ChoiceField):
@@ -274,17 +297,20 @@ class DirectionField(serializers.ChoiceField):
         super().__init__(choices=ScanDirection.choices, **kwargs)
 
     def to_internal_value(self, data):
-        return super().to_internal_value(str(data).strip().upper())
+        value = str(data).strip().upper()
+        return super().to_internal_value(_TYPE_ALIASES.get(value, value))
 
 
 class ScanTypeField(serializers.ChoiceField):
-    """`in` / `out` from building doors, `pay` from till readers (case-insensitive)."""
+    """`in`/`input` and `out`/`output` from building doors, `pay` from till readers,
+    `master` from card assign readers (case-insensitive)."""
 
     def __init__(self, **kwargs):
-        super().__init__(choices=[*ScanDirection.values, PAY], **kwargs)
+        super().__init__(choices=[*ScanDirection.values, PAY, MASTER], **kwargs)
 
     def to_internal_value(self, data):
-        return super().to_internal_value(str(data).strip().upper())
+        value = str(data).strip().upper()
+        return super().to_internal_value(_TYPE_ALIASES.get(value, value))
 
 
 class ScanSerializer(serializers.Serializer):
@@ -317,22 +343,29 @@ class ScanSerializer(serializers.Serializer):
 
     def validate_device_id(self, value):
         device = self.context["device"]
-        if device.purpose == DevicePurpose.ENROLL and value.strip().lower() == ENROLL_ID:
-            return value
         if value.strip().lower() != device.code.lower():
             raise serializers.ValidationError(_("Does not match the authenticated device."))
         return value
 
     def validate(self, attrs):
-        """The scan type must fit the device: doors send in/out, till readers send pay.
-        A mismatch usually means a device is configured with another device's key."""
+        """The scan type must fit the device: doors send in/out, till readers send pay,
+        card assign readers send master. A mismatch usually means a device is configured
+        with another device's ID or key."""
         kind = attrs.pop("type", "")
         purpose = self.context["device"].purpose
         if purpose == DevicePurpose.TILL and kind not in ("", PAY):
             raise serializers.ValidationError({"type": [_("Till readers send `pay`.")]})
         if purpose == DevicePurpose.ENROLL:
+            if kind not in ("", MASTER):
+                raise serializers.ValidationError(
+                    {"type": [_("Card assign readers send `master`.")]}
+                )
             attrs["direction"] = ""  # card assign readers only read the UID
             return attrs
+        if kind == MASTER:
+            raise serializers.ValidationError(
+                {"type": [_("Only card assign readers send `master`.")]}
+            )
         if purpose == DevicePurpose.ATTENDANCE and kind == PAY:
             raise serializers.ValidationError({"type": [_("Door devices send `in` or `out`.")]})
         attrs["direction"] = kind if kind in ScanDirection.values else ""
@@ -390,7 +423,7 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         if obj.result in ("ACCEPTED", "DUPLICATE") and obj.developer is not None:
             if obj.device.purpose == DevicePurpose.TILL:
                 if self.get_purchase(obj) is None:
-                    return _("No open purchase for this reader")
+                    return _("No purchase is waiting for a card")
                 return _("%(name)s - enter PIN") % {"name": obj.developer.full_name}
             if obj.direction == "OUT":
                 return _("Goodbye, %(name)s") % {"name": obj.developer.full_name}
@@ -411,13 +444,7 @@ class ScanResponseSerializer(serializers.ModelSerializer):
 
 class HeartbeatSerializer(serializers.Serializer):
     app_version = serializers.CharField(max_length=50, required=False, allow_blank=True)
-    ID = serializers.CharField(
-        required=False, help_text="Device code; needed for key-less doors and till readers."
-    )
-    SN = serializers.CharField(
-        required=False,
-        help_text="Till and card assign readers without a key: their serial number.",
-    )
+    ID = serializers.CharField(required=False, help_text="Device code; needed for key-less doors.")
 
 
 class BatchScanItemSerializer(serializers.Serializer):

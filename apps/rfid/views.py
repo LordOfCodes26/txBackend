@@ -24,7 +24,6 @@ from . import services
 from .authentication import (
     DeviceAuthentication,
     DeviceIPAuthentication,
-    DeviceSNAuthentication,
 )
 from .filters import (
     RFIDCardAssignmentFilter,
@@ -222,7 +221,7 @@ class RFIDDeviceViewSet(
 ):
     """Deactivate a reader with `PATCH {"is_active": false}`; its key stops working."""
 
-    queryset = RFIDDevice.objects.select_related("building")
+    queryset = RFIDDevice.objects.select_related("building", "seller")
     serializer_class = RFIDDeviceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
@@ -292,7 +291,6 @@ class RFIDEventViewSet(
     authentication_classes = [
         *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
         DeviceAuthentication,
-        DeviceSNAuthentication,
         DeviceIPAuthentication,
     ]
     required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
@@ -437,7 +435,7 @@ def _int_param(request, name: str) -> int | None:
 class DeviceHeartbeatView(DeviceLanguageMixin, APIView):
     """Devices call this every RFID_HEARTBEAT_SECONDS with `Authorization: Device <key>`."""
 
-    authentication_classes = [DeviceAuthentication, DeviceSNAuthentication, DeviceIPAuthentication]
+    authentication_classes = [DeviceAuthentication, DeviceIPAuthentication]
     permission_classes = [IsRFIDDevice]
 
     @extend_schema(request=HeartbeatSerializer, responses=DeviceConfigSerializer)
