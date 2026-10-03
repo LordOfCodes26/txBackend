@@ -5,6 +5,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import record_audit
 from apps.developers.models import DeveloperStatus
@@ -33,6 +34,7 @@ from .exceptions import (
 from .models import Purchase, PurchaseItem, PurchaseKind, PurchaseStatus
 
 INACTIVE_DEVELOPER = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
+MAX_ITEM_QUANTITY = 999  # matches PurchaseItem.quantity's validator
 
 
 def _lock_draft(purchase: Purchase) -> Purchase:
@@ -54,7 +56,7 @@ def _ensure_sellable(good: Good, purchase: Purchase, *, booking: bool = False) -
     if (
         good.deleted_at is not None
         or not good.is_active
-        or good.service_position.seller_id != purchase.seller_id
+        or good.service_position_id != purchase.service_position_id
     ):
         raise GoodNotAvailable(details={"good": good.pk})
 
@@ -148,6 +150,10 @@ def add_item(*, purchase: Purchase, good: Good, quantity: int = 1) -> PurchaseIt
     )
     if not created:
         item.quantity += quantity
+    if item.quantity > MAX_ITEM_QUANTITY:
+        raise ValidationError(
+            {"quantity": [_("At most %(max)s per item.") % {"max": MAX_ITEM_QUANTITY}]}
+        )
     _check_stock_hint(good, item.quantity)
     item.save()
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")

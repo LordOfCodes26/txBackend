@@ -130,3 +130,29 @@ def test_manager_follows_only_their_counter_live(cafe):
 
     assert allowed(cafe.kiosk) is True
     assert allowed(cafe.counter) is False
+
+
+def _untracked(position, name):
+    return Good.objects.create(service_position=position, name=name, price="1.00", track_stock=False)
+
+
+def test_purchase_takes_only_its_own_positions_goods(auth_client, cafe):
+    # A kiosk sale can't sell (and take stock of) the counter's goods, even for the owner.
+    water, bun = _untracked(cafe.kiosk, "Water"), _untracked(cafe.counter, "Bun")
+    for user in (cafe.manager, cafe.owner):
+        client = auth_client(user)
+        purchase = client.post(PURCHASES, {"service_position": cafe.kiosk.pk}).json()
+        items = f"{PURCHASES}{purchase['id']}/items/"
+        assert client.post(items, {"good": bun.pk}).status_code == 409
+        assert client.post(items, {"good": water.pk}).status_code == 200
+
+
+def test_repeated_adds_cannot_exceed_the_item_limit(auth_client, cafe):
+    water = _untracked(cafe.kiosk, "Water")
+    client = auth_client(cafe.manager)
+    purchase = client.post(PURCHASES, {"service_position": cafe.kiosk.pk}).json()
+    items = f"{PURCHASES}{purchase['id']}/items/"
+    assert client.post(items, {"good": water.pk, "quantity": 999}).status_code == 200
+    r = client.post(items, {"good": water.pk, "quantity": 1})
+    assert r.status_code == 400
+    assert "quantity" in r.json()["error"]["details"]
