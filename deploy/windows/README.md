@@ -271,9 +271,27 @@ git merge offline/main
 rmdir /s /q node_modules & robocopy .offline-cache\node_modules node_modules /E /NFL /NDL /NJH /NJS & npm rebuild --ignore-scripts --offline
 ```
 
-**Putting your changes live:** commit them, then run the kit's installer with your
-frontend copy: `install.cmd -FrontendFrom %USERPROFILE%\frontend-dev`. Backend changes go
-through the internet machine (below), which builds the next kit.
+### Putting your changes live
+
+1. **Commit** your changes in the copy (only committed changes are deployed):
+   `git add -A` then `git commit -m "what changed"`.
+2. Double-click one of these in `C:\Management` (they ask for administrator rights):
+
+| File | What it puts live |
+|---|---|
+| `deploy-backend.bat` | `backend-dev`: safety backup, new release, database migrations, static files, restart |
+| `deploy-frontend.bat` | `frontend-dev`: builds it (a few minutes), restart |
+| `deploy-all.bat` | both |
+
+Each deploy is a **new release next to the running one** (the last three are kept). If the
+new one doesn't start, the previous one is put back automatically and the window says why.
+Database migrations can't be undone that way: test them in `backend-dev` first
+(`.venv\Scripts\python manage.py migrate` on its own database, then `pytest`).
+
+Limits (offline): a **new Python package** must be in the copy's
+`.offline-cache\wheelhouse` and a **new npm package** in `frontend-dev\node_modules`;
+otherwise it has to come with a kit built on the internet machine. Send your commits
+there too (below), or the next kit will not have them.
 
 **Sending your changes to the internet machine** (USB stick, e.g. drive `E:`):
 

@@ -387,6 +387,26 @@ Write-TextFile "$Root\manage.cmd" (@(
         '.venv\Scripts\python.exe manage.py %*'
     ) -join "`r`n")
 
+# deploy-*.bat: put a developer's committed changes live (deploy-dev.ps1), double-clicked.
+$deployScript = "$Root\backend\current\deploy\windows\deploy-dev.ps1"
+foreach ($deploy in @(
+        @('deploy-backend.bat', '-Backend', 'backend-dev'),
+        @('deploy-frontend.bat', '-Frontend', 'frontend-dev'),
+        @('deploy-all.bat', '-Backend -Frontend', 'backend-dev and frontend-dev'))) {
+    Write-TextFile "$Root\$($deploy[0])" ((@(
+                '@echo off',
+                "rem Put the COMMITTED changes of your $($deploy[2]) live (asks for administrator rights).",
+                'net session >nul 2>&1',
+                'if errorlevel 1 (',
+                "    powershell -NoProfile -Command `"Start-Process -FilePath '%~f0' -Verb RunAs`"",
+                '    exit /b',
+                ')',
+                "powershell -NoProfile -ExecutionPolicy Bypass -File `"$deployScript`" -Root `"$Root`" $($deploy[1]) %*",
+                'echo.',
+                'pause'
+            ) -join "`r`n") + "`r`n")
+}
+
 # ============================================================================ 6. frontend
 Write-Step '6. Frontend (build and service)'
 $feWork = "$Work\frontend"

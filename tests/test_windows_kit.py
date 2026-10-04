@@ -93,3 +93,17 @@ def test_ip_candidates_stay_a_list():
     # A one-item list comes back as the bare item: with one IP, $ips[0] was its first character.
     installer = (WINDOWS / "install-all.ps1").read_text()
     assert "$ips = @(Get-ServerIPv4Candidates)" in installer
+
+
+def test_installer_writes_the_deploy_bat_files():
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    for bat in ("deploy-backend.bat", "deploy-frontend.bat", "deploy-all.bat"):
+        assert bat in installer
+    assert (WINDOWS / "deploy-dev.ps1").exists()
+
+
+def test_deploys_use_committed_code_and_production_settings():
+    deploy = (WINDOWS / "deploy-dev.ps1").read_text()
+    assert "'archive', '--format=tar'" in deploy  # committed files only
+    assert "DJANGO_SETTINGS_MODULE = 'config.settings.prod'" in deploy
+    assert "backup.ps1" in deploy  # safety backup before migrating
