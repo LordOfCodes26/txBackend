@@ -272,10 +272,11 @@ for path in health/ health/db/ health/redis/ health/backup/; do
     printf '    %-26s %s\n' "/$path" "$code"
     [[ "$code" == 200 ]] || FAILED=1
 done
-if timeout 3 bash -c '</dev/tcp/127.0.0.1/9100' 2>/dev/null; then
-    printf '    %-26s %s\n' "door listener :9100" "open"
+DOOR_PORT=$(grep -s '^RFID_TCP_PORT=' "$ENV_FILE" | cut -d= -f2- || true); DOOR_PORT=${DOOR_PORT:-9100}
+if timeout 3 bash -c "</dev/tcp/127.0.0.1/$DOOR_PORT" 2>/dev/null; then
+    printf '    %-26s %s\n' "door listener :$DOOR_PORT" "open"
 else
-    printf '    %-26s %s\n' "door listener :9100" "CLOSED"; FAILED=1
+    printf '    %-26s %s\n' "door listener :$DOOR_PORT" "CLOSED"; FAILED=1
 fi
 
 IP="$SERVER_IP"
@@ -291,7 +292,7 @@ $(printf '\033[32m')Installed $VERSION successfully.$(printf '\033[0m')
 
   Web / API:     https://$IP/            (admin: https://$IP/admin/)
   API docs:      https://$IP/api/docs/   (sign in at https://$IP/admin/ first)
-  Door devices:  TCP $IP:9100
+  Door devices:  TCP $IP:$DOOR_PORT
   Till readers:  https://$IP/api/v1/rfid/events/
   Settings:      $ENV_FILE
   Backups:       /var/backups/backend   (config: /etc/backend/backup.conf)
@@ -303,5 +304,5 @@ Next steps (see docs/OFFLINE_DEPLOYMENT.md in $APP):
   3. Create buildings, then register every door unit (code Door1, name Door1-1, its fixed
      IP) - journalctl -u backend-tcp shows "rejected ID='Door1' from <ip>" after a tap.
   4. Register the till readers (Reader1, ...) and card assign readers (Master1, ...).
-  5. Firewall: allow 443 (and 80), and 9100 only from the devices' network.
+  5. Firewall: allow 443 (and 80), and $DOOR_PORT only from the devices' network.
 EOF
