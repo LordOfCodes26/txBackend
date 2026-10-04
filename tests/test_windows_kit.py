@@ -112,7 +112,9 @@ def test_installer_writes_the_deploy_bat_files():
         assert bat in installer
     assert (WINDOWS / "deploy-dev.ps1").exists()
     # Scripts must live outside backend\\current: deploy retargets that junction.
-    assert 'DeployTools = "$Root\\deploy"' in installer or "$Root\\deploy\\deploy-dev.ps1" in installer
+    assert (
+        'DeployTools = "$Root\\deploy"' in installer or "$Root\\deploy\\deploy-dev.ps1" in installer
+    )
     assert "backend\\current\\deploy\\windows\\deploy-dev.ps1" not in installer
 
 
@@ -186,3 +188,12 @@ def test_the_web_ports_come_from_the_settings():
     assert "https://localhost/" not in (WINDOWS / "deploy-dev.ps1").read_text()
     assert (WINDOWS / "web-port.ps1").exists()
     assert "change-web-port.bat" in installer
+
+
+def test_garnet_is_reached_with_resp2():
+    # redis-py 8 defaults to RESP3 and then sends a "maintenance notifications" handshake that
+    # Garnet on Windows never answers: every cache use timed out (/health/redis/ 503).
+    lines = (WINDOWS / "backend.env.template").read_text().splitlines()
+    assert "REDIS_URL=redis://127.0.0.1:__GARNET_PORT__/0?protocol=2" in lines
+    assert "?protocol=2" in (WINDOWS / "setup-dev.ps1").read_text()
+    assert "Repair-RedisUrl" in (WINDOWS / "install-all.ps1").read_text()

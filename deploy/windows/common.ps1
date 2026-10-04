@@ -434,6 +434,15 @@ function Get-DoorPort([string]$EnvFile) {
     return 9100
 }
 
+function Repair-RedisUrl([string]$Url) {
+    # Garnet needs protocol=2 (see backend.env.template) and listens on 127.0.0.1 only.
+    $Url = $Url -replace '^redis://localhost:', 'redis://127.0.0.1:'
+    if ($Url -and $Url -notmatch '[?&]protocol=') {
+        if ($Url.Contains('?')) { $Url = "$Url&protocol=2" } else { $Url = "$($Url)?protocol=2" }
+    }
+    return $Url
+}
+
 function Get-WebPorts([string]$EnvFile) {
     # The web server's ports: WEB_HTTP_PORT / WEB_HTTPS_PORT in backend.env (default 80/443).
     $values = Read-EnvFile $EnvFile
