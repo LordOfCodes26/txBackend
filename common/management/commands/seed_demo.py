@@ -16,6 +16,7 @@ from apps.goods import services as goods
 from apps.rfid import services as rfid
 from apps.rfid.models import RFIDCard
 from apps.sellers.models import Seller, ServicePosition
+from common import demo_devices
 
 DEPARTMENTS = ["Engineering", "Research", "Platform", "Design", "QA"]
 FIRST = ["Ada", "Alan", "Grace", "Linus", "Margaret", "Dennis", "Barbara", "Ken", "Radia", "Tim"]
@@ -44,28 +45,15 @@ class Command(BaseCommand):
                 self._rentals()
             self.stdout.write(self.style.SUCCESS("Demo rentals created."))
             created = True
-        if not rfid.RFIDDevice.objects.filter(code__in=["Door1", "Door2"]).exists():
-            from apps.rfid.models import Building
-
-            for code, (bcode, building) in (
-                ("Door1", ("B1", "Building 1")),
-                ("Door2", ("B2", "Building 2")),
-            ):
-                b, _ = Building.objects.get_or_create(code=bcode, defaults={"name": building})
-                _, door_key = rfid.register_device(
-                    actor=None, code=code, name=f"{building} door", location=building, building=b
-                )
-                self.stdout.write(f"Door device {code} API key (shown only now): {door_key}")
+        units = demo_devices.ensure_door_units()
+        if units:
+            self.stdout.write(f"Door units: {', '.join(units)}")
             created = True
-        if not rfid.RFIDDevice.objects.filter(purpose="TILL").exists():
-            _, till_key = rfid.register_device(
-                actor=None,
-                code="Reader1",
-                name="Till reader 1",
-                purpose="TILL",
-            )
-            self.stdout.write(self.style.SUCCESS("Demo till reader Reader1."))
+        readers = demo_devices.ensure_readers()
+        if readers:
+            self.stdout.write(f"Readers: {', '.join(readers)}")
             created = True
+        demo_devices.link_building_users()
         if not AccountTransaction.objects.filter(idempotency_key__startswith="demo-").exists():
             self._deposits()
             self.stdout.write(self.style.SUCCESS("Demo deposits created."))
@@ -79,17 +67,15 @@ class Command(BaseCommand):
         password = secrets.token_urlsafe(12)
         with transaction.atomic():
             self._users(password)
+            demo_devices.ensure_door_units()
             developers = self._developers()
             self._cards(developers)
-            keys = self._devices()
         self._scans(developers)
 
         self.stdout.write(self.style.SUCCESS("Demo people, cards and scans created."))
         self.stdout.write(f"Logins (password {password}; shown only now):")
         for code in ROLES:
             self.stdout.write(f"  {code.lower()}  ({code})")
-        for code, key in keys.items():
-            self.stdout.write(f"Reader {code} API key: {key}")
 
     def _users(self, password):
         for code in ROLES:
@@ -103,6 +89,7 @@ class Command(BaseCommand):
     def _developers(self):
         developers = []
         leads = {}
+        buildings = list(demo_devices.ensure_buildings().values())
         for i in range(1, 31):
             dept = DEPARTMENTS[i % len(DEPARTMENTS)]
             name = f"{random.choice(FIRST)} {random.choice(LAST)}"
@@ -117,6 +104,7 @@ class Command(BaseCommand):
                 position_title="Team lead" if dept not in leads else "Developer",
                 start_date=timezone.localdate() - timedelta(days=random.randint(30, 2000)),
                 status=DeveloperStatus.ON_LEAVE if i == 7 else DeveloperStatus.ACTIVE,
+                building=buildings[i % len(buildings)],
             )
             leads.setdefault(dept, dev)
             developers.append(dev)
@@ -138,14 +126,10 @@ class Command(BaseCommand):
         for i in range(28, 33):
             rfid.register_card(actor=None, uid=f"04DE{i:06X}", label=f"{i:04d}")
 
-    def _devices(self):
-        keys = {}
-        for code, location in [("READER-001", "Main entrance"), ("READER-002", "Back entrance")]:
-            _, keys[code] = rfid.register_device(actor=None, code=code, location=location)
-        return keys
-
     def _scans(self, developers):
-        devices = list(rfid.RFIDDevice.objects.all())
+        """In at a way-in unit, out at a way-out unit of the developer's own building."""
+        doors = demo_devices.doors_by_building()
+        any_door = next(iter(doors.values()))["IN"][0]
         today = timezone.localdate()
         tz = timezone.get_current_timezone()
         for days_ago in range(5, -1, -1):
@@ -154,17 +138,23 @@ class Command(BaseCommand):
                 continue
             for dev in developers[:27]:
                 card = dev.card_assignments.get(unassigned_at__isnull=True).card
+                sides = doors[dev.building_id]
                 arrive = datetime.combine(day, time(8, 30), tz) + timedelta(
                     minutes=random.randint(0, 90)
                 )
                 leave = arrive + timedelta(hours=8, minutes=random.randint(0, 60))
-                for moment in (arrive, arrive + timedelta(seconds=2), leave):
+                door_in = random.choice(sides["IN"])
+                for moment, door, direction in (
+                    (arrive, door_in, "IN"),
+                    (arrive + timedelta(seconds=2), door_in, "IN"),  # a double tap
+                    (leave, random.choice(sides["OUT"]), "OUT"),
+                ):
                     if moment < timezone.now():
                         rfid.record_scan(
-                            device=random.choice(devices), uid=card.uid, event_time=moment
+                            device=door, uid=card.uid, event_time=moment, direction=direction
                         )
             rfid.record_scan(
-                device=devices[0],
+                device=any_door,
                 uid="04BADBAD01",
                 event_time=datetime.combine(day, time(9, 0), tz),
             )

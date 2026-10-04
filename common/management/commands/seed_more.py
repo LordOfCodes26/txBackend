@@ -17,8 +17,9 @@ from apps.goods.models import GoodKind
 from apps.purchases import services as purchases
 from apps.purchases.models import Purchase
 from apps.rfid import services as rfid
-from apps.rfid.models import Building, DevicePurpose, RFIDCard, RFIDCardAssignment, RFIDDevice
+from apps.rfid.models import RFIDCard, RFIDCardAssignment, RFIDEvent
 from apps.sellers.models import Seller, ServicePosition
+from common import demo_devices
 
 FIRST = [
     "Ada",
@@ -122,6 +123,7 @@ class Command(BaseCommand):
         start = Developer.all_objects.filter(employee_number__startswith="DEMO-").count() + 1
         leads = {}
         today = timezone.localdate()
+        buildings = list(demo_devices.ensure_buildings().values())
         with transaction.atomic():
             for i in range(start, start + count):
                 dept = random.choice(DEPARTMENTS)
@@ -135,6 +137,7 @@ class Command(BaseCommand):
                     position_title="Team lead" if dept not in leads else "Developer",
                     start_date=today - timedelta(days=random.randint(20, 3000)),
                     status=DeveloperStatus.ON_LEAVE if i % 37 == 0 else DeveloperStatus.ACTIVE,
+                    building=buildings[i % len(buildings)],
                 )
                 leads.setdefault(dept, dev)
                 finance.open_account(dev)
@@ -191,51 +194,47 @@ class Command(BaseCommand):
         self.stdout.write("Created Demo Bakery with 6 goods.")
 
     def _readers(self):
-        """Till readers aren't tied to counters (they're plugged into sellers' PCs, which
-        choose their reader); just make sure Reader1-4 exist."""
-        for n in range(1, 5):
-            code = f"Reader{n}"
-            if not RFIDDevice.objects.filter(code=code).exists():
-                rfid.register_device(
-                    actor=None, code=code, name=f"Till reader {n}", purpose=DevicePurpose.TILL
-                )
-                self.stdout.write(f"Till reader {code}")
+        """Till readers Reader1-4 of the demo sellers, and the card assign readers."""
+        created = demo_devices.ensure_readers()
+        if created:
+            self.stdout.write(f"Readers: {', '.join(created)}")
 
     # -- activity ------------------------------------------------------------------------
 
     def _door_scans(self):
-        doors = list(RFIDDevice.objects.filter(code__in=["Door1", "Door2"], is_active=True))
-        if len(doors) < 2 or not Building.objects.exists():
-            self.stdout.write(self.style.WARNING("Door1/Door2 missing; skipping door scans."))
+        """Today's door scans: in at a way-in unit, out at a way-out unit of the
+        developer's building (some walk over to the other building)."""
+        doors = demo_devices.doors_by_building()
+        if len(doors) < 2:
+            self.stdout.write(self.style.WARNING("Door units missing; skipping door scans."))
             return
         since = timezone.now() - timedelta(hours=4)
-        if RFIDDevice.objects.filter(
-            pk__in=[d.pk for d in doors],
-            events__received_at__gte=since,
-            events__client_event_id__startswith="demo-door-",
+        if RFIDEvent.objects.filter(
+            received_at__gte=since, client_event_id__startswith="demo-door-"
         ).exists():
             return
-        cards = list(
-            RFIDCard.objects.filter(
-                status="ACTIVE", assignments__unassigned_at__isnull=True
-            ).order_by("?")[:180]
+        assignments = list(
+            RFIDCardAssignment.objects.filter(
+                unassigned_at__isnull=True, card__status="ACTIVE", developer__building__isnull=False
+            )
+            .select_related("card", "developer")
+            .order_by("?")[:180]
         )
         now = timezone.now()
         scans = []
-        for card in cards:
+        for a in assignments:
+            home = doors.get(a.developer.building_id) or next(iter(doors.values()))
+            other = next((d for b, d in doors.items() if d is not home), home)
             arrive = now - timedelta(minutes=random.randint(30, 230))
-            door = random.choice(doors)
-            scans.append((arrive, door, card, "IN"))
+            scans.append((arrive, random.choice(home["IN"]), a.card, "IN"))
             roll = random.random()
             if roll < 0.15:  # went home again
-                scans.append(
-                    (arrive + timedelta(minutes=random.randint(10, 25)), door, card, "OUT")
-                )
-            elif roll < 0.30:  # moved to the other building
-                other = doors[0] if door == doors[1] else doors[1]
                 t = arrive + timedelta(minutes=random.randint(10, 25))
-                scans.append((t, door, card, "OUT"))
-                scans.append((t + timedelta(minutes=2), other, card, "IN"))
+                scans.append((t, random.choice(home["OUT"]), a.card, "OUT"))
+            elif roll < 0.30:  # moved to the other building
+                t = arrive + timedelta(minutes=random.randint(10, 25))
+                scans.append((t, random.choice(home["OUT"]), a.card, "OUT"))
+                scans.append((t + timedelta(minutes=2), random.choice(other["IN"]), a.card, "IN"))
         for i, (moment, door, card, direction) in enumerate(sorted(scans, key=lambda s: s[0])):
             rfid.record_scan(
                 device=door,
@@ -244,7 +243,9 @@ class Command(BaseCommand):
                 direction=direction,
                 client_event_id=f"demo-door-{now:%Y%m%d}-{i:05d}",
             )
-        self.stdout.write(f"Recorded {len(scans)} door scans for {len(cards)} developers today.")
+        self.stdout.write(
+            f"Recorded {len(scans)} door scans for {len(assignments)} developers today."
+        )
 
     def _purchases(self, count: int):
         positions = [

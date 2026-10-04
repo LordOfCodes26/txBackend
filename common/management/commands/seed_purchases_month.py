@@ -84,9 +84,12 @@ class Command(BaseCommand):
     # -- planning --------------------------------------------------------------------------
 
     def _counters(self):
-        readers = list(
-            RFIDDevice.objects.filter(purpose=DevicePurpose.TILL, is_active=True).order_by("code")
-        )
+        # Each counter's taps go to one of its seller's till readers.
+        readers = {}
+        for reader in RFIDDevice.objects.filter(
+            purpose=DevicePurpose.TILL, is_active=True, seller__isnull=False
+        ).order_by("code"):
+            readers.setdefault(reader.seller_id, []).append(reader)
         counters = []
         for i, position in enumerate(
             ServicePosition.objects.filter(is_active=True, seller__status="ACTIVE")
@@ -96,9 +99,10 @@ class Command(BaseCommand):
             goods = list(
                 position.goods.filter(is_active=True).exclude(kind=GoodKind.RENTAL).order_by("pk")
             )
-            if goods and readers:
+            own = readers.get(position.seller_id, [])
+            if goods and own:
                 weight = 1 if "Tech" in position.seller.name else 10
-                counters.append((position, goods, readers[i % len(readers)], weight))
+                counters.append((position, goods, own[i % len(own)], weight))
         if not counters:
             raise CommandError("No counters with goods; run seed_demo / seed_more first.")
         return counters

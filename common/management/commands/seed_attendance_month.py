@@ -10,17 +10,17 @@ from apps.attendance.models import AttendanceRecord
 from apps.attendance.services import rebuild
 from apps.developers.models import DeveloperStatus
 from apps.rfid.models import (
-    DevicePurpose,
     RFIDCardAssignment,
-    RFIDDevice,
     RFIDEvent,
     ScanResult,
 )
+from common import demo_devices
 
 
 class Command(BaseCommand):
     help = (
-        "Demo data: about a month of realistic door scans (Door1/Door2) for the demo "
+        "Demo data: about a month of realistic door scans (the door units of Building 1 and "
+        "2) for the demo "
         "developers, up to yesterday, then rebuild attendance and presence from them. "
         "Days that already have attendance for a developer are skipped."
     )
@@ -35,13 +35,10 @@ class Command(BaseCommand):
             raise CommandError(
                 "Set ATTENDANCE_DIRECTION_RULE=device (the doors report in/out) before seeding."
             )
-        doors = list(
-            RFIDDevice.objects.filter(
-                purpose=DevicePurpose.ATTENDANCE, code__in=["Door1", "Door2"], is_active=True
-            ).order_by("code")
-        )
-        if len(doors) != 2:
-            raise CommandError("Door1 and Door2 must exist (run seed_demo).")
+        doors = demo_devices.doors_by_building()  # {building: {"IN": units, "OUT": units}}
+        if len(doors) < 2:
+            raise CommandError("The door units of both buildings must exist (run seed_demo).")
+        buildings = sorted(doors)
 
         rng = random.Random(2026)
         today = timezone.localdate()
@@ -63,8 +60,9 @@ class Command(BaseCommand):
         events = []
         for a in assignments:
             dev, card = a.developer, a.card
-            home = doors[dev.pk % 2]
-            other = doors[1 - dev.pk % 2]
+            home_id = dev.building_id if dev.building_id in doors else buildings[dev.pk % 2]
+            home = doors[home_id]
+            other = doors[next(b for b in buildings if b != home_id)]
             for offset in range(days):
                 day = first + timedelta(days=offset)
                 if (dev.pk, day) in existing:
@@ -73,10 +71,10 @@ class Command(BaseCommand):
                     dev.start_date and day < dev.start_date
                 ):
                     continue
-                for moment, door, direction in _day_pattern(rng, day, home, other):
+                for moment, sides, direction in _day_pattern(rng, day, home, other):
                     events.append(
                         RFIDEvent(
-                            device=door,
+                            device=rng.choice(sides[direction]),  # a way-in / way-out unit
                             client_event_id=f"demo-month-{dev.pk}-{day:%Y%m%d}-{len(events)}",
                             uid=card.uid,
                             card=card,
