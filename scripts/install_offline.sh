@@ -45,7 +45,7 @@ if [[ -d "${BUNDLE}/os-packages" ]]; then
     apt-get "${APT_OPTS[@]}" update -qq
     DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install -y -q --no-install-recommends \
         python3 python3-venv postgresql postgresql-contrib redis-server nginx openssl rsync \
-        ca-certificates
+        ca-certificates xz-utils   # xz: install-all.sh unpacks Node.js (.tar.xz)
     rm -rf "${APT_TMP}"
 fi
 
