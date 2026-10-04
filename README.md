@@ -15,6 +15,10 @@ cp .env.example .env            # then set DJANGO_SECRET_KEY
 .venv/bin/celery -A config worker -l info
 ```
 
+**Development guide for the Windows server** (development copy, ports and how to change
+them, testing with devices, demo data, putting changes live):
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
 - API: `/api/v1/` · Swagger: `/api/docs/` · Schema: `/api/schema/` · Admin: `/admin/`
 - Demo data (dev only): `.venv/bin/python manage.py seed_demo`
 - Health: `/health/`, `/health/db/`, `/health/redis/`

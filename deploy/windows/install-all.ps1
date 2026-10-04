@@ -660,7 +660,7 @@ if ($DevUser) {
     Write-Host @"
 
   Development ($DevUser):
-    backend-dev    cd %USERPROFILE%\backend-dev  &&  .venv\Scripts\uvicorn config.asgi:application --reload --port 8000
+    backend-dev    cd %USERPROFILE%\backend-dev  &&  .venv\Scripts\uvicorn config.asgi:application --reload --port 8100
     frontend-dev   cd %USERPROFILE%\frontend-dev &&  npm run dev        (http://127.0.0.1:3000)
 "@
 }

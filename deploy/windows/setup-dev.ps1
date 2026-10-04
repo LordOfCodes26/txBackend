@@ -35,6 +35,9 @@ $Root = $Root.TrimEnd('\')
 $Runtime = "$Root\runtime"
 $Work = "$Root\work"
 $DevPgPort = 5433
+# The development backend's web port (8000 is the installed backend's) and door port (9100 is
+# the installed door listener's; RFID_TCP_PORT in .env.example).
+$DevWebPort = 8100
 $DbName = 'backend_dev'
 $DbUser = 'backend_dev'
 $PgPass = "$Root\etc\private\pgpass.conf"
@@ -217,13 +220,24 @@ if (-not $SkipFrontend) {
     if (-not (Test-Path -LiteralPath $FrontendDev)) {
         Write-Note 'copying source, git history and node_modules...'
         Copy-Tree $FrontendSource $FrontendDev
-        # The development frontend talks to the development backend (port 8000).
-        Write-TextFile "$FrontendDev\.env.local" "# Written by setup-dev.ps1: the development backend (backend-dev, port 8000).`r`nAPI_URL=http://127.0.0.1:8000`r`n"
         $newCopy = $true
     } elseif (-not (Test-Path -LiteralPath "$FrontendDev\.git")) {
         Write-Warn "$FrontendDev exists but is not a git repository: left alone"
     } else {
         Write-Note "existing copy: your work is kept (not overwritten)"
+    }
+    # The development frontend talks to the development backend. Port 8100, not 8000: the
+    # installed backend (mgmt-web) has 8000. Copies set up before 2026-10-04 were pointed at
+    # 8000, i.e. at the LIVE backend: that file is replaced too, a hand-edited one is kept.
+    $envLocal = "$FrontendDev\.env.local"
+    $oldEnvLocal = $false
+    if (Test-Path -LiteralPath $envLocal) {
+        $text = Read-TextFile $envLocal
+        $oldEnvLocal = ($text -match '(?m)^# Written by setup-dev\.ps1') -and ($text -match '(?m)^API_URL=http://127\.0\.0\.1:8000\s*$')
+    }
+    if ((Test-Path -LiteralPath $FrontendDev) -and ($newCopy -or $oldEnvLocal)) {
+        Write-TextFile $envLocal "# Written by setup-dev.ps1: the development backend (backend-dev, port $DevWebPort).`r`nAPI_URL=http://127.0.0.1:$DevWebPort`r`n"
+        if ($oldEnvLocal) { Write-Note "frontend copy: .env.local now points at the development backend (port $DevWebPort), not the live one" }
     }
     if (Test-Path -LiteralPath "$FrontendDev\.git") {
         # The kit's frontend history becomes the branch offline/main; merge it when ready.
@@ -262,7 +276,7 @@ Write-Step 'Development copies ready'
 Write-Host @"
     Backend   $BackendDev   (database $DbName on port $DevPgPort, settings in .env)
               cd $BackendDev
-              .venv\Scripts\uvicorn config.asgi:application --reload --port 8000   (http://127.0.0.1:8000/admin/)
+              .venv\Scripts\uvicorn config.asgi:application --reload --port $DevWebPort   (http://127.0.0.1:$DevWebPort/admin/)
               .venv\Scripts\python manage.py createsuperuser                       (a login for this copy)
               .venv\Scripts\pytest -q                                              (all tests)
               .venv\Scripts\ruff check . ; .venv\Scripts\ruff format .            (lint and format)

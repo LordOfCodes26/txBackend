@@ -270,10 +270,12 @@ With `-DevUser` (default: the user who installs), each developer gets, in their 
 
 | Folder | What | Start it |
 |---|---|---|
-| `backend-dev` | the backend source, git history, Python environment with tests and tools, **own database** (port 5433) | `.venv\Scripts\uvicorn config.asgi:application --reload --port 8000` |
+| `backend-dev` | the backend source, git history, Python environment with tests and tools, **own database** (port 5433) | `.venv\Scripts\uvicorn config.asgi:application --reload --port 8100` (8000 is the live API) |
 | `frontend-dev` | the frontend source, git history, `node_modules` | `npm run dev` (http://127.0.0.1:3000, uses the development backend) |
 
 Git, Node.js and Python are on the PATH (open a **new** terminal after installing).
+Full development guide (ports, settings, testing with devices, demo data): `backend-dev\docs\DEVELOPMENT.md`.
+The development door listener (`manage.py run_rfid_tcp`) uses port 9101, not the live 9100.
 Useful commands in `backend-dev`: `.venv\Scripts\python manage.py createsuperuser` (a login
 for the copy), `.venv\Scripts\pytest -q` (tests), `.venv\Scripts\ruff check .` (lint).
 

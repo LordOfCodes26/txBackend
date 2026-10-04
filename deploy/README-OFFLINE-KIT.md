@@ -643,6 +643,7 @@ internet machine                      USB stick                    offline serve
 | 8001 | the backend for the frontend server (nginx, no TLS) | this server only |
 | 5432 / 5433 | PostgreSQL: installed system / development copies | this server only |
 | 8000, 3000 | development servers, when you run them | this server only |
+| 9101 | development door listener (`run_rfid_tcp`), when you run it | this server; a test PC only if you open it |
 
 Services: `frontend`, `backend-web`, `backend-ws`, `backend-tcp`, `backend-worker`, `nginx`,
 `postgresql`, `redis-server`. Logs: `sudo journalctl -u frontend -n 100` (or the service named).
