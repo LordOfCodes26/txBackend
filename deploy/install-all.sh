@@ -239,8 +239,12 @@ rm -rf "$WORK"
 # ---------------------------------------------------------------------------------- 5. checks
 say "5. Checks"
 FAILED=0
+# The web address, with the HTTPS port chosen by `mgmt change-web-port` (default 443).
+HTTPS_PORT=$(grep -s '^WEB_HTTPS_PORT=' /etc/backend/backend.env | cut -d= -f2- || true); HTTPS_PORT=${HTTPS_PORT:-443}
+WEB=https://localhost; ADDR=$SERVER_IP
+[[ "$HTTPS_PORT" == 443 ]] || { WEB="https://localhost:$HTTPS_PORT"; ADDR="$SERVER_IP:$HTTPS_PORT"; }
 for _ in $(seq 1 30); do
-    code=$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/ || echo 000)
+    code=$(curl -sk -o /dev/null -w '%{http_code}' "$WEB/" || echo 000)
     [[ "$code" =~ ^(200|30[1278])$ ]] && break
     sleep 1
 done
@@ -252,9 +256,9 @@ check() {  # check NAME URL
 }
 printf '    %-34s %s\n' "frontend service" "$(systemctl is-active frontend || true)"
 [[ "$(systemctl is-active frontend || true)" == active ]] || FAILED=1
-check "https://localhost/ (frontend)" https://localhost/
-check "https://localhost/health/ (backend)" https://localhost/health/
-check "https://localhost/admin/ (backend)" https://localhost/admin/login/
+check "$WEB/ (frontend)" "$WEB/"
+check "$WEB/health/ (backend)" "$WEB/health/"
+check "$WEB/admin/ (backend)" "$WEB/admin/login/"
 check "http://127.0.0.1:8001/health/ (internal)" http://127.0.0.1:8001/health/
 if (( FAILED )); then
     die "Something isn't answering (see above). Logs: journalctl -u frontend -u backend-web -n 100"
@@ -264,10 +268,10 @@ cat <<EOF
 
 $(printf '\033[32m')Everything is installed.$(printf '\033[0m')
 
-  Open in a browser:   https://$SERVER_IP/          (the frontend)
-  Backend admin:       https://$SERVER_IP/admin/
-  API documentation:   https://$SERVER_IP/api/docs/   (sign in at /admin/ first)
-  API base address:    https://$SERVER_IP/api/v1/
+  Open in a browser:   https://$ADDR/          (the frontend)
+  Backend admin:       https://$ADDR/admin/
+  API documentation:   https://$ADDR/api/docs/   (sign in at /admin/ first)
+  API base address:    https://$ADDR/api/v1/
 
   Services: backend-web backend-ws backend-tcp backend-worker frontend nginx postgresql redis-server
 EOF

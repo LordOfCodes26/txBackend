@@ -125,6 +125,10 @@ install -m 644 "${RELEASE}/deploy/nginx/backend.conf" /etc/nginx/sites-available
 # What "/" serves: the backend, unless install-all.sh has put the frontend there (kept).
 [[ -f "${ETC}/nginx-root.conf" ]] || install -m 644 "${RELEASE}/deploy/nginx/root-backend.conf" "${ETC}/nginx-root.conf"
 ln -sfn /etc/nginx/sites-available/backend.conf /etc/nginx/sites-enabled/backend.conf
+# Web ports chosen with `mgmt change-web-port` (WEB_HTTP_PORT / WEB_HTTPS_PORT) survive upgrades.
+"${RELEASE}/deploy/mgmt.sh" apply-web-ports
+# `sudo mgmt ...`: deploys from the development copies, port changes, uninstall.
+ln -sfn "${BASE}/current/deploy/mgmt.sh" /usr/local/sbin/mgmt
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 

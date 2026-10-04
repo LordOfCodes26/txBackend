@@ -267,8 +267,9 @@ for svc in postgresql redis-server nginx backend-web backend-ws backend-tcp back
     printf '    %-26s %s\n' "$svc" "$state"
     [[ "$state" == active ]] || FAILED=1
 done
+HTTPS_PORT=$(grep -s '^WEB_HTTPS_PORT=' "$ENV_FILE" | cut -d= -f2- || true); HTTPS_PORT=${HTTPS_PORT:-443}
 for path in health/ health/db/ health/redis/ health/backup/; do
-    code=$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost/$path" || echo 000)
+    code=$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost:$HTTPS_PORT/$path" || echo 000)
     printf '    %-26s %s\n' "/$path" "$code"
     [[ "$code" == 200 ]] || FAILED=1
 done
@@ -280,6 +281,7 @@ else
 fi
 
 IP="$SERVER_IP"
+[[ "$HTTPS_PORT" == 443 ]] || IP="$SERVER_IP:$HTTPS_PORT"   # the web address (with a changed port)
 if (( FAILED )); then
     say "Installed $VERSION, but some checks failed (see above)."
     echo "    Logs: journalctl -u backend-web -u backend-tcp -u backend-ws -n 100"
@@ -292,7 +294,7 @@ $(printf '\033[32m')Installed $VERSION successfully.$(printf '\033[0m')
 
   Web / API:     https://$IP/            (admin: https://$IP/admin/)
   API docs:      https://$IP/api/docs/   (sign in at https://$IP/admin/ first)
-  Door devices:  TCP $IP:$DOOR_PORT
+  Door devices:  TCP $SERVER_IP:$DOOR_PORT
   Till readers:  https://$IP/api/v1/rfid/events/
   Settings:      $ENV_FILE
   Backups:       /var/backups/backend   (config: /etc/backend/backup.conf)

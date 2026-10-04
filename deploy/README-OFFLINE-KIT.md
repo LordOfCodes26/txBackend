@@ -284,28 +284,51 @@ git add -A && git commit -m "Describe the change"
 
 ## 9. Putting your changes live (without internet)
 
-Commit first: only committed backend code goes into a bundle.
-
-**Backend:**
-
-```bash
-cd ~/backend-dev
-scripts/build_offline_bundle.sh --reuse .offline-cache 2026.10.20   # any new version name
-sudo bash dist/install-backend.sh                                   # safety backup, then upgrade
-```
-
-If your change needs a Python package that isn't in the kit, the build stops with a
-message: that change needs a machine with internet.
-
-**Frontend:**
+1. **Commit** your changes in the copy (only committed changes are deployed):
+   `git add -A && git commit -m "what changed"`.
+2. Put them live:
 
 ```bash
-sudo bash ~/offline-kit/install-all.sh --skip-backend --dev-user none --frontend-from ~/frontend-dev
+sudo mgmt deploy-backend    # ~/backend-dev: safety backup, new release, migrations, restart
+sudo mgmt deploy-frontend   # ~/frontend-dev: build (a few minutes), restart
+sudo mgmt deploy-all        # both
 ```
 
-It builds the frontend from your copy (as it is now) and replaces the running one; the last
-3 versions are kept in `/opt/frontend/releases/`. New npm packages can't be installed
-without internet: add them on a machine with internet and bring a new kit.
+Each deploy is a **new release next to the running one** (the last three are kept in
+`/opt/backend/releases/` and `/opt/frontend/releases/`). If the new one doesn't start, the
+previous one is put back automatically and the command says why. Uncommitted changes are
+listed and not deployed. Another user's copies: `sudo mgmt deploy-backend --user kim`.
+
+Database migrations can't be undone that way: test them in `~/backend-dev` first (its own
+database: `.venv/bin/python manage.py migrate`, then `.venv/bin/pytest -q`).
+
+Offline limits: a **new Python package** must be in `~/backend-dev/.offline-cache/wheelhouse`
+and a **new npm package** in `~/frontend-dev/node_modules`; otherwise it has to come with a
+kit built on a machine with internet. Send your commits there too (section 12), or the next
+kit will not have them.
+
+## 9a. Everyday commands: `sudo mgmt`
+
+| Command | What it does |
+|---|---|
+| `sudo mgmt status` | services, ports, health checks, running releases |
+| `sudo mgmt deploy-backend` / `deploy-frontend` / `deploy-all` | section 9 |
+| `sudo mgmt change-door-port 9200` | the devices' TCP port (default 9100) |
+| `sudo mgmt change-web-port 8080 8443` | the web ports, HTTP first (default 80 443) |
+| `sudo mgmt uninstall` | remove the system; `--remove-data` removes everything (section 17) |
+
+**Changing the door port.** `sudo mgmt change-door-port 9200` sets `RFID_TCP_PORT` in
+`/etc/backend/backend.env`, restarts the door listener, checks it answers on the new port
+(else puts the old one back) and moves the firewall (ufw) rule: who may use the port stays
+the same. Then **set every door and reader device to the new port**: until then they aren't
+heard. The port is a setting, not code: changing it in the backend's code changes nothing.
+
+**Changing the web ports.** `sudo mgmt change-web-port 8080 8443` changes nginx's ports,
+checks the site answers on the new HTTPS port (else puts the old ones back) and moves the
+firewall rules. The address is then `https://<server-ip>:8443/`: **tell the users and change
+it in every till program**.
+
+Both are saved in `backend.env`: upgrades with a newer kit and deploys keep them.
 
 ## 10. Connecting the door devices (attendance)
 
@@ -637,8 +660,8 @@ internet machine                      USB stick                    offline serve
 
 | Port | Who listens | Reachable from |
 |---|---|---|
-| 443 (80 redirects) | nginx: the frontend, and the backend's `/api/v1`, `/admin`, `/ws`, `/health` | the company network |
-| 9100 | RFID devices: doors, till and card assign readers (backend-tcp) | the devices |
+| 443 (80 redirects; `mgmt change-web-port`) | nginx: the frontend, and the backend's `/api/v1`, `/admin`, `/ws`, `/health` | the company network |
+| 9100 (`mgmt change-door-port`) | RFID devices: doors, till and card assign readers (backend-tcp) | the devices |
 | 3100 | the installed frontend (Next.js) | this server only |
 | 8001 | the backend for the frontend server (nginx, no TLS) | this server only |
 | 5432 / 5433 | PostgreSQL: installed system / development copies | this server only |
@@ -677,3 +700,16 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |
 | Door scans don't arrive | See section 10, "If a door doesn't work" |
 | A till or card assign reader gets no answer or `CARD_NO` | See section 11, "If a reader doesn't work" |
+
+## 17. Removing it
+
+```bash
+sudo mgmt uninstall                 # services, web site, firewall rules, backup schedule
+sudo mgmt uninstall --remove-data   # also the database, uploaded files, settings and ALL backups
+```
+
+It asks to confirm (type `yes`). Without `--remove-data` the data, settings and backups stay,
+and running the kit's `install-all.sh` again brings everything back. Copy
+`/var/backups/backend` somewhere else first if you might need it. The OS packages
+(PostgreSQL, Redis, nginx) and the developers' `~/backend-dev` and `~/frontend-dev` are
+never removed.
