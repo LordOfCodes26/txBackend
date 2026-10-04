@@ -216,7 +216,7 @@ cat <<EOF
       .venv/bin/ruff check . && .venv/bin/ruff format .      # lint and format
       git add -A && git commit -m "..."                      # record your changes
 
-    Make a new bundle from your committed changes, without internet, and install it:
-      scripts/build_offline_bundle.sh --reuse .offline-cache 2026.10.06
-      sudo bash dist/install-backend.sh
+    Put your committed changes live, without internet (new release; the old one comes back
+    if it doesn't start):
+      sudo mgmt deploy-backend         (and sudo mgmt deploy-frontend for ~/frontend-dev)
 EOF

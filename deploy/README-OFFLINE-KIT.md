@@ -704,8 +704,9 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 ## 17. Removing it
 
 ```bash
-sudo mgmt uninstall                 # services, web site, firewall rules, backup schedule
-sudo mgmt uninstall --remove-data   # also the database, uploaded files, settings and ALL backups
+sudo mgmt uninstall                 # services, web site, backup schedule
+sudo mgmt uninstall --remove-data   # also the database, uploaded files, settings, ALL backups
+                                    # and the firewall rules for the web and door ports
 ```
 
 It asks to confirm (type `yes`). Without `--remove-data` the data, settings and backups stay,

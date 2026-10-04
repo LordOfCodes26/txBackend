@@ -7,7 +7,7 @@
 #   sudo mgmt deploy-all       [--user NAME] [--yes]   both
 #   sudo mgmt change-door-port PORT                    the devices' TCP port (default 9100)
 #   sudo mgmt change-web-port  HTTP HTTPS              the web ports (default 80 443)
-#   sudo mgmt uninstall        [--remove-data] [--yes] remove it (data kept unless --remove-data)
+#   sudo mgmt uninstall        [--remove-data] [--yes] remove it (data and firewall kept unless --remove-data)
 #   sudo mgmt status                                   services, ports, health
 #
 # Deploys take COMMITTED code only. Each one is a new release next to the running one; if
@@ -48,7 +48,7 @@ wait_ok() {  # wait_ok URL [SECONDS]
     return 1
 }
 valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
-port_owner() { ss -Hltnp "sport = :$1" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1; }
+port_owner() { ss -Hltnp "sport = :$1" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true; }   # empty when free
 confirm() {  # confirm QUESTION DEFAULT
     (( ASSUME_YES )) && return 0
     local answer; read -r -p "    $1 (yes/no) [$2]: " answer </dev/tty || true
@@ -67,6 +67,9 @@ keep_last_3() {  # keep_last_3 RELEASES_DIR CURRENT_LINK
     done
 }
 switch_link() { ln -sfn "$2" "$1.new"; mv -T "$1.new" "$1"; }
+# A release that didn't go live (a failed build, check, migration or start) is removed on exit.
+UNUSED_RELEASE=""
+trap '[[ -z "$UNUSED_RELEASE" || ! -d "$UNUSED_RELEASE" ]] || rm -rf "$UNUSED_RELEASE"' EXIT
 
 # ----------------------------------------------------------------------------- development copies
 dev_home() {
@@ -105,11 +108,11 @@ deploy_backend() {
     release="$BASE/releases/dev-$commit-$stamp"
     note "release $(basename "$release")..."
     mkdir -p "$release"
+    UNUSED_RELEASE=$release
     dev_git "$dev" archive --format=tar HEAD | tar -xf - -C "$release"
     python3 -m venv "$release/.venv"
     if ! "$release/.venv/bin/pip" install --quiet --disable-pip-version-check --no-index \
             --find-links "$dev/.offline-cache/wheelhouse" -r "$release/requirements/prod.txt"; then
-        rm -rf "$release"
         die "A Python package the code needs isn't in the offline wheelhouse: new packages need a kit built with internet."
     fi
     chown -R backend:backend "$release"
@@ -126,6 +129,7 @@ deploy_backend() {
         systemctl restart "${BACKEND_SERVICES[@]}"
         die "Deploy failed (the previous release is running again). Logs: journalctl -u backend-web -u backend-tcp -n 80"
     fi
+    UNUSED_RELEASE=""
     keep_last_3 "$BASE/releases" "$BASE/current"
     note "backend $commit is live"
 }
@@ -151,6 +155,7 @@ deploy_frontend() {
     stamp=$(date +%Y%m%d%H%M%S)
     release="$FRONT/releases/dev-$commit-$stamp"
     mkdir -p "$release/.next"
+    UNUSED_RELEASE=$release
     cp -a "$build/.next/standalone/." "$release/"
     cp -a "$build/.next/static" "$release/.next/static"
     [[ ! -d "$build/public" ]] || cp -a "$build/public" "$release/public"
@@ -166,6 +171,7 @@ deploy_frontend() {
         systemctl restart frontend
         die "Deploy failed (the previous release is running again). Logs: journalctl -u frontend -n 80"
     fi
+    UNUSED_RELEASE=""
     keep_last_3 "$FRONT/releases" "$FRONT/current"
     note "frontend $commit is live"
 }
@@ -280,7 +286,7 @@ change_web_port() {
 
 # ----------------------------------------------------------------------------- uninstall
 uninstall() {
-    local what="services, web site, firewall rules and the backup schedule (data, settings and backups are KEPT)"
+    local what="services, web site and the backup schedule (data, settings, backups and firewall rules are KEPT)"
     (( REMOVE_DATA )) && what="EVERYTHING: also the database, uploaded files, settings and ALL BACKUPS"
     say "Removing $what"
     confirm "Continue?" no || { note "Cancelled: nothing was changed."; return 0; }
@@ -296,7 +302,7 @@ uninstall() {
     rm -f /etc/nginx/sites-enabled/backend.conf "$NGINX_SITE"
     systemctl reload nginx 2>/dev/null || true
     note "web site removed from nginx"
-    if ufw_active; then
+    if (( REMOVE_DATA )) && ufw_active; then
         local port rule
         for port in "$door" "$http" "$https"; do
             while read -r rule; do [[ -z "$rule" ]] || ufw_delete "$rule"; done <<<"$(ufw_rules_for "$port")"
@@ -318,7 +324,7 @@ uninstall() {
         note "database, files, settings and backups removed"
         note "kept: the OS packages (PostgreSQL, Redis, nginx) and developers' backend-dev / frontend-dev"
     else
-        note "kept: $BASE, $FRONT, $ETC, /var/lib/backend, /var/backups/backend and the database"
+        note "kept: $BASE, $FRONT, $ETC, /var/lib/backend, /var/backups/backend, the database and the firewall rules"
         note "run the kit's install-all.sh again to bring everything back"
     fi
 }
