@@ -91,7 +91,10 @@ function Switch-Release([string]$Link, [string]$NewRelease, [string[]]$Services,
         foreach ($svc in $Services) { Stop-ServiceSafely $svc }
         Set-Junction $Link $NewRelease
         $switched = $true
-        foreach ($svc in $Services) { Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc]) }
+        foreach ($svc in $Services) {
+            $addr = if ($svc -eq 'mgmt-tcp') { '' } else { '127.0.0.1' }
+            Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc]) -LocalAddress $addr
+        }
     } catch {
         Write-Warn "The new release didn't start: $($_.Exception.Message)"
         foreach ($svc in $Services) { Stop-ServiceSafely $svc }
@@ -102,7 +105,8 @@ function Switch-Release([string]$Link, [string]$NewRelease, [string[]]$Services,
         $restartFailed = $false
         foreach ($svc in $Services) {
             try {
-                Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc])
+                $addr = if ($svc -eq 'mgmt-tcp') { '' } else { '127.0.0.1' }
+                Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc]) -LocalAddress $addr
             } catch {
                 $restartFailed = $true
                 Write-Warn "Could not restart ${svc}: $($_.Exception.Message)"

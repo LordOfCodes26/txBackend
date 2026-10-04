@@ -154,12 +154,19 @@ Write-Note "developer copies for: $(if ($DevUser) { $DevUser } else { 'nobody' }
 if ((Read-Answer 'Continue? (yes/no)' 'yes' -AssumeYes:$Yes) -ne 'yes') { Stop-WithError 'Cancelled.' }
 if ($SkipBackend -and -not $Upgrade) { Stop-WithError 'The backend is not installed yet: run without -SkipBackend.' }
 
-# Ports this installation needs must be free (or already ours).
+# Ports this installation needs must be free (or already ours). For loopback-only
+# services, only 127.0.0.1 / 0.0.0.0 count: Cursor (and similar) on ::1:6379 is fine.
 $ours = @('caddy', 'GarnetServer', 'postgres', 'python', 'node')
-foreach ($p in @($HttpPort, $HttpsPort, $PgPort, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend, $DoorPortNow)) {
+foreach ($p in @($HttpPort, $HttpsPort, $DoorPortNow)) {
     $owner = Get-PortOwner $p
     if ($owner -and ($ours -notcontains $owner)) {
         Stop-WithError "Port $p is used by '$owner'. Stop that program (e.g. IIS, Skype, another Redis/PostgreSQL) or see the README for other ports."
+    }
+}
+foreach ($p in @($PgPort, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend)) {
+    $owner = Get-PortOwner $p -LocalAddress '127.0.0.1'
+    if ($owner -and ($ours -notcontains $owner)) {
+        Stop-WithError "Port $p is used by '$owner' on 127.0.0.1. Stop that program or see the README for other ports."
     }
 }
 
@@ -246,8 +253,19 @@ $garnetXml = New-WinswXml -Id $ServiceIds.Garnet -Name 'Management cache (Garnet
     -Arguments "--bind 127.0.0.1 --port $($Ports.Garnet) --lua true --memory 512m --index 64m" `
     -WorkingDirectory "$Runtime\garnet" -Environment @{ DOTNET_ROOT = "$Runtime\dotnet" } -LogPath $Logs
 Install-WinswService $ServicesDir $Winsw $ServiceIds.Garnet $garnetXml
-Start-ServiceChecked $ServiceIds.Garnet $Logs -Port $Ports.Garnet
-Write-Note "Garnet on 127.0.0.1:$($Ports.Garnet)"
+Start-ServiceChecked $ServiceIds.Garnet $Logs -Port $Ports.Garnet -LocalAddress '127.0.0.1'
+$garnetOk = $false
+for ($i = 0; $i -lt 30 -and -not $garnetOk; $i++) {
+    $garnetOk = Test-RedisPing -HostName '127.0.0.1' -Port $Ports.Garnet
+    if (-not $garnetOk) { Start-Sleep -Seconds 1 }
+}
+if (-not $garnetOk) {
+    Get-ChildItem -LiteralPath $Logs -Filter 'mgmt-garnet*.log' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 2 |
+        ForEach-Object { Write-Host "    --- $($_.Name)"; Get-Content -LiteralPath $_.FullName -Tail 30 | ForEach-Object { Write-Host "    | $_" } }
+    Stop-WithError "Garnet is listening on 127.0.0.1:$($Ports.Garnet) but does not answer PING. Logs: $Logs"
+}
+Write-Note "Garnet on 127.0.0.1:$($Ports.Garnet) (PING ok)"
 
 # ============================================================================ 5. backend
 $commit = ''
@@ -402,8 +420,8 @@ END `$`$;
             -Arguments $d.Arguments -WorkingDirectory $cur -Environment $pyEnv -DependsOn $deps -LogPath $Logs
         Install-WinswService $ServicesDir $Winsw $d.Id $xml
     }
-    Start-ServiceChecked $ServiceIds.Web $Logs -Port $Ports.Web
-    Start-ServiceChecked $ServiceIds.Ws $Logs -Port $Ports.Ws
+    Start-ServiceChecked $ServiceIds.Web $Logs -Port $Ports.Web -LocalAddress '127.0.0.1'
+    Start-ServiceChecked $ServiceIds.Ws $Logs -Port $Ports.Ws -LocalAddress '127.0.0.1'
     Start-ServiceChecked $ServiceIds.Tcp $Logs -Port $DoorPortNow
     Write-Note "backend $version running (services: $($AppServices -join ', '))"
 
@@ -548,7 +566,7 @@ $feXml = New-WinswXml -Id $ServiceIds.Frontend -Name 'Management frontend (Next.
         API_URL = "http://127.0.0.1:$($Ports.Internal)"
     }
 Install-WinswService $ServicesDir $Winsw $ServiceIds.Frontend $feXml
-Start-ServiceChecked $ServiceIds.Frontend $Logs -Port $Ports.Frontend
+Start-ServiceChecked $ServiceIds.Frontend $Logs -Port $Ports.Frontend -LocalAddress '127.0.0.1'
 Remove-Tree $build
 $activeFe = Get-JunctionTarget "$Root\frontend\current"
 Get-ChildItem -LiteralPath "$Root\frontend\releases" -Directory | Sort-Object LastWriteTime -Descending |

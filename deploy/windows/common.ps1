@@ -319,9 +319,17 @@ function Stop-ServiceSafely([string]$Name) {
     }
 }
 
-function Start-ServiceChecked([string]$Name, [string]$LogDir, [int]$Port = 0) {
+function Start-ServiceChecked {
     # Start a service and make sure its program really runs: "Running" only says the WinSW
     # wrapper started, so with -Port also wait until the program listens there.
+    # -LocalAddress matters on Windows: another app (e.g. Cursor) may listen on the same
+    # port on ::1 while our program binds 127.0.0.1; a bare port check then falsely passed.
+    param(
+        [string]$Name,
+        [string]$LogDir,
+        [int]$Port = 0,
+        [string]$LocalAddress = ''
+    )
     Start-Service -Name $Name
     Start-Sleep -Seconds 3
     $svc = Get-Service -Name $Name
@@ -329,7 +337,7 @@ function Start-ServiceChecked([string]$Name, [string]$LogDir, [int]$Port = 0) {
     if ($Port -and $svc.Status -eq 'Running') {
         $listening = $false
         for ($i = 0; $i -lt 60 -and -not $listening; $i++) {
-            $listening = Test-PortInUse $Port
+            $listening = Test-PortInUse $Port -LocalAddress $LocalAddress
             if (-not $listening) { Start-Sleep -Seconds 1 }
         }
     }
@@ -339,21 +347,61 @@ function Start-ServiceChecked([string]$Name, [string]$LogDir, [int]$Port = 0) {
                 Sort-Object LastWriteTime | Select-Object -Last 3 |
                 ForEach-Object { Write-Host "    --- $($_.Name)"; Get-Content -LiteralPath $_.FullName -Tail 20 | ForEach-Object { Write-Host "    | $_" } }
         }
-        if ($svc.Status -eq 'Running') { Stop-WithError "The service $Name runs, but nothing listens on port $Port (its program stopped; see its log above)." }
+        $where = if ($LocalAddress) { " on $LocalAddress" } else { '' }
+        if ($svc.Status -eq 'Running') { Stop-WithError "The service $Name runs, but nothing listens on port $Port$where (its program stopped; see its log above)." }
         Stop-WithError "The service $Name did not start (status: $($svc.Status))."
     }
 }
 
-function Test-PortInUse([int]$Port) {
-    return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+function Test-PortInUse {
+    param([int]$Port, [string]$LocalAddress = '')
+    $conns = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    if (-not $conns.Count) { return $false }
+    if (-not $LocalAddress) { return $true }
+    # Match the address, or a wildcard bind that includes it. Do not treat ::1 as 127.0.0.1.
+    return [bool]($conns | Where-Object {
+            $_.LocalAddress -eq $LocalAddress -or $_.LocalAddress -eq '0.0.0.0' -or $_.LocalAddress -eq '::'
+        })
 }
 
-function Get-PortOwner([int]$Port) {
-    $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+function Get-PortOwner {
+    # Who listens on Port (optionally only on LocalAddress / 0.0.0.0). Ignores other stacks
+    # (Cursor on ::1:6379 must not look like it owns our 127.0.0.1:6379 Garnet port).
+    param([int]$Port, [string]$LocalAddress = '')
+    $conns = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    if ($LocalAddress) {
+        $conns = @($conns | Where-Object {
+                $_.LocalAddress -eq $LocalAddress -or $_.LocalAddress -eq '0.0.0.0' -or $_.LocalAddress -eq '::'
+            })
+    }
+    $conn = $conns | Select-Object -First 1
     if (-not $conn) { return $null }
     $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
     if ($proc) { return $proc.ProcessName }
     return "process $($conn.OwningProcess)"
+}
+
+function Test-RedisPing {
+    # RESP2 PING to Host:Port with no Python deps (Garnet/Redis). Used right after Garnet starts.
+    param([string]$HostName = '127.0.0.1', [int]$Port = 6379, [int]$TimeoutMs = 2000)
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $client.ReceiveTimeout = $TimeoutMs
+        $client.SendTimeout = $TimeoutMs
+        $iar = $client.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { $client.Close(); return $false }
+        $client.EndConnect($iar)
+        $stream = $client.GetStream()
+        $bytes = [Text.Encoding]::ASCII.GetBytes("*1`r`n`$4`r`nPING`r`n")
+        $stream.Write($bytes, 0, $bytes.Length)
+        $buf = New-Object byte[] 64
+        $n = $stream.Read($buf, 0, $buf.Length)
+        $client.Close()
+        if ($n -le 0) { return $false }
+        return ([Text.Encoding]::ASCII.GetString($buf, 0, $n) -match 'PONG')
+    } catch {
+        return $false
+    }
 }
 
 function Wait-HttpOk([string]$Url, [int]$Seconds = 60) {

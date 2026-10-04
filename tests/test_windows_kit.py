@@ -132,6 +132,16 @@ def test_stop_service_does_not_abort_on_timeout():
     assert "Never throw" in common or "must not abort" in common
 
 
+def test_port_checks_can_target_127_0_0_1():
+    # Cursor listens on ::1:6379; a bare port check treated Garnet as up while it was dead.
+    common = (WINDOWS / "common.ps1").read_text()
+    assert "LocalAddress" in common
+    assert "Test-RedisPing" in common
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    assert "LocalAddress '127.0.0.1'" in installer
+    assert "Test-RedisPing" in installer
+
+
 @pytest.mark.parametrize("path", sorted(WINDOWS.glob("*.bat")), ids=lambda p: p.name)
 def test_bat_files_have_windows_line_endings(path):
     data = path.read_bytes()
