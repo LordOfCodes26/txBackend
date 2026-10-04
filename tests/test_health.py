@@ -19,6 +19,15 @@ def test_health_redis_reports_failure(client):
     assert response.json()["component"] == "redis"
 
 
+def test_health_redis_uses_resp2(client, settings):
+    # redis-py 8's RESP3 CLIENT MAINT_NOTIFICATIONS probe hangs Garnet (Windows kit).
+    settings.REDIS_CONNECTION_KWARGS = {"protocol": 2}
+    with mock.patch("common.health.redis.Redis.from_url") as from_url:
+        from_url.return_value.ping.return_value = True
+        assert client.get("/health/redis/").status_code == 200
+    assert from_url.call_args.kwargs.get("protocol") == 2
+
+
 def test_request_id_is_echoed(client):
     response = client.get("/health/", HTTP_X_REQUEST_ID="abc-123")
     assert response["X-Request-ID"] == "abc-123"

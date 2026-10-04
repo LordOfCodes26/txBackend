@@ -424,8 +424,15 @@ Write-TextFile "$Root\manage.cmd" (@(
         '.venv\Scripts\python.exe manage.py %*'
     ) -join "`r`n")
 
-# deploy-*.bat: put a developer's committed changes live (deploy-dev.ps1), double-clicked.
-$deployScript = "$Root\backend\current\deploy\windows\deploy-dev.ps1"
+# Tools used by the .bat files live in $Root\deploy (NOT under backend\current): deploy
+# retargets that junction, and running deploy-dev.ps1 from under it left services stopped
+# when the restart step failed.
+$DeployTools = "$Root\deploy"
+New-Item -ItemType Directory -Path $DeployTools -Force | Out-Null
+foreach ($name in @('common.ps1', 'deploy-dev.ps1', 'backup.ps1', 'door-port.ps1', 'web-port.ps1')) {
+    Copy-Item -LiteralPath "$Root\backend\current\deploy\windows\$name" -Destination "$DeployTools\$name" -Force
+}
+$deployScript = "$DeployTools\deploy-dev.ps1"
 foreach ($deploy in @(
         @('deploy-backend.bat', '-Backend', 'backend-dev'),
         @('deploy-frontend.bat', '-Frontend', 'frontend-dev'),
@@ -459,7 +466,7 @@ Write-TextFile "$Root\change-door-port.bat" ((@(
             '    )',
             '    exit /b',
             ')',
-            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Root\backend\current\deploy\windows\door-port.ps1`" -Root `"$Root`" %*",
+            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$DeployTools\door-port.ps1`" -Root `"$Root`" %*",
             'echo.',
             'pause'
         ) -join "`r`n") + "`r`n")
@@ -479,7 +486,7 @@ Write-TextFile "$Root\change-web-port.bat" ((@(
             '    )',
             '    exit /b',
             ')',
-            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Root\backend\current\deploy\windows\web-port.ps1`" -Root `"$Root`" %*",
+            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$DeployTools\web-port.ps1`" -Root `"$Root`" %*",
             'echo.',
             'pause'
         ) -join "`r`n") + "`r`n")

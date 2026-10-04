@@ -321,8 +321,10 @@ rmdir /s /q node_modules & robocopy .offline-cache\node_modules node_modules /E 
 | `deploy-frontend.bat` | `frontend-dev`: builds it (a few minutes), restart |
 | `deploy-all.bat` | both |
 
-Each deploy is a **new release next to the running one** (the last three are kept). If the
-new one doesn't start, the previous one is put back automatically and the window says why.
+The `.bat` files run scripts in `C:\Management\deploy\` (not under `backend\current`), so
+retargeting the live release cannot strand the deploy itself. Each deploy is a **new release
+next to the running one** (the last three are kept). If the new one doesn't start, the
+previous one is put back and services are started again; the window says why.
 Database migrations can't be undone that way: test them in `backend-dev` first
 (`.venv\Scripts\python manage.py migrate` on its own database, then `pytest`).
 

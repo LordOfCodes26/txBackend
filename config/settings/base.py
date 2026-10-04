@@ -90,12 +90,20 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- Redis / cache / Celery -------------------------------------------------
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+# redis-py 8 defaults to RESP3 and probes CLIENT MAINT_NOTIFICATIONS on connect.
+# Garnet (and older Redis) does not answer that probe: the socket hangs until the
+# timeout, /health/redis/ returns 503, and Garnet can crash (NativeOverlapped).
+REDIS_CONNECTION_KWARGS = {"protocol": 2}
 
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
-        "OPTIONS": {"SOCKET_CONNECT_TIMEOUT": 2, "SOCKET_TIMEOUT": 2},
+        "OPTIONS": {
+            "SOCKET_CONNECT_TIMEOUT": 2,
+            "SOCKET_TIMEOUT": 2,
+            "CONNECTION_POOL_KWARGS": dict(REDIS_CONNECTION_KWARGS),
+        },
     }
 }
 
@@ -103,7 +111,11 @@ CACHES = {
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL], "capacity": 500, "expiry": 30},
+        "CONFIG": {
+            "hosts": [{"address": REDIS_URL, **REDIS_CONNECTION_KWARGS}],
+            "capacity": 500,
+            "expiry": 30,
+        },
     }
 }
 

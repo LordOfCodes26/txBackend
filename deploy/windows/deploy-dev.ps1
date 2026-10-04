@@ -83,20 +83,47 @@ function Export-Commit([string]$Dir, [string]$Destination) {
 
 function Switch-Release([string]$Link, [string]$NewRelease, [string[]]$Services, [hashtable]$Ports) {
     # Point the junction at the new release and restart; if a service doesn't come up, put
-    # the previous release back and restart again.
+    # the previous release back and restart again. Always try to bring services back: a failed
+    # Start-Service -ErrorAction SilentlyContinue used to leave them stopped after a bad deploy.
     $previous = Get-JunctionTarget $Link
-    foreach ($svc in $Services) { Stop-ServiceSafely $svc }
-    Set-Junction $Link $NewRelease
+    $switched = $false
     try {
-        foreach ($svc in $Services) { Start-ServiceChecked $svc $Logs -Port $Ports[$svc] }
-    } catch {
-        Write-Warn "The new release didn't start: going back to $previous"
         foreach ($svc in $Services) { Stop-ServiceSafely $svc }
-        if ($previous) {
+        Set-Junction $Link $NewRelease
+        $switched = $true
+        foreach ($svc in $Services) { Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc]) }
+    } catch {
+        Write-Warn "The new release didn't start: $($_.Exception.Message)"
+        foreach ($svc in $Services) { Stop-ServiceSafely $svc }
+        if ($switched -and $previous) {
+            Write-Warn "Going back to $previous"
             Set-Junction $Link $previous
-            foreach ($svc in $Services) { Start-Service -Name $svc -ErrorAction SilentlyContinue }
+        }
+        $restartFailed = $false
+        foreach ($svc in $Services) {
+            try {
+                Start-ServiceChecked $svc $Logs -Port ([int]$Ports[$svc])
+            } catch {
+                $restartFailed = $true
+                Write-Warn "Could not restart ${svc}: $($_.Exception.Message)"
+            }
+        }
+        if ($restartFailed) {
+            Stop-WithError "Deploy failed and not all services came back. Start them with: Get-Service mgmt-web,mgmt-ws,mgmt-tcp,mgmt-frontend | Start-Service. Logs: $Logs"
         }
         throw
+    }
+}
+
+function Sync-DeployTools {
+    # Keep a copy outside backend\current: deploy retargets that junction, so the .bat files
+    # must not run the script from under current (or a failed switch leaves nothing to restart).
+    $dir = "$Root\deploy"
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $src = "$Root\backend\current\deploy\windows"
+    foreach ($name in @('common.ps1', 'deploy-dev.ps1', 'backup.ps1', 'door-port.ps1', 'web-port.ps1')) {
+        $from = Join-Path $src $name
+        if (Test-Path -LiteralPath $from) { Copy-Item -LiteralPath $from -Destination (Join-Path $dir $name) -Force }
     }
 }
 
@@ -108,6 +135,9 @@ function Remove-OldReleases([string]$ReleasesDir, [string]$Link) {
 
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $stamp = Get-Date -Format yyyyMMddHHmmss
+# Prefer backup.ps1 next to this script (C:\Management\deploy); fall back to the live tree.
+$BackupScript = Join-Path $PSScriptRoot 'backup.ps1'
+if (-not (Test-Path -LiteralPath $BackupScript)) { $BackupScript = "$Root\backend\current\deploy\windows\backup.ps1" }
 
 # ============================================================================ backend
 if ($Backend) {
@@ -117,7 +147,7 @@ if ($Backend) {
     if (-not (Test-Path -LiteralPath $wheels)) { Stop-WithError "No ${wheels}: set the copy up with install.cmd first." }
 
     Write-Note 'safety backup...'
-    & "$Root\backend\current\deploy\windows\backup.ps1" -Root $Root
+    & $BackupScript -Root $Root
 
     $release = "$Root\backend\releases\dev-$commit-$stamp"
     Write-Note "release $(Split-Path -Leaf $release)..."
@@ -144,6 +174,7 @@ if ($Backend) {
         'mgmt-web' = $Ports.Web; 'mgmt-ws' = $Ports.Ws; 'mgmt-tcp' = (Get-DoorPort $EnvFile)
     }
     Remove-OldReleases "$Root\backend\releases" "$Root\backend\current"
+    Sync-DeployTools
     Write-Note "backend $commit is live"
 }
 

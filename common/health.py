@@ -30,7 +30,10 @@ def health_db(request):
 def health_redis(request):
     try:
         client = redis.Redis.from_url(
-            settings.REDIS_URL, socket_connect_timeout=2, socket_timeout=2
+            settings.REDIS_URL,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            **getattr(settings, "REDIS_CONNECTION_KWARGS", {}),
         )
         client.ping()
     except Exception as exc:

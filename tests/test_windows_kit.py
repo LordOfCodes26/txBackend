@@ -76,6 +76,16 @@ def test_garnet_booleans_have_values():
     assert "--quiet" not in garnet
 
 
+def test_redis_clients_use_resp2_for_garnet():
+    # redis-py 8 defaults to RESP3 and CLIENT MAINT_NOTIFICATIONS; Garnet hangs on that.
+    # (Test settings replace CACHES/CHANNEL_LAYERS with in-memory backends.)
+    assert settings.REDIS_CONNECTION_KWARGS.get("protocol") == 2
+    base = (pathlib.Path(settings.BASE_DIR) / "config" / "settings" / "base.py").read_text()
+    assert 'REDIS_CONNECTION_KWARGS = {"protocol": 2}' in base
+    assert "CONNECTION_POOL_KWARGS" in base
+    assert '{"address": REDIS_URL, **REDIS_CONNECTION_KWARGS}' in base
+
+
 def test_winsw_services_run_as_local_system():
     # Under LocalService WinSW can't report its program's exit to Windows: a crashed program
     # left the service "Running" and was never restarted.
@@ -101,6 +111,9 @@ def test_installer_writes_the_deploy_bat_files():
     for bat in ("deploy-backend.bat", "deploy-frontend.bat", "deploy-all.bat"):
         assert bat in installer
     assert (WINDOWS / "deploy-dev.ps1").exists()
+    # Scripts must live outside backend\\current: deploy retargets that junction.
+    assert 'DeployTools = "$Root\\deploy"' in installer or "$Root\\deploy\\deploy-dev.ps1" in installer
+    assert "backend\\current\\deploy\\windows\\deploy-dev.ps1" not in installer
 
 
 def test_deploys_use_committed_code_and_production_settings():
@@ -108,6 +121,15 @@ def test_deploys_use_committed_code_and_production_settings():
     assert "'archive', '--format=tar'" in deploy  # committed files only
     assert "DJANGO_SETTINGS_MODULE = 'config.settings.prod'" in deploy
     assert "backup.ps1" in deploy  # safety backup before migrating
+    assert "Sync-DeployTools" in deploy
+    assert "not all services came back" in deploy
+
+
+def test_stop_service_does_not_abort_on_timeout():
+    # WaitForStatus used to throw under ErrorActionPreference Stop and leave services down.
+    common = (WINDOWS / "common.ps1").read_text()
+    assert "did not stop in time" in common
+    assert "Never throw" in common or "must not abort" in common
 
 
 @pytest.mark.parametrize("path", sorted(WINDOWS.glob("*.bat")), ids=lambda p: p.name)

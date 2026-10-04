@@ -307,10 +307,15 @@ function Set-ServiceAccount([string]$Name, [string]$Account) {
 }
 
 function Stop-ServiceSafely([string]$Name) {
+    # Never throw: a stuck StopPending must not abort a deploy after services are already down
+    # (that left mgmt-web/ws/tcp stopped with nothing restarted).
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -ne 'Stopped') {
-        Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-        $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+    if (-not $svc -or $svc.Status -eq 'Stopped') { return }
+    Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+    try {
+        (Get-Service -Name $Name).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+    } catch {
+        Write-Warn "$Name did not stop in time (status: $((Get-Service -Name $Name -ErrorAction SilentlyContinue).Status))"
     }
 }
 
