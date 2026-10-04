@@ -36,7 +36,9 @@ if (-not $Port) {
 }
 if ($Port -lt 1 -or $Port -gt 65535) { Stop-WithError "Not a port: $Port" }
 if ($Port -eq $old) { Write-Note "Already ${Port}: nothing to change."; return }
-$taken = @(80, 443, 5432, 5433, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend)
+# Also the development copies' ports (backend 8100, frontend 3000, door listener 9101): they
+# are free until a developer starts those servers, then they would clash.
+$taken = @(80, 443, 5432, 5433, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend, 8100, 3000, 9101)
 if ($taken -contains $Port) { Stop-WithError "Port $Port is used by this system itself; choose another (e.g. 9200)." }
 $owner = Get-PortOwner $Port
 if ($owner) { Stop-WithError "Port $Port is already used by '$owner'; choose another." }

@@ -41,7 +41,8 @@ if (-not $HttpPort -and -not $HttpsPort) {
 foreach ($p in @($HttpPort, $HttpsPort)) { if ($p -lt 1 -or $p -gt 65535) { Stop-WithError "Not a port: $p" } }
 if ($HttpPort -eq $HttpsPort) { Stop-WithError 'The HTTP and HTTPS ports must differ.' }
 if ($HttpPort -eq $old.Http -and $HttpsPort -eq $old.Https) { Write-Note 'Already these ports: nothing to change.'; return }
-$taken = @(5432, 5433, (Get-DoorPort $EnvFile), $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend)
+# Also the development copies' ports (backend 8100, frontend 3000, door listener 9101).
+$taken = @(5432, 5433, (Get-DoorPort $EnvFile), $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend, 8100, 3000, 9101)
 foreach ($p in @($HttpPort, $HttpsPort)) {
     if ($taken -contains $p) { Stop-WithError "Port $p is used by this system itself; choose another." }
     $owner = Get-PortOwner $p

@@ -21,7 +21,9 @@ ETC=/etc/backend
 ENV_FILE=$ETC/backend.env
 NGINX_SITE=/etc/nginx/sites-available/backend.conf
 BACKEND_SERVICES=(backend-web backend-ws backend-tcp backend-worker)
-OWN_PORTS=(5432 5433 6379 8001 8091 3100)   # PostgreSQL, Redis, nginx-internal, ws, frontend
+# Live: PostgreSQL, Redis, nginx-internal, ws, frontend. Development copies: their database,
+# backend (8000), frontend (3000) and door listener (9101), which run when a developer starts them.
+OWN_PORTS=(5432 5433 6379 8001 8091 3100 8000 3000 9101)
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 note() { echo "    $*"; }
