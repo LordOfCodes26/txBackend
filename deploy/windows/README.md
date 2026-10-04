@@ -184,6 +184,27 @@ door and reader device to the new port**: until then they aren't heard.
 
 The port is a setting, not code: changing it in the backend's code and deploying with
 `deploy-backend.bat` changes nothing (`backend.env` wins). Upgrades keep the port you chose.
+The development copy's door port (9101) is separate and doesn't change.
+
+### Changing the web ports
+
+Browsers and till programs use **80** (HTTP) and **443** (HTTPS). To use other ports (e.g.
+when another program needs 443), run the installer again from the kit folder:
+
+```
+install.cmd -HttpPort 8080 -HttpsPort 8443
+```
+
+It rewrites the web server's configuration and the firewall rule. The address is then
+`https://<this PC's IP>:8443/`: tell the users, and change it in every till program.
+
+Two things to know (not yet automatic):
+
+- **Give the same options every time** you run `install.cmd`, including upgrades with a
+  newer kit: without them it goes back to 80/443.
+- `deploy-backend.bat`, `deploy-frontend.bat` and `deploy-all.bat` check
+  `https://localhost/` at the end. With other web ports that check fails although the
+  deploy itself worked: open `https://localhost:8443/` to confirm.
 
 ## 8. Doors (attendance)
 
