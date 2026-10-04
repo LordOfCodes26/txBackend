@@ -168,7 +168,7 @@ if (-not $SkipBackend) {
             DJANGO_SECRET_KEY = New-RandomHex 50
             DJANGO_ALLOWED_HOSTS = "localhost,127.0.0.1,$($env:COMPUTERNAME)"
             DATABASE_URL = "postgres://$($DbUser):$dbPassword@localhost:$DevPgPort/$DbName"
-            REDIS_URL = "redis://localhost:$($Ports.Garnet)/1"
+            REDIS_URL = "redis://127.0.0.1:$($Ports.Garnet)/1"
             TIME_ZONE = $live['TIME_ZONE']
             LANGUAGE_CODE = $live['LANGUAGE_CODE']
             MEDIA_ROOT = ConvertTo-ForwardSlash "$BackendDev\media"
@@ -179,7 +179,11 @@ if (-not $SkipBackend) {
         }
         Write-TextFile $envFile (($lines -join "`r`n").TrimEnd() + "`r`n")
         Write-Note "settings: $envFile (DEBUG on, its own database, Garnet database 1)"
-    } elseif ($dbPassword) {
+    } elseif ((Read-EnvFile $envFile)['REDIS_URL'] -match '^redis://localhost:(.*)$') {
+        # Copies set up before 2026-10-04: localhost tries IPv6 first, where Garnet doesn't listen.
+        [void](Set-EnvValue $envFile 'REDIS_URL' "redis://127.0.0.1:$($Matches[1])")
+    }
+    if ($dbPassword -and (Test-Path -LiteralPath $envFile) -and ((Read-EnvFile $envFile)['DATABASE_URL'] -notmatch [regex]::Escape(":$dbPassword@"))) {
         # The database user was made again (e.g. a new development database): new password.
         [void](Set-EnvValue $envFile 'DATABASE_URL' "postgres://$($DbUser):$dbPassword@localhost:$DevPgPort/$DbName")
     }

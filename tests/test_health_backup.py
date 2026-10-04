@@ -81,3 +81,14 @@ def test_without_pitr_only_nightly_dumps_are_required(client, status_file, setti
     r = client.get("/health/backup/")
     assert r.status_code == 200, r.json()
     assert r.json()["errors"] == []
+
+
+def test_redis_failure_is_logged_with_its_reason(client, settings, caplog):
+    # The endpoint only says "error"; the log says why (it took two rounds on Windows).
+    settings.REDIS_URL = "redis://127.0.0.1:1/0"
+    with caplog.at_level("WARNING", logger="common.health"):
+        r = client.get("/health/redis/")
+    assert r.status_code == 503
+    assert r.json() == {"status": "error", "component": "redis"}
+    assert "health/redis: ConnectionError" in caplog.text
+    assert "127.0.0.1" in caplog.text

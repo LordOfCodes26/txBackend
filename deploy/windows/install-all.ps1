@@ -132,6 +132,12 @@ if ($DoorPort) {
     if ($DoorPort -lt 1 -or $DoorPort -gt 65535) { Stop-WithError "Not a port: $DoorPort" }
     $DoorPortNow = $DoorPort
 }
+# Installations before 2026-10-04 reach Garnet as "localhost": on Windows that tries IPv6
+# (::1) first, where Garnet doesn't listen, and the cache check failed (503).
+if ($Upgrade) {
+    $oldRedis = (Read-EnvFile $EnvFile)['REDIS_URL']
+    if ($oldRedis -match '^redis://localhost:(.*)$') { [void](Set-EnvValue $EnvFile 'REDIS_URL' "redis://127.0.0.1:$($Matches[1])") }
+}
 # The web ports: WEB_HTTP_PORT / WEB_HTTPS_PORT in backend.env, kept unless -HttpPort/-HttpsPort.
 $web = @{ Http = 80; Https = 443 }
 if ($Upgrade) { $web = Get-WebPorts $EnvFile }
