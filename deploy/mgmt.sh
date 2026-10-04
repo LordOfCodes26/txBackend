@@ -51,7 +51,7 @@ valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
 port_owner() { ss -Hltnp "sport = :$1" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1 || true; }   # empty when free
 confirm() {  # confirm QUESTION DEFAULT
     (( ASSUME_YES )) && return 0
-    local answer; read -r -p "    $1 (yes/no) [$2]: " answer </dev/tty || true
+    local answer; read -r -p "    $1 (yes/no) [$2]: " answer </dev/tty 2>/dev/null || true
     [[ "${answer:-$2}" == yes ]]
 }
 need_root() { [[ $EUID -eq 0 ]] || die "Run with sudo: sudo mgmt $CMD"; }
@@ -218,7 +218,7 @@ change_door_port() {
     local new=${ARGS[0]:-} old
     old=$(door_port)
     say "Door port: now $old"
-    if [[ -z "$new" ]]; then read -r -p "    New port for the door and reader devices [$old]: " new </dev/tty || true; new=${new:-$old}; fi
+    if [[ -z "$new" ]]; then read -r -p "    New port for the door and reader devices [$old]: " new </dev/tty 2>/dev/null || true; new=${new:-$old}; fi
     valid_port "$new" || die "Not a port: $new"
     [[ "$new" != "$old" ]] || { note "Already $new: nothing to change."; return 0; }
     [[ " ${OWN_PORTS[*]} $(http_port) $(https_port) " != *" $new "* ]] || die "Port $new is used by this system itself; choose another (e.g. 9200)."
@@ -251,8 +251,8 @@ change_web_port() {
     old_http=$(http_port); old_https=$(https_port)
     say "Web ports: now HTTP $old_http, HTTPS $old_https"
     if [[ -z "$http" && -z "$https" ]]; then
-        read -r -p "    New HTTPS port (what browsers and till programs use) [$old_https]: " https </dev/tty || true
-        read -r -p "    New HTTP port (only redirects to HTTPS) [$old_http]: " http </dev/tty || true
+        read -r -p "    New HTTPS port (what browsers and till programs use) [$old_https]: " https </dev/tty 2>/dev/null || true
+        read -r -p "    New HTTP port (only redirects to HTTPS) [$old_http]: " http </dev/tty 2>/dev/null || true
         http=${http:-$old_http}; https=${https:-$old_https}
     elif [[ -z "$http" || -z "$https" ]]; then
         die "Give both ports, HTTP first: sudo mgmt change-web-port 8080 8443"
@@ -298,6 +298,7 @@ uninstall() {
     rm -f /etc/systemd/system/backend-{web,ws,tcp,worker}.service /etc/systemd/system/frontend.service \
         /etc/systemd/system/backend-{backup,basebackup}.{service,timer}
     systemctl daemon-reload
+    systemctl reset-failed >/dev/null 2>&1 || true   # forget the stopped services' last state
     note "services and backup schedule removed"
     rm -f /etc/nginx/sites-enabled/backend.conf "$NGINX_SITE"
     systemctl reload nginx 2>/dev/null || true

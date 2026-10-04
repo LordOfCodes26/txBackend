@@ -159,5 +159,5 @@ fi
 grep -Eq '^OFFSITE_(DIR|RSYNC)=.+' "${ETC}/backup.conf" || \
     echo "WARNING: set OFFSITE_DIR or OFFSITE_RSYNC in ${ETC}/backup.conf: backups are on this disk only."
 
-echo "Installed ${VERSION}. Check: curl -k https://localhost/health/db/"
+echo "Installed ${VERSION}. Check: sudo mgmt status"
 echo "Create the first admin: cd ${BASE}/current && sudo -u backend bash -c 'set -a; . ${ENV_FILE}; set +a; .venv/bin/python manage.py createsuperuser'"
