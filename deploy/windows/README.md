@@ -337,11 +337,18 @@ the commits, merge, test, and build the next kit (`scripts/build_windows_kit.sh`
 
 ## 15. Removing it
 
-In an administrator PowerShell in the kit folder:
+Double-click **`uninstall.bat`**: in `C:\Management`, or in the kit folder. It asks for
+administrator rights and then for confirmation (type `yes`). It removes the services,
+firewall rules and backup task, and **keeps** the data, settings and backups, so running
+`install.cmd` again brings everything back.
 
-```powershell
-.\uninstall.ps1               # removes services, firewall rules, backup task; KEEPS data and backups
-.\uninstall.ps1 -RemoveData   # removes EVERYTHING in C:\Management (asks to confirm)
+To remove **everything** in `C:\Management` too (database, uploaded files, backups), from a
+command prompt:
+
 ```
+C:\Management\uninstall.bat -RemoveData
+```
+
+Copy the backups (`C:\Management\backups`) somewhere else first if you might need them.
 
 Developers' `backend-dev` and `frontend-dev` folders are never removed.

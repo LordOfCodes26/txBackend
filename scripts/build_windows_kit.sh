@@ -209,12 +209,14 @@ cp "$FRONTEND_PKG" "$KIT/management-app-offline-windows.tar.gz"
 # The installer scripts and guide, from the committed code (same commit as the bundle).
 mkdir -p "$KIT/.scripts"
 git archive --format=tar HEAD deploy/windows | tar -xf - -C "$KIT/.scripts"
-for f in install.cmd install-all.ps1 common.ps1 postgres.ps1 setup-dev.ps1 uninstall.ps1 backup.ps1 restore.ps1; do
+for f in install.cmd uninstall.bat install-all.ps1 common.ps1 postgres.ps1 setup-dev.ps1 uninstall.ps1 backup.ps1 restore.ps1; do
     cp "$KIT/.scripts/deploy/windows/$f" "$KIT/$f"
 done
 cp "$KIT/.scripts/deploy/windows/README.md" "$KIT/README.md"
 rm -rf "$KIT/.scripts"
-grep -q $'\r$' "$KIT/install.cmd" || sed -i 's/$/\r/' "$KIT/install.cmd"   # cmd.exe wants CRLF
+for f in "$KIT/install.cmd" "$KIT/uninstall.bat"; do   # cmd.exe wants CRLF
+    grep -q $'\r$' "$f" || sed -i 's/$/\r/' "$f"
+done
 (cd "$KIT" && find . -type f ! -name SHA256SUMS | sed 's#^\./##' | sort | xargs sha256sum > SHA256SUMS)
 
 say "Packing dist/${NAME}.zip"

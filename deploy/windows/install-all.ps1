@@ -407,6 +407,10 @@ foreach ($deploy in @(
             ) -join "`r`n") + "`r`n")
 }
 
+# uninstall.bat in the install folder too, for when the kit is gone.
+$uninstallBat = "$Root\backend\current\deploy\windows\uninstall.bat"
+if (Test-Path -LiteralPath $uninstallBat) { Copy-Item -LiteralPath $uninstallBat -Destination "$Root\uninstall.bat" -Force }
+
 # ============================================================================ 6. frontend
 Write-Step '6. Frontend (build and service)'
 $feWork = "$Work\frontend"

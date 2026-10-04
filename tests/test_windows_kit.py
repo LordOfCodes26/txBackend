@@ -107,3 +107,22 @@ def test_deploys_use_committed_code_and_production_settings():
     assert "'archive', '--format=tar'" in deploy  # committed files only
     assert "DJANGO_SETTINGS_MODULE = 'config.settings.prod'" in deploy
     assert "backup.ps1" in deploy  # safety backup before migrating
+
+
+@pytest.mark.parametrize("path", sorted(WINDOWS.glob("*.bat")), ids=lambda p: p.name)
+def test_bat_files_have_windows_line_endings(path):
+    data = path.read_bytes()
+    assert data.count(b"\n") == data.count(b"\r\n"), f"{path.name}: cmd.exe needs CRLF"
+
+
+def test_uninstall_bat_runs_from_a_temporary_copy():
+    # -RemoveData deletes C:\Management, where this .bat may be: cmd reads a batch file line by
+    # line, so it runs a copy, and its last command is a single line.
+    bat = (WINDOWS / "uninstall.bat").read_text()
+    assert "%TEMP%\\mgmt-uninstall" in bat
+    last = [line for line in bat.splitlines() if line.strip()][-1]
+    assert last.startswith("powershell") and last.endswith("& pause & exit /b")
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    assert 'uninstall.bat"' in installer
+    builder = (WINDOWS.parent.parent / "scripts" / "build_windows_kit.sh").read_text()
+    assert "uninstall.bat" in builder

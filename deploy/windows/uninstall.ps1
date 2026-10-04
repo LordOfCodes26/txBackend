@@ -5,7 +5,8 @@ Remove the management system's services, firewall rules and backup task from thi
 .DESCRIPTION
 Keeps the data (database, uploaded files), settings and backups in C:\Management unless
 -RemoveData is given. Developers' copies (backend-dev, frontend-dev) are never touched.
-In an administrator PowerShell:
+Double-click uninstall.bat (in the kit folder or C:\Management), or in an administrator
+PowerShell:
 
     powershell -ExecutionPolicy Bypass -File uninstall.ps1
     powershell -ExecutionPolicy Bypass -File uninstall.ps1 -RemoveData -Yes   # everything
@@ -24,7 +25,10 @@ $Root = $Root.TrimEnd('\')
 $what = 'services, firewall rules and the backup task (data, settings and backups are KEPT)'
 if ($RemoveData) { $what = "EVERYTHING in $Root, including the database and all backups" }
 Write-Step "Removing $what"
-if (-not $Yes -and (Read-Answer 'Type yes to continue' 'no') -ne 'yes') { throw 'Cancelled.' }
+if (-not $Yes -and (Read-Answer 'Type yes to continue' 'no') -ne 'yes') {
+    Write-Host '    Cancelled: nothing was changed.'
+    return
+}
 
 foreach ($svc in Get-Service -Name 'mgmt-*' -ErrorAction SilentlyContinue) {
     Stop-ServiceSafely $svc.Name
