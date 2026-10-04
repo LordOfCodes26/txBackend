@@ -374,6 +374,29 @@ function Get-HttpCode([string]$Url) {
 
 # ------------------------------------------------------------------------------- settings
 
+function Get-DoorPort([string]$EnvFile) {
+    # The door listener's TCP port: RFID_TCP_PORT in backend.env (default 9100).
+    $values = Read-EnvFile $EnvFile
+    if ($values.Contains('RFID_TCP_PORT') -and "$($values['RFID_TCP_PORT'])" -match '^\d+$') { return [int]$values['RFID_TCP_PORT'] }
+    return 9100
+}
+
+function Get-DoorRemoteAddress {
+    # Who may reach the door port now (kept when the port or the installation changes).
+    $rule = Get-NetFirewallRule -Group $Script:FirewallGroup -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Management doors*' } | Select-Object -First 1
+    if (-not $rule) { return @('Any') }
+    return @(($rule | Get-NetFirewallAddressFilter).RemoteAddress)
+}
+
+function Set-DoorFirewallRule([int]$Port, [string[]]$RemoteAddress) {
+    Get-NetFirewallRule -Group $Script:FirewallGroup -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Management doors*' } | Remove-NetFirewallRule
+    New-NetFirewallRule -DisplayName "Management doors (TCP $Port)" -Group $Script:FirewallGroup -Direction Inbound `
+        -Protocol TCP -LocalPort $Port -RemoteAddress $RemoteAddress -Action Allow -Profile Any | Out-Null
+}
+
+
 function Get-ServerIPv4Candidates {
     # The machine's IPv4 addresses, the one with the default route first.
     # An offline network may have no default gateway (no route): then no interface comes first.

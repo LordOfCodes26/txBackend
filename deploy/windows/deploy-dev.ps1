@@ -141,7 +141,7 @@ if ($Backend) {
     } finally { Pop-Location }
 
     Switch-Release "$Root\backend\current" $release $AppServices @{
-        'mgmt-web' = $Ports.Web; 'mgmt-ws' = $Ports.Ws; 'mgmt-tcp' = 9100
+        'mgmt-web' = $Ports.Web; 'mgmt-ws' = $Ports.Ws; 'mgmt-tcp' = (Get-DoorPort $EnvFile)
     }
     Remove-OldReleases "$Root\backend\releases" "$Root\backend\current"
     Write-Note "backend $commit is live"

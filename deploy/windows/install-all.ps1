@@ -40,7 +40,11 @@ Don't (re)install the backend (e.g. only the frontend changed).
 .PARAMETER FrontendFrom
 Build the frontend from this folder (e.g. a developer's frontend-dev) instead of the kit's.
 .PARAMETER DoorNetwork
-Only these addresses may use the door port 9100, e.g. 192.168.1.0/24 (default: any).
+Only these addresses may use the door port, e.g. 192.168.1.0/24 (default: as before; any
+on a new installation).
+.PARAMETER DoorPort
+The TCP port the door and reader devices send to (default: as before; 9100 on a new
+installation). C:\Management\change-door-port.bat changes it without reinstalling.
 .PARAMETER Yes
 Don't ask questions: use the parameters and defaults.
 #>
@@ -59,6 +63,7 @@ param(
     [switch]$SkipBackend,
     [string]$FrontendFrom = '',
     [string]$DoorNetwork = '',
+    [int]$DoorPort = 0,
     [int]$PgPort = 5432,
     [int]$HttpPort = 80,
     [int]$HttpsPort = 443,
@@ -120,6 +125,13 @@ foreach ($line in (Read-TextFile $sums) -split "`r?`n") {
 }
 Write-Note 'kit files OK'
 $Upgrade = Test-Path -LiteralPath $EnvFile
+# The door devices' port: RFID_TCP_PORT in backend.env, kept on upgrades unless -DoorPort.
+$DoorPortNow = 9100
+if ($Upgrade) { $DoorPortNow = Get-DoorPort $EnvFile }
+if ($DoorPort) {
+    if ($DoorPort -lt 1 -or $DoorPort -gt 65535) { Stop-WithError "Not a port: $DoorPort" }
+    $DoorPortNow = $DoorPort
+}
 Write-Note "install folder: $Root ($(if ($Upgrade) { 'UPGRADE: data and settings are kept' } else { 'new installation' }))"
 if ($BackendBundle) { Write-Note "backend:  $($BackendBundle.Name)$(if ($SkipBackend) { ' (skipped)' })" }
 Write-Note "frontend: $($FrontendPkg.Name)$(if ($FrontendFrom) { " (building from $FrontendFrom)" })"
@@ -129,7 +141,7 @@ if ($SkipBackend -and -not $Upgrade) { Stop-WithError 'The backend is not instal
 
 # Ports this installation needs must be free (or already ours).
 $ours = @('caddy', 'GarnetServer', 'postgres', 'python', 'node')
-foreach ($p in @($HttpPort, $HttpsPort, $PgPort, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend, 9100)) {
+foreach ($p in @($HttpPort, $HttpsPort, $PgPort, $Ports.Garnet, $Ports.Web, $Ports.Internal, $Ports.Ws, $Ports.Frontend, $DoorPortNow)) {
     $owner = Get-PortOwner $p
     if ($owner -and ($ours -notcontains $owner)) {
         Stop-WithError "Port $p is used by '$owner'. Stop that program (e.g. IIS, Skype, another Redis/PostgreSQL) or see the README for other ports."
@@ -226,6 +238,11 @@ Write-Note "Garnet on 127.0.0.1:$($Ports.Garnet)"
 $commit = ''
 if ($SkipBackend) {
     Write-Step '5. Backend: skipped (-SkipBackend)'
+    if ($DoorPort -and (Set-EnvValue $EnvFile 'RFID_TCP_PORT' "$DoorPortNow")) {
+        Stop-ServiceSafely $ServiceIds.Tcp
+        Start-ServiceChecked $ServiceIds.Tcp $Logs -Port $DoorPortNow
+        Write-Note "door port is now $DoorPortNow"
+    }
 } else {
     Write-Step '5. Backend'
     $bundleName = $BackendBundle.Name -replace '\.tar\.gz$', ''
@@ -322,13 +339,14 @@ END `$`$;
         Write-Warn "$ServerIp is not an address of this PC right now ($($ips -join ', ')). Give the PC that fixed address (see the README)."
     }
     [void](Set-EnvValue $EnvFile 'SERVER_IP' $ServerIp)
+    [void](Set-EnvValue $EnvFile 'RFID_TCP_PORT' "$DoorPortNow")
     $hostList = @('localhost', '127.0.0.1', $ServerIp, $env:COMPUTERNAME) + $ips
     if ($Hosts) { $hostList += ($Hosts -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     $existingHosts = @()
     if ($current.Contains('DJANGO_ALLOWED_HOSTS')) { $existingHosts = @($current['DJANGO_ALLOWED_HOSTS'] -split ',' | Where-Object { $_ }) }
     [void](Set-EnvValue $EnvFile 'DJANGO_ALLOWED_HOSTS' ((@($existingHosts + $hostList | Select-Object -Unique)) -join ','))
     $settings = Read-EnvFile $EnvFile
-    foreach ($k in @('SERVER_IP', 'TIME_ZONE', 'LANGUAGE_CODE', 'DEVICE_LANGUAGE', 'DJANGO_ALLOWED_HOSTS')) {
+    foreach ($k in @('SERVER_IP', 'RFID_TCP_PORT', 'TIME_ZONE', 'LANGUAGE_CODE', 'DEVICE_LANGUAGE', 'DJANGO_ALLOWED_HOSTS')) {
         Write-Note "$k=$($settings[$k])"
     }
 
@@ -357,7 +375,7 @@ END `$`$;
             Arguments = "-m waitress --listen=127.0.0.1:$($Ports.Web) --threads=16 --channel-timeout=60 --no-clear-untrusted-proxy-headers config.wsgi:application" },
         @{ Id = $ServiceIds.Ws; Name = 'Management realtime (uvicorn)'; Description = 'WebSockets (/ws/) on 127.0.0.1:8002.'
             Arguments = "-m uvicorn config.asgi:application --host 127.0.0.1 --port $($Ports.Ws) --proxy-headers --no-access-log" },
-        @{ Id = $ServiceIds.Tcp; Name = 'Management door listener (TCP 9100)'; Description = 'Raw TCP listener for door and till readers.'
+        @{ Id = $ServiceIds.Tcp; Name = 'Management door listener (TCP)'; Description = 'Raw TCP listener for door and reader devices (RFID_TCP_PORT).'
             Arguments = 'manage.py run_rfid_tcp' }
     )
     foreach ($d in $defs) {
@@ -367,7 +385,7 @@ END `$`$;
     }
     Start-ServiceChecked $ServiceIds.Web $Logs -Port $Ports.Web
     Start-ServiceChecked $ServiceIds.Ws $Logs -Port $Ports.Ws
-    Start-ServiceChecked $ServiceIds.Tcp $Logs -Port 9100
+    Start-ServiceChecked $ServiceIds.Tcp $Logs -Port $DoorPortNow
     Write-Note "backend $version running (services: $($AppServices -join ', '))"
 
     # Keep the last 3 releases.
@@ -406,6 +424,26 @@ foreach ($deploy in @(
                 'pause'
             ) -join "`r`n") + "`r`n")
 }
+
+# change-door-port.bat: move the door devices' TCP port without reinstalling (door-port.ps1).
+Write-TextFile "$Root\change-door-port.bat" ((@(
+            '@echo off',
+            'rem Change the TCP port the door and reader devices send to, e.g.  change-door-port.bat 9200',
+            'rem (double-click: it asks for the port). Asks for administrator rights.',
+            'setlocal',
+            'net session >nul 2>&1',
+            'if errorlevel 1 (',
+            '    if "%~1"=="" (',
+            "        powershell -NoProfile -Command `"Start-Process -FilePath '%~f0' -Verb RunAs`"",
+            '    ) else (',
+            "        powershell -NoProfile -Command `"Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs`"",
+            '    )',
+            '    exit /b',
+            ')',
+            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Root\backend\current\deploy\windows\door-port.ps1`" -Root `"$Root`" %*",
+            'echo.',
+            'pause'
+        ) -join "`r`n") + "`r`n")
 
 # uninstall.bat in the install folder too, for when the kit is gone.
 $uninstallBat = "$Root\backend\current\deploy\windows\uninstall.bat"
@@ -514,14 +552,15 @@ if ($tls -eq 'tls internal') {
 
 # ============================================================================ 8. firewall
 Write-Step '8. Windows Firewall'
-Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -like 'Management web*' } | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName 'Management web (HTTP/HTTPS)' -Group $FirewallGroup -Direction Inbound -Protocol TCP `
     -LocalPort @($HttpPort, $HttpsPort) -Action Allow -Profile Any | Out-Null
-$doorRemote = 'Any'
-if ($DoorNetwork) { $doorRemote = $DoorNetwork }
-New-NetFirewallRule -DisplayName 'Management doors (TCP 9100)' -Group $FirewallGroup -Direction Inbound -Protocol TCP `
-    -LocalPort 9100 -RemoteAddress $doorRemote -Action Allow -Profile Any | Out-Null
-Write-Note "allowed: TCP $HttpPort, $HttpsPort from anywhere; TCP 9100 from $doorRemote"
+# Who may use the door port: -DoorNetwork, else as before (a re-run used to reset it to any).
+$doorRemote = @(Get-DoorRemoteAddress)
+if ($DoorNetwork) { $doorRemote = @($DoorNetwork -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+Set-DoorFirewallRule $DoorPortNow $doorRemote
+Write-Note "allowed: TCP $HttpPort, $HttpsPort from anywhere; TCP $DoorPortNow from $($doorRemote -join ', ')"
 
 # ============================================================================ 9. backups
 Write-Step '9. Nightly backups'
@@ -596,8 +635,8 @@ foreach ($check in @(
     Write-Note ('{0,-28} {1}  {2}' -f $check[1], $code, $check[0])
     if ($code -notmatch '^(200|30[1278])$') { $failed = $true }
 }
-$door = Test-NetConnection -ComputerName 127.0.0.1 -Port 9100 -InformationLevel Quiet -WarningAction SilentlyContinue
-Write-Note ('{0,-28} {1}' -f 'door listener :9100', $(if ($door) { 'open' } else { 'CLOSED' }))
+$door = Test-NetConnection -ComputerName 127.0.0.1 -Port $DoorPortNow -InformationLevel Quiet -WarningAction SilentlyContinue
+Write-Note ('{0,-28} {1}' -f "door listener :$DoorPortNow", $(if ($door) { 'open' } else { 'CLOSED' }))
 if (-not $door) { $failed = $true }
 if ($failed) { Stop-WithError "Something isn't answering (see above). Logs: $Logs" }
 
@@ -610,7 +649,7 @@ Write-Host @"
   Open in a browser:   $url/            (the frontend)
   Backend admin:       $url/admin/
   API documentation:   $url/api/docs/   (sign in at /admin/ first)
-  Door devices:        TCP $($serverIpNow):9100
+  Door devices:        TCP $($serverIpNow):$DoorPortNow
   Till readers:        $url/api/v1/rfid/events/
 
   Certificate for the other PCs:  $Root\certificate\management-root-ca.crt  (see the README)

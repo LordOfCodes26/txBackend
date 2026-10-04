@@ -126,3 +126,19 @@ def test_uninstall_bat_runs_from_a_temporary_copy():
     assert 'uninstall.bat"' in installer
     builder = (WINDOWS.parent.parent / "scripts" / "build_windows_kit.sh").read_text()
     assert "uninstall.bat" in builder
+
+
+def test_the_door_port_comes_from_the_settings():
+    # A changed RFID_TCP_PORT must not make deploys roll back or the installer wait for 9100.
+    for name in ("install-all.ps1", "deploy-dev.ps1"):
+        text = (WINDOWS / name).read_text()
+        hard = [
+            line
+            for line in text.splitlines()
+            if "9100" in line and "DoorPortNow = 9100" not in line
+        ]
+        assert all(
+            line.lstrip().startswith(("#", "The TCP port", "installation")) for line in hard
+        ), hard
+    assert (WINDOWS / "door-port.ps1").exists()
+    assert "change-door-port.bat" in (WINDOWS / "install-all.ps1").read_text()

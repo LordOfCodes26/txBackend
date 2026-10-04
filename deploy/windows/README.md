@@ -98,7 +98,8 @@ the kit folder):
 | `-AdminUser NAME`, `-NoAdmin` | the first admin account, or none |
 | `-DevUser NAME` | whose development copies (default: you; `none` = no copies) |
 | `-SeedDemo` | fill the development copy with demo data |
-| `-DoorNetwork 192.168.1.0/24` | only these addresses may use the door port 9100 |
+| `-DoorNetwork 192.168.1.0/24` | only these addresses may use the door port (kept on later runs) |
+| `-DoorPort 9200` | the TCP port the devices send to (default 9100; see section 7 to change it later) |
 | `-Hosts "name1,name2"` | extra names/IPs clients use to reach this PC |
 | `-Root D:\Management` | install somewhere else than `C:\Management` |
 | `-Yes` | ask nothing (with `DJANGO_SUPERUSER_PASSWORD` set, also creates the admin) |
@@ -149,7 +150,7 @@ a failure. See them in the Services app (`services.msc`); their names start with
 | `mgmt-frontend` | the web app (Next.js), 127.0.0.1:3100 |
 | `mgmt-web` | the backend API (waitress), 127.0.0.1:8000 |
 | `mgmt-ws` | live updates (WebSockets), 127.0.0.1:8002 |
-| `mgmt-tcp` | the door listener, TCP **9100** |
+| `mgmt-tcp` | the door listener, TCP **9100** (or the port you chose) |
 | `mgmt-postgres` | the database (PostgreSQL 16), localhost:5432 |
 | `mgmt-garnet` | cache and live-update messages (Redis-compatible), localhost:6379 |
 | `mgmt-postgres-dev` | the development database, localhost:5433 (with development copies) |
@@ -166,6 +167,23 @@ in `C:\Management\data\pgdata\log\`).
 **Management commands** (in an administrator command prompt):
 `C:\Management\manage.cmd <command>`, e.g. `C:\Management\manage.cmd changepassword admin`
 or `C:\Management\manage.cmd createsuperuser`.
+
+### Changing the door port
+
+The doors and readers send to TCP **9100**. To use another port (e.g. 9200), in an
+administrator command prompt:
+
+```
+C:\Management\change-door-port.bat 9200
+```
+
+(or double-click it and type the port). It changes `RFID_TCP_PORT` in `backend.env`, moves
+the firewall rule (who may use the port stays the same), restarts the door listener and
+checks it answers on the new port; if it doesn't, the old port is put back. Then **set every
+door and reader device to the new port**: until then they aren't heard.
+
+The port is a setting, not code: changing it in the backend's code and deploying with
+`deploy-backend.bat` changes nothing (`backend.env` wins). Upgrades keep the port you chose.
 
 ## 8. Doors (attendance)
 
