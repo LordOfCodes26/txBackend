@@ -228,6 +228,8 @@ RFID_TCP_MAX_FRAME_BYTES = env.int("RFID_TCP_MAX_FRAME_BYTES", default=2048)
 RFID_TCP_IDLE_TIMEOUT_SECONDS = env.int("RFID_TCP_IDLE_TIMEOUT_SECONDS", default=300)
 RFID_TCP_MAX_CONNECTIONS = env.int("RFID_TCP_MAX_CONNECTIONS", default=200)
 RFID_TCP_MAX_CONNECTIONS_PER_IP = env.int("RFID_TCP_MAX_CONNECTIONS_PER_IP", default=10)
+# Every packet and its answer is kept in the TCP log (admins) for this many days.
+RFID_TCP_LOG_DAYS = env.int("RFID_TCP_LOG_DAYS", default=30)
 
 # --- Attendance -------------------------------------------------------------
 # How scans become IN/OUT: "none" (first/last scan only), "toggle" (alternate IN/OUT),

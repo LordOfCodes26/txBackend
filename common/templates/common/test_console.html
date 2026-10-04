@@ -59,7 +59,7 @@
 <header>
   <h1>Test Console</h1><span class="tag">staging only</span>
   <form id="login" class="row" style="flex:1; max-width:640px">
-    <input id="email" placeholder="email" autocomplete="username" value="admin@example.com">
+    <input id="username" placeholder="username" autocomplete="username" value="admin">
     <input id="password" type="password" placeholder="password" autocomplete="current-password">
     <button>Log in</button>
   </form>
@@ -223,13 +223,13 @@ async function openSocket(path, onMessage, onState) {
 $("login").onsubmit = async (e) => {
   e.preventDefault();
   const r = await fetch(`${API}/auth/token/`, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
+    body: JSON.stringify({ username: $("username").value, password: $("password").value }) });
   const body = await r.json();
   if (!r.ok) { log("error", "login failed", body); alert(errText(body)); return; }
   state.access = body.access; state.refresh = body.refresh;
   $("password").value = "";
   state.me = (await api("/auth/me/")).data;
-  $("whoText").textContent = `${state.me.email} · ${state.me.roles.join(", ") || "superuser"}`;
+  $("whoText").textContent = `${state.me.username} · ${state.me.roles.join(", ") || "superuser"}`;
   $("login").classList.add("hidden"); $("who").classList.remove("hidden"); $("app").classList.remove("hidden");
   await loadData();
 };

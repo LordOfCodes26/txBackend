@@ -249,7 +249,7 @@ class Command(BaseCommand):
             )
             AuditLog.objects.create(
                 actor=position.seller.user,
-                actor_email=getattr(position.seller.user, "email", ""),
+                actor_username=getattr(position.seller.user, "username", ""),
                 action="purchase.confirmed",
                 entity_type="purchases.purchase",
                 entity_id=str(purchase.pk),

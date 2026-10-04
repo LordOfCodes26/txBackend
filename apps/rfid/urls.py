@@ -9,6 +9,7 @@ router.register("rfid/assignments", views.RFIDCardAssignmentViewSet, basename="r
 router.register("rfid/devices", views.RFIDDeviceViewSet, basename="rfid-device")
 router.register("rfid/events", views.RFIDEventViewSet, basename="rfid-event")
 router.register("rfid/buildings", views.BuildingViewSet, basename="rfid-building")
+router.register("rfid/tcp-log", views.TCPFrameLogViewSet, basename="rfid-tcp-log")
 
 urlpatterns = [
     path("rfid/device/heartbeat/", views.DeviceHeartbeatView.as_view(), name="rfid-heartbeat"),

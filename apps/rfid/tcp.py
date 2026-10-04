@@ -33,7 +33,9 @@ live dashboard events, till payments).
 import asyncio
 import json
 import logging
+import time
 from collections import Counter
+from dataclasses import dataclass
 
 from channels.db import database_sync_to_async
 from django.conf import settings
@@ -83,7 +85,9 @@ class FrameDecoder:
 
 
 def encode(payload: dict) -> bytes:
-    return FRAME_MARK + json.dumps(payload, separators=(",", ":")).encode() + FRAME_MARK
+    # default=str: translated texts (lazy strings) become plain text.
+    body = json.dumps(payload, separators=(",", ":"), default=str)
+    return FRAME_MARK + body.encode() + FRAME_MARK
 
 
 def _error(message: str) -> dict:
@@ -116,16 +120,78 @@ def parse_text_frame(frame: bytes) -> dict[str, str]:
     return fields
 
 
+@dataclass
+class _Trace:
+    """What handling a frame found out, for the TCP log."""
+
+    code: str = ""
+    device: object = None
+    event: object = None
+    outcome: str = "OK"
+    note: str = ""
+
+
 def handle_frame(frame: bytes, peer_ip: str) -> dict | str:
-    """Authenticate, validate and record one frame.
+    """Authenticate, validate and record one frame, and log request and response.
 
     A JSON frame (`{...}`) gets a JSON reply payload, with texts in DEVICE_LANGUAGE. A
     text frame (`ID:...,TYPE:...,UID=...`) gets CARD_OK, CARD_NO or CARD_DENIED.
     """
+    started = time.monotonic()
+    trace = _Trace()
+    is_json = frame.lstrip().startswith(b"{")
     with translation.override(settings.DEVICE_LANGUAGE):
-        if frame.lstrip().startswith(b"{"):
-            return _handle_json_frame(frame, peer_ip)
-        return _handle_text_frame(frame, peer_ip) + "\r\n"
+        try:
+            if is_json:
+                reply = _handle_json_frame(frame, peer_ip, trace)
+            else:
+                reply = _handle_text_frame(frame, peer_ip, trace) + "\r\n"
+        except Exception as exc:
+            logger.exception("RFID TCP: error handling frame from %s", peer_ip)
+            trace.outcome, trace.note = "ERROR", f"{type(exc).__name__}: {exc}"[:300]
+            reply = _error(_("Server error.")) if is_json else CARD_NO + "\r\n"
+    response = reply if isinstance(reply, str) else encode(reply).decode()
+    log_tcp(
+        peer_ip,
+        frame.decode("utf-8", errors="replace"),
+        response,
+        trace,
+        int((time.monotonic() - started) * 1000),
+    )
+    return reply
+
+
+def log_tcp(peer_ip, request: str, response: str, trace: _Trace, duration_ms: int = 0) -> None:
+    """One row of the TCP log. Never lets logging break the answer to the device."""
+    from .models import TCPFrameLog
+
+    try:
+        TCPFrameLog.objects.create(
+            peer_ip=peer_ip or None,
+            request=request,
+            response=response,
+            device_code=trace.code[:50],
+            device=trace.device,
+            event=trace.event,
+            outcome=trace.outcome,
+            note=trace.note[:300],
+            duration_ms=duration_ms,
+        )
+    except Exception:
+        logger.exception("RFID TCP: could not write the TCP log")
+
+
+def prune_tcp_log() -> int:
+    """Delete TCP log rows older than RFID_TCP_LOG_DAYS. Returns how many."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from .models import TCPFrameLog
+
+    limit = timezone.now() - timedelta(days=settings.RFID_TCP_LOG_DAYS)
+    deleted, _rows = TCPFrameLog.objects.filter(received_at__lt=limit).delete()
+    return deleted
 
 
 def _record(device, data: dict, peer_ip: str):
@@ -146,24 +212,27 @@ def _record(device, data: dict, peer_ip: str):
     return event
 
 
-def _handle_text_frame(frame: bytes, peer_ip: str) -> str:
+def _handle_text_frame(frame: bytes, peer_ip: str, trace: _Trace) -> str:
     from rest_framework.exceptions import ValidationError
 
     from .authentication import device_for_id
     from .models import DevicePurpose, RFIDCard, ScanResult, normalize_uid
 
     fields = parse_text_frame(frame)
-    code = fields.get("id", "")
-    device = device_for_id(code, peer_ip)
+    code = trace.code = fields.get("id", "")
+    device = trace.device = device_for_id(code, peer_ip)
     if device is None:
         logger.warning("RFID TCP: rejected ID=%r from %s (no such device/IP)", code, peer_ip)
+        trace.outcome, trace.note = "REJECTED", "No active device with this ID for this address."
         return CARD_NO
     known = RFIDCard.objects.filter(uid=normalize_uid(fields.get("uid", ""))).exists()
     try:
-        event = _record(device, fields, peer_ip)
+        event = trace.event = _record(device, fields, peer_ip)
     except ValidationError as exc:
         logger.warning("RFID TCP: invalid frame from %s (%s): %s", peer_ip, code, exc.detail)
+        trace.outcome, trace.note = "INVALID", json.dumps(exc.detail, default=str)
         return CARD_NO
+    trace.note = event.result
 
     if device.purpose == DevicePurpose.ENROLL:
         return CARD_OK if known else CARD_NO  # a new card is registered by this tap
@@ -180,32 +249,39 @@ def _handle_text_frame(frame: bytes, peer_ip: str) -> str:
     return CARD_NO
 
 
-def _handle_json_frame(frame: bytes, peer_ip: str) -> dict:
+def _handle_json_frame(frame: bytes, peer_ip: str, trace: _Trace) -> dict:
     from rest_framework.exceptions import ValidationError
 
     from .authentication import device_for_id
     from .models import DevicePurpose
     from .serializers import ScanResponseSerializer
 
+    trace.outcome = "INVALID"
     try:
         data = json.loads(frame.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
+        trace.note = "Frame is not valid JSON."
         return _error(_("Frame is not valid JSON."))
     if not isinstance(data, dict):
+        trace.note = "Frame must be a JSON object."
         return _error(_("Frame must be a JSON object."))
 
     fields = {str(k).lower(): v for k, v in data.items()}
-    code = str(fields.get("id") or fields.get("device_id") or "").strip()
+    code = trace.code = str(fields.get("id") or fields.get("device_id") or "").strip()
     if not code:
+        trace.note = "Missing ID."
         return _error(_("Missing ID."))
-    device = device_for_id(code, peer_ip)
+    device = trace.device = device_for_id(code, peer_ip)
     if device is None:
         logger.warning("RFID TCP: rejected ID=%r from %s (no such device/IP)", code, peer_ip)
+        trace.outcome, trace.note = "REJECTED", "No active device with this ID for this address."
         return _error(_("No door device with this ID is registered for this IP."))
     try:
-        event = _record(device, data, peer_ip)
+        event = trace.event = _record(device, data, peer_ip)
     except ValidationError as exc:
+        trace.note = json.dumps(exc.detail, default=str)
         return _error(json.dumps(exc.detail, default=str))
+    trace.outcome, trace.note = "OK", event.result
     body = ScanResponseSerializer(event).data
     reply = {
         "result": body["result"],
@@ -225,11 +301,27 @@ class DoorTCPServer:
         self.connections: Counter[str] = Counter()
         self.server: asyncio.base_events.Server | None = None
         self._handle_frame = database_sync_to_async(handle_frame)
+        self._log = database_sync_to_async(log_tcp)
+        self._pruner: asyncio.Task | None = None
 
     async def start(self) -> None:
         self.server = await asyncio.start_server(self._client, self.host, self.port)
         sockets = ", ".join(str(s.getsockname()) for s in self.server.sockets)
         logger.info("RFID TCP listener on %s", sockets)
+        self._pruner = asyncio.create_task(self._prune_hourly())
+
+    async def _prune_hourly(self) -> None:
+        """Keep the TCP log to RFID_TCP_LOG_DAYS."""
+        while True:
+            try:
+                await database_sync_to_async(prune_tcp_log)()
+            except Exception:
+                logger.exception("RFID TCP: could not prune the TCP log")
+            await asyncio.sleep(3600)
+
+    async def _refused(self, peer_ip: str, request: str, reply: dict, note: str) -> None:
+        trace = _Trace(outcome="REFUSED", note=note)
+        await self._log(peer_ip, request, encode(reply).decode(), trace)
 
     async def serve_forever(self) -> None:
         await self.start()
@@ -237,6 +329,8 @@ class DoorTCPServer:
             await self.server.serve_forever()
 
     async def close(self) -> None:
+        if self._pruner is not None:
+            self._pruner.cancel()
         if self.server is not None:
             self.server.close()
             await self.server.wait_closed()
@@ -248,7 +342,9 @@ class DoorTCPServer:
             or self.connections[peer_ip] >= settings.RFID_TCP_MAX_CONNECTIONS_PER_IP
         ):
             logger.warning("RFID TCP: too many connections, refusing %s", peer_ip)
-            writer.write(encode(_error(_("Too many connections."))))
+            reply = _error(_("Too many connections."))
+            await self._refused(peer_ip, "", reply, "Too many connections from this address.")
+            writer.write(encode(reply))
             await self._close(writer)
             return
         self.connections[peer_ip] += 1
@@ -266,7 +362,12 @@ class DoorTCPServer:
                 try:
                     frames = decoder.feed(data)
                 except FrameTooLarge:
-                    writer.write(encode(_error(_("Frame too large."))))
+                    reply = _error(_("Frame too large."))
+                    limit = settings.RFID_TCP_MAX_FRAME_BYTES
+                    request = data[:500].decode(errors="replace")
+                    note = f"Packet over {limit} bytes."
+                    await self._refused(peer_ip, request, reply, note)
+                    writer.write(encode(reply))
                     break
                 for frame in frames:
                     text = not frame.lstrip().startswith(b"{")

@@ -113,3 +113,9 @@ class SetPinSerializer(serializers.Serializer):
         required=False,
         help_text="Required to change an existing PIN.",
     )
+
+
+class DeskChangePinSerializer(NewPinSerializer):
+    """At the PIN desk the developer types the current PIN, then the new one twice."""
+
+    current_pin = serializers.CharField(write_only=True, max_length=6)

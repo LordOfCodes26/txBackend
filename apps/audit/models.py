@@ -17,7 +17,9 @@ class AuditLog(AppendOnlyModel):
         related_name="+",
         help_text="Null for system actions (Celery tasks, RFID devices, migrations).",
     )
-    actor_email = models.CharField(max_length=254, blank=True)
+    # The actor's username when the entry was written (entries from before usernames hold
+    # the actor's email address).
+    actor_username = models.CharField(max_length=254, blank=True)
     action = models.CharField(max_length=100, db_index=True)
     entity_type = models.CharField(max_length=100)
     entity_id = models.CharField(max_length=64)

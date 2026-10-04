@@ -21,12 +21,12 @@ def test_readme_door_setup(api_client, make_user, settings):
     from tests.conftest import PASSWORD
 
     settings.ATTENDANCE_DIRECTION_RULE = "device"  # as in the installed backend.env
-    make_user(Roles.ADMIN, email="admin@chonha.com")
+    make_user(Roles.ADMIN, username="admin")
     json_post = {"format": "json"}
 
     # Step 1: sign in.
     r = api_client.post(
-        "/api/v1/auth/token/", {"email": "admin@chonha.com", "password": PASSWORD}, **json_post
+        "/api/v1/auth/token/", {"username": "admin", "password": PASSWORD}, **json_post
     )
     api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.json()['access']}")
     assert api_client.get("/api/v1/auth/me/").status_code == 200

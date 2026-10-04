@@ -97,7 +97,7 @@ def _simulator_reader(user, seller) -> RFIDDevice:
         defaults={
             "purpose": DevicePurpose.TILL,
             "seller": seller,
-            "name": f"Simulated reader of {user.email}",
+            "name": f"Simulated reader of {user.username}",
         },
     )
     if created:

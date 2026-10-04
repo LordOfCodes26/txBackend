@@ -5,10 +5,10 @@
 #
 #   sudo bash install-all.sh                                  # asks what it needs
 #   sudo bash install-all.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang \
-#        --language ko --admin-email admin@chonha.com --dev-user kim
+#        --language ko --admin-user admin --dev-user kim
 #
 # Options:
-#   --server-ip, --timezone, --language, --device-language, --hosts, --admin-email,
+#   --server-ip, --timezone, --language, --device-language, --hosts, --admin-user,
 #   --no-admin, --yes          passed on to install-backend.sh (see its --help)
 #   --dev-user NAME            set up the development copies for this user
 #                              (default: the user running sudo; "none" = no development copies)
@@ -29,7 +29,7 @@ ASSUME_YES=0
 
 while (( $# )); do
     case "$1" in
-        --server-ip|--timezone|--language|--device-language|--hosts|--admin-email)
+        --server-ip|--timezone|--language|--device-language|--hosts|--admin-user)
             BACKEND_ARGS+=("$1" "$2"); shift 2 ;;
         --no-admin) BACKEND_ARGS+=("$1"); shift ;;
         --yes|-y) BACKEND_ARGS+=("--yes"); ASSUME_YES=1; shift ;;

@@ -51,12 +51,12 @@ sudo bash install-backend.sh                        # newest backend-*.tar.gz in
 On a first install it asks for the **server IP** (it shows the server's addresses and
 suggests one; find it yourself with `hostname -I`), the company **timezone**, the **languages** (English or
 Korean; for the web/API, and for the door and till reader screens: Korean on readers only
-if their screens can show Korean letters) and the **first admin's email and password**.
+if their screens can show Korean letters) and the **first admin's username and password**.
 Or without questions:
 
 ```bash
 sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang \
-     --language ko --device-language en --admin-email admin@chonha.com
+     --language ko --device-language en --admin-user admin
 ```
 
 | Option | Meaning |
@@ -66,7 +66,7 @@ sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang 
 | `--language en\|ko` | Web/API language when the browser doesn't choose one (`ko` = Korean, DPRK usage) |
 | `--device-language en\|ko` | Language on door and till reader screens |
 | `--hosts "a,b"` | Extra host names / IPs clients use (the server's own are always allowed) |
-| `--admin-email EMAIL` | First admin account (asks for the password; or set `DJANGO_SUPERUSER_PASSWORD`) |
+| `--admin-user NAME` | First admin account (asks for the password; or set `DJANGO_SUPERUSER_PASSWORD`) |
 | `--no-admin` | Don't create an admin account |
 | `--yes` | Don't ask for confirmation |
 | `--extract-only [DIR]` | Only check and unpack the bundle (default: next to the script) |
@@ -113,10 +113,10 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
 1. **TLS certificate:** replace `/etc/backend/tls/cert.pem` and `key.pem` with a certificate
    from your internal certificate authority for the server's name or IP, then
    `sudo systemctl reload nginx`. (Otherwise browsers warn about the self-signed one.)
-2. **Logins for each role:** `<command>` = `create_role_users --domain chonha.com` creates
-   `admin@chonha.com`, `boss@chonha.com`, `manager@chonha.com`, `finance_manager@…`,
-   `building_manager@…`, `building_owner@…`, `seller@…`, `developer@…`, each with its
-   role. Every new user gets a random password, **printed once**: store them safely.
+2. **Logins for each role:** `<command>` = `create_role_users` creates
+   the usernames `admin`, `boss`, `manager`, `finance_manager`, `building_manager`,
+   `building_owner`, `seller`, `developer` (with `--prefix chonha_`: `chonha_admin`, …),
+   each with its role. Every new user gets a random password, **printed once**: store them safely.
    `--ask-password` types one password for all; `--roles BOSS BUILDING_OWNER` limits it;
    existing users are skipped.
 3. **Link the accounts** that need it: a SELLER login to its store (`user` on the seller),

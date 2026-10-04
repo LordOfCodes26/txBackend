@@ -5,9 +5,9 @@ from .models import AuditLog
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "actor_email", "action", "entity_type", "entity_id"]
+    list_display = ["created_at", "actor_username", "action", "entity_type", "entity_id"]
     list_filter = ["action", "entity_type"]
-    search_fields = ["actor_email", "entity_id", "request_id"]
+    search_fields = ["actor_username", "entity_id", "request_id"]
 
     def has_add_permission(self, request):
         return False

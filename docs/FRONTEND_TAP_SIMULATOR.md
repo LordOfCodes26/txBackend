@@ -259,7 +259,7 @@ No other change is needed: the existing `card_tapped` WebSocket handler and the 
 ## 5. Try it
 
 1. `npm run dev` with `TAP_SIMULATOR=true` in `.env.development`.
-2. Sign in as `seller@demo.local` (or an admin) → Purchases → open a till → add goods →
+2. Sign in as `seller` (or an admin) → Purchases → open a till → add goods →
    **Scan card to buy**.
 3. In **Simulate tap**, pick a developer (the list shows balance and PIN status) → **Simulate
    tap**. The screen switches to the buyer/PIN step.

@@ -31,7 +31,7 @@ def record_audit(
     ctx = get_request_context()
     return AuditLog.objects.create(
         actor=actor,
-        actor_email=actor.email if actor else "",
+        actor_username=actor.username if actor else "",
         action=action,
         entity_type=entity_type,
         entity_id=str(entity_id),

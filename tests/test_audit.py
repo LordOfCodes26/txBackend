@@ -35,7 +35,7 @@ def test_record_audit_requires_an_entity():
 
 def test_system_actions_have_no_actor():
     log = record_audit("system.task", entity_type="rfid.device", entity_id="READER-1")
-    assert log.actor is None and log.actor_email == ""
+    assert log.actor is None and log.actor_username == ""
 
 
 @pytest.mark.parametrize(("role", "expected"), [(Roles.ADMIN, 200), (Roles.DEVELOPER, 403)])

@@ -4,7 +4,7 @@ Each tap opens a TCP connection to the server (port 9100), sends exactly the pac
 device sends and shows the server's one-line answer:
 
     $ID:Door1,TYPE:Input,UID=DC62B3E3$      ->  CARD_OK / CARD_NO / CARD_DENIED
-    $ID:ID:Reader1,TYPE:Pay,UID=DC62B3E3$   ->  CARD_OK / CARD_NO
+    $ID:Reader1,TYPE:Pay,UID=DC62B3E3$      ->  CARD_OK / CARD_NO
     $ID:Master1,TYPE:Master,UID=DC62B3E3$   ->  CARD_OK / CARD_NO
 
 The server recognises a door unit by its ID *and* the address it sends from, so every
@@ -41,7 +41,7 @@ TYPES = ["Input", "Output", "Pay", "Master"]
 TEMPLATES = {
     "Input": "ID:{id},TYPE:{type},UID={uid}",
     "Output": "ID:{id},TYPE:{type},UID={uid}",
-    "Pay": "ID:ID:{id},TYPE:{type},UID={uid}",  # the till readers repeat "ID:"
+    "Pay": "ID:{id},TYPE:{type},UID={uid}",
     "Master": "ID:{id},TYPE:{type},UID={uid}",
 }
 

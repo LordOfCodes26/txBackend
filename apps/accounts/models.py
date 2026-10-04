@@ -1,4 +1,5 @@
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
+from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -6,30 +7,37 @@ from django.utils.functional import cached_property
 
 from common.models import TimeStampedModel
 
+# Sign-in name: letters, digits, dot, underscore, hyphen; stored lower-case.
+USERNAME_PATTERN = r"^[A-Za-z0-9._-]{3,150}$"
+username_validator = RegexValidator(
+    USERNAME_PATTERN,
+    "3 to 150 letters, digits, dots, underscores or hyphens.",
+)
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
-    def _create_user(self, email, password, **extra):
-        if not email:
-            raise ValueError("Email is required.")
-        user = self.model(email=self.normalize_email(email).lower(), **extra)
+    def _create_user(self, username, password, **extra):
+        if not username:
+            raise ValueError("A username is required.")
+        user = self.model(username=username.strip().lower(), **extra)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
     def get_by_natural_key(self, username):
-        return self.get(email__iexact=username)
+        return self.get(username__iexact=username)
 
-    def create_user(self, email, password=None, **extra):
+    def create_user(self, username, password=None, **extra):
         extra.setdefault("is_staff", False)
         extra.setdefault("is_superuser", False)
-        return self._create_user(email, password, **extra)
+        return self._create_user(username, password, **extra)
 
-    def create_superuser(self, email, password=None, **extra):
+    def create_superuser(self, username, password=None, **extra):
         extra["is_staff"] = True
         extra["is_superuser"] = True
-        return self._create_user(email, password, **extra)
+        return self._create_user(username, password, **extra)
 
 
 class User(AbstractBaseUser):
@@ -40,7 +48,7 @@ class User(AbstractBaseUser):
     the only way into the Django admin.
     """
 
-    email = models.EmailField(unique=True)
+    username = models.CharField(max_length=150, unique=True, validators=[username_validator])
     full_name = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -53,20 +61,19 @@ class User(AbstractBaseUser):
 
     objects = UserManager()
 
-    USERNAME_FIELD = "email"
-    EMAIL_FIELD = "email"
+    USERNAME_FIELD = "username"
     REQUIRED_FIELDS: list[str] = []
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(Lower("email"), name="accounts_user_email_ci_unique"),
+            models.UniqueConstraint(Lower("username"), name="accounts_user_username_ci_unique"),
         ]
 
     def __str__(self):
-        return self.email
+        return self.username
 
     def save(self, *args, **kwargs):
-        self.email = self.email.lower()
+        self.username = self.username.strip().lower()
         super().save(*args, **kwargs)
 
     # --- RBAC ---------------------------------------------------------------

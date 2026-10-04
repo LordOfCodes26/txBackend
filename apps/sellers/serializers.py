@@ -28,14 +28,14 @@ class SellerSerializer(serializers.ModelSerializer):
         allow_null=True,
         help_text="The store's login: a user with the SELLER role. They manage only this store.",
     )
-    user_email = serializers.EmailField(source="user.email", read_only=True, default=None)
+    user_username = serializers.CharField(source="user.username", read_only=True, default=None)
 
     class Meta:
         model = Seller
         fields = [
             "id",
             "user",
-            "user_email",
+            "user_username",
             "name",
             "contact_name",
             "email",
@@ -85,7 +85,9 @@ class ServicePositionSerializer(serializers.ModelSerializer):
         allow_null=True,
         help_text="User id of the position's manager: sees and manages only this position.",
     )
-    manager_email = serializers.EmailField(source="manager.email", read_only=True, default=None)
+    manager_username = serializers.CharField(
+        source="manager.username", read_only=True, default=None
+    )
 
     class Meta:
         model = ServicePosition
@@ -98,7 +100,7 @@ class ServicePositionSerializer(serializers.ModelSerializer):
             "building",
             "building_name",
             "manager",
-            "manager_email",
+            "manager_username",
             "is_active",
             "created_at",
             "updated_at",

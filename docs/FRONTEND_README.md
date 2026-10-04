@@ -60,13 +60,13 @@ JWT (JSON Web Tokens) with a short-lived **access token** and a rotating **refre
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/api/v1/auth/token/` | `{email, password}` | `{access, refresh}` |
+| POST | `/api/v1/auth/token/` | `{username, password}` | `{access, refresh}` |
 | POST | `/api/v1/auth/token/refresh/` | `{refresh}` | `{access, refresh}`, a **new** refresh token |
 | POST | `/api/v1/auth/logout/` | `{refresh}` | 204 (refresh token revoked). No access token needed, so it works after expiry |
 | GET | `/api/v1/auth/me/` | none | Current user, roles and permissions |
 | POST | `/api/v1/auth/password/` | `{old_password, new_password}` | 204 (revokes all refresh tokens: log in again) |
 
-Email login ignores upper/lower case. The login endpoint is rate-limited, so show the
+Usernames ignore upper/lower case (they are stored lower-case). Users have no email address. The login endpoint is rate-limited, so show the
 `THROTTLED` error nicely.
 
 ### Refresh rotation: read this carefully
@@ -144,7 +144,7 @@ memory only (not `localStorage`). The backend must then list the frontend's orig
 ```json
 {
   "id": 7,
-  "email": "manager@demo.local",
+  "username": "manager",
   "full_name": "Manager",
   "is_active": true,
   "roles": ["MANAGER"],
@@ -343,7 +343,7 @@ owner can't also be a position manager.
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Show field errors from `details` |
 | 401 | `NOT_AUTHENTICATED`, `TOKEN_NOT_VALID` | Refresh once, else go to login |
-| 401 | `NO_ACTIVE_ACCOUNT` | Wrong email/password on login |
+| 401 | `NO_ACTIVE_ACCOUNT` | Wrong username/password on login |
 | 403 | `PERMISSION_DENIED`, `PRIVILEGE_ESCALATION` | "You don't have access" |
 | 404 | `NOT_FOUND`, `DEVELOPER_PROFILE_NOT_FOUND` | Not-found state |
 | 409 | Business rule codes (below) | Show `message`; usually refetch the item |
@@ -447,8 +447,8 @@ headers: { "Accept-Language": locale }   // "ko" or "en"
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/users/` | `user.view` | Filters: `is_active`, `role`. Search: email, name. Ordering: `email`, `full_name`, `date_joined`, `last_login` |
-| POST | `/users/` | `user.manage` | `{email, full_name?, password}`; password rules enforced |
+| GET | `/users/` | `user.view` | Filters: `is_active`, `role`. Search: username, name. Ordering: `username`, `full_name`, `date_joined`, `last_login` |
+| POST | `/users/` | `user.manage` | `{username, full_name?, password}`: username 3–150 letters, digits, `.`, `_`, `-` (unique, stored lower-case); password rules enforced. `PATCH /users/{id}/` also takes `username` |
 | GET/PATCH | `/users/{id}/` | `user.view` / `user.manage` | PATCH: `full_name`, `is_active` |
 | POST | `/users/{id}/roles/` | `role.assign` | `{role: "MANAGER"}` |
 | DELETE | `/users/{id}/roles/{role_code}/` | `role.assign` | |
@@ -469,7 +469,7 @@ Users can't grant roles with more permissions than they have themselves
 Fields: `employee_number`, `full_name`, `phone`, `home_address`, `birthday`, `department`,
 `position_title`, `building` (optional home building; read-only `building_name`),
 `start_date`, `out_date` (last working day), `status`, `user`.
-Developers have **no email field**; a developer's login email lives on their user account.
+Developers have **no email field**, and users have none either: a developer signs in with the **username** of their user account.
 Dates are `YYYY-MM-DD`. `out_date` can't be before `start_date`, and `birthday` can't be in
 the future. `home_address` is personal data: show it only on detail and edit pages, not in list
 tables. The developer list shows `birthday`.
@@ -485,6 +485,7 @@ tables. The developer list shows `birthday`.
 | PATCH | `/rfid/cards/{id}/` | `rfid.assign` | `label`, `notes` only |
 | POST | `/rfid/cards/{id}/assign/` | `rfid.assign` | `{developer, building?, pin, pin_confirm}` (`building` also sets the developer's home building): assigning a card **also sets the developer's purchase PIN**. Show two masked PIN fields the developer fills in themselves (4–6 digits, not trivial like 1111 / 1234). A bad or mismatched PIN assigns nothing (`VALIDATION_ERROR` on `pin` / `pin_confirm`). A new PIN replaces an old one |
 | GET | `/rfid/card-reads/?device=&after=` | `rfid.assign` or `finance.deposit` | Card assign readers (`devices`) and the newest tap on `device` after tap id `after` (`read`: `uid`, `card` with `status`, `assigned`, `new`, `holder`, `developer`). Poll every ~1 s while waiting: take `cursor` first, then pass it as `after`. Used by New card, Assign card and the deposit desk |
+| GET | `/rfid/tcp-log/` | `system.tcp_log` (Admin) | Every packet the TCP listener received: `request` (as received, without the `$`), `response` (exactly what was sent back, e.g. `CARD_OK\r\n` or `$…$` JSON), `received_at`, `peer_ip`, `device_code`, `device`/`device_name`, `event`, `outcome` (`OK`, `REJECTED`, `INVALID`, `REFUSED`, `ERROR`), `note` (why), `duration_ms`. Newest first. Filters: `outcome`, `peer_ip`, `device_code`, `device`, `received_after`, `received_before`, `text` (in request or response). Kept `RFID_TCP_LOG_DAYS` (30) |
 | POST | `/rfid/cards/{id}/unassign/` | `rfid.assign` | |
 | POST | `/rfid/cards/{id}/replace/` | `rfid.assign` | `{new_card_uid, new_card_label?, reason?}`; returns the **new** card |
 | POST | `/rfid/cards/{id}/block/`, `/unblock/` | `rfid.block` | `{reason?}` |
@@ -1047,9 +1048,9 @@ Build the navigation from `me.permissions` so each user only sees their pages.
 2. The staging certificate is self-signed. For server-side calls from Node during
    development, trust it by setting `NODE_EXTRA_CA_CERTS=/path/to/staging.crt` (ask the
    backend team for the file). Don't use `NODE_TLS_REJECT_UNAUTHORIZED=0`.
-3. Demo accounts exist for each role (`admin@demo.local`, `boss@demo.local`, `manager@demo.local`,
-   `finance_manager@demo.local`, `seller_manager@demo.local`, `developer@demo.local`,
-   `seller@demo.local`). Ask the backend team for passwords. `developer@demo.local` is
+3. Demo accounts exist for each role (usernames `admin`, `boss`, `manager`,
+   `finance_manager`, `seller_manager`, `developer`, `seller`). Ask the backend team for
+   passwords. `developer` is
    linked to a developer profile, so the `/me/` pages have data.
 
 ---

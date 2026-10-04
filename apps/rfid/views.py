@@ -31,6 +31,7 @@ from .filters import (
     RFIDCardFilter,
     RFIDDeviceFilter,
     RFIDEventFilter,
+    TCPFrameLogFilter,
 )
 from .models import (
     Building,
@@ -39,6 +40,7 @@ from .models import (
     RFIDCardAssignment,
     RFIDDevice,
     RFIDEvent,
+    TCPFrameLog,
 )
 from .permissions import IsRFIDDevice
 from .scope import BuildingScopedMixin, building_scope, ensure_in_scope
@@ -59,6 +61,7 @@ from .serializers import (
     RFIDEventSerializer,
     ScanResponseSerializer,
     ScanSerializer,
+    TCPFrameLogSerializer,
 )
 
 ACTIVE_ASSIGNMENTS = "assignments__developer"
@@ -511,3 +514,15 @@ class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         if self._scoped():
             raise PermissionDenied(_("Building managers can't delete buildings."))
         instance.delete()
+
+
+class TCPFrameLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Every packet the TCP listener received (`request`) and what it sent back (`response`),
+    newest first, kept for RFID_TCP_LOG_DAYS. Admins only (`system.tcp_log`)."""
+
+    queryset = TCPFrameLog.objects.select_related("device")
+    serializer_class = TCPFrameLogSerializer
+    permission_classes = [HasPermissions]
+    required_permissions = {"list": ["system.tcp_log"], "retrieve": ["system.tcp_log"]}
+    filterset_class = TCPFrameLogFilter
+    ordering_fields = ["received_at", "duration_ms"]

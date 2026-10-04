@@ -35,10 +35,10 @@ def api_client():
 def make_user(db):
     counter = iter(range(1, 10_000))
 
-    def _make(*roles: str, email: str | None = None, **extra) -> User:
-        user = User.objects.create_user(
-            email=email or f"user{next(counter)}@example.com", password=PASSWORD, **extra
-        )
+    def _make(*roles: str, username: str | None = None, email: str | None = None, **extra) -> User:
+        # `email="cafe@x.com"` (older tests) becomes the username "cafe".
+        name = username or (email.split("@")[0] if email else f"user{next(counter)}")
+        user = User.objects.create_user(username=name, password=PASSWORD, **extra)
         for code in roles:
             UserRole.objects.create(user=user, role=Role.objects.get(code=code))
         return user
@@ -48,7 +48,7 @@ def make_user(db):
 
 @pytest.fixture
 def admin(make_user):
-    return make_user(Roles.ADMIN, email="root@example.com")
+    return make_user(Roles.ADMIN, username="root")
 
 
 @pytest.fixture

@@ -22,7 +22,7 @@
 #                            find it with: hostname -I (default: asked on first install)
 #   --hosts "a,b"            extra host names / IPs clients use to reach the server
 #                            (the server's own IPs and hostname are always allowed)
-#   --admin-email EMAIL      create the first admin with this email (asks for the password)
+#   --admin-user NAME        create the first admin with this username (asks for the password)
 #   --no-admin               don't create an admin account
 #   --yes                    don't ask for confirmation
 #   --extract-only [DIR]     check and unpack the bundle (default: next to this script), then stop
@@ -36,7 +36,7 @@ LANGUAGE=""
 SERVER_IP=""
 DEVICE_LANGUAGE=""
 EXTRA_HOSTS=""
-ADMIN_EMAIL=""
+ADMIN_USER=""
 NO_ADMIN=0
 ASSUME_YES=0
 EXTRACT_ONLY=0
@@ -50,7 +50,7 @@ while (( $# )); do
         --server-ip) SERVER_IP="$2"; shift 2 ;;
         --device-language) DEVICE_LANGUAGE="$2"; shift 2 ;;
         --hosts) EXTRA_HOSTS="$2"; shift 2 ;;
-        --admin-email) ADMIN_EMAIL="$2"; shift 2 ;;
+        --admin-user) ADMIN_USER="$2"; shift 2 ;;
         --no-admin) NO_ADMIN=1; shift ;;
         --yes|-y) ASSUME_YES=1; shift ;;
         --extract-only)
@@ -240,19 +240,19 @@ fi
 HAS_ADMIN=$(manage shell -c "\"from apps.accounts.models import User; print(int(User.objects.filter(is_superuser=True, is_active=True).exists()))\"" 2>/dev/null | tail -1)
 if [[ "$HAS_ADMIN" != "1" && $NO_ADMIN -eq 0 ]]; then
     say "First admin account"
-    if [[ -z "$ADMIN_EMAIL" ]]; then
-        ADMIN_EMAIL=$(ask "Admin email" "admin@example.com")
+    if [[ -z "$ADMIN_USER" ]]; then
+        ADMIN_USER=$(ask "Admin username" "admin")
     fi
     if (( ASSUME_YES )) && [[ -z "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
         echo "    --yes without DJANGO_SUPERUSER_PASSWORD: create the admin later with:"
         echo "    sudo -u backend bash -c 'set -a; . $ENV_FILE; set +a; cd $APP && .venv/bin/python manage.py createsuperuser'"
     elif [[ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
         runuser -u backend -- env DJANGO_SUPERUSER_PASSWORD="$DJANGO_SUPERUSER_PASSWORD" bash -c \
-            "set -a; . '$ENV_FILE'; set +a; cd '$APP' && .venv/bin/python manage.py createsuperuser --noinput --email '$ADMIN_EMAIL'"
+            "set -a; . '$ENV_FILE'; set +a; cd '$APP' && .venv/bin/python manage.py createsuperuser --noinput --username '$ADMIN_USER'"
     else
         echo "    Choose a strong password (at least 8 characters, not only digits):"
         runuser -u backend -- bash -c \
-            "set -a; . '$ENV_FILE'; set +a; cd '$APP' && .venv/bin/python manage.py createsuperuser --email '$ADMIN_EMAIL'" </dev/tty
+            "set -a; . '$ENV_FILE'; set +a; cd '$APP' && .venv/bin/python manage.py createsuperuser --username '$ADMIN_USER'" </dev/tty
     fi
 elif [[ "$HAS_ADMIN" == "1" ]]; then
     echo "    An admin account already exists; skipping."

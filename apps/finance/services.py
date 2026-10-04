@@ -288,6 +288,15 @@ def give_pin(*, actor, account: DeveloperAccount, pin: str, action: str) -> None
     record_audit(action, actor=actor, entity=account)
 
 
+def change_pin_at_desk(*, actor, account: DeveloperAccount, current_pin: str, pin: str) -> None:
+    """The developer changes their PIN at the PIN desk (identified by their card).
+
+    The current PIN is checked like at the till: wrong attempts count and lock the PIN
+    (verify_pin commits them). Only then is the new PIN stored."""
+    verify_pin(account=account, pin=current_pin)
+    give_pin(actor=actor, account=account, pin=pin, action="finance.pin_changed_at_desk")
+
+
 @transaction.atomic
 def reset_pin(*, actor, account: DeveloperAccount, pin: str | None = None) -> None:
     """Replace a forgotten PIN with `pin` (typed by the developer), or clear it. Clears

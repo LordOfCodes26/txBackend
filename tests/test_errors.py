@@ -42,10 +42,10 @@ def test_unique_violation_race_becomes_409():
 
     from apps.accounts.models import User
 
-    User.objects.create_user(email="dup@example.com", password="x")
+    User.objects.create_user(username="dup", password="x")
     try:
         with transaction.atomic():
-            User.objects.create(email="dup@example.com")
+            User.objects.create(username="dup")
     except IntegrityError as exc:
         response = exception_handler(exc, {})
     assert response.status_code == 409

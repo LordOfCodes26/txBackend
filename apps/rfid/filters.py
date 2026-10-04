@@ -1,6 +1,14 @@
 import django_filters
+from django.db.models import Q
 
-from .models import RFIDCard, RFIDCardAssignment, RFIDDevice, RFIDEvent, normalize_uid
+from .models import (
+    RFIDCard,
+    RFIDCardAssignment,
+    RFIDDevice,
+    RFIDEvent,
+    TCPFrameLog,
+    normalize_uid,
+)
 
 
 class RFIDCardFilter(django_filters.FilterSet):
@@ -60,3 +68,18 @@ class RFIDDeviceFilter(django_filters.FilterSet):
         since = timezone.now() - timedelta(seconds=settings.RFID_DEVICE_OFFLINE_AFTER_SECONDS)
         online = queryset.filter(last_seen_at__gte=since)
         return online if value else queryset.exclude(pk__in=online.values("pk"))
+
+
+class TCPFrameLogFilter(django_filters.FilterSet):
+    received_after = django_filters.IsoDateTimeFilter(field_name="received_at", lookup_expr="gte")
+    received_before = django_filters.IsoDateTimeFilter(field_name="received_at", lookup_expr="lt")
+    device_code = django_filters.CharFilter(field_name="device_code", lookup_expr="iexact")
+    text = django_filters.CharFilter(method="filter_text")
+
+    class Meta:
+        model = TCPFrameLog
+        fields = ["outcome", "peer_ip", "device", "device_code"]
+
+    def filter_text(self, queryset, name, value):
+        """Words in the request or the response, e.g. a card UID or CARD_DENIED."""
+        return queryset.filter(Q(request__icontains=value) | Q(response__icontains=value))

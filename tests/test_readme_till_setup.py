@@ -17,7 +17,7 @@ TILL_PC = "192.168.100.60"  # the seller's PC, where the till reader is plugged 
 DESK_PC = "192.168.100.70"  # where the card assign reader is
 
 
-def tap(uid, reader="ID:Reader1", kind="Pay", ip=TILL_PC):
+def tap(uid, reader="Reader1", kind="Pay", ip=TILL_PC):
     """Exactly the packet the reader sends (between the $ signs) and the line it gets back."""
     return handle_frame(f"ID:{reader},TYPE:{kind},UID={uid}".encode(), ip)
 
@@ -63,7 +63,7 @@ def test_readme_till_and_card_assign_readers(auth_client, make_user):
     )
     assert tap("DC62B3E3") == "CARD_NO\r\n"  # before Scan card to buy: nobody takes it
     desk.post(f"/api/v1/purchases/{purchase}/wait/")
-    assert tap("DC62B3E3") == "CARD_OK\r\n"  # the reader sends ID:ID:Reader1 here
+    assert tap("DC62B3E3") == "CARD_OK\r\n"  # $ID:Reader1,TYPE:Pay,UID=DC62B3E3$
     assert RFIDDevice.objects.get(code="Reader1").last_ip == TILL_PC
 
     # The seller's screen shows who tapped; the developer types the PIN; paid.

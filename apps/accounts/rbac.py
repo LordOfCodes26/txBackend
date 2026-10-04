@@ -32,6 +32,7 @@ PERMISSIONS: dict[str, str] = {
     "rfid.assign": "Assign and replace RFID cards",
     "rfid.block": "Block RFID cards",
     "rfid.device.manage": "Register and manage RFID readers",
+    "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",
     # Attendance
     "attendance.view": "View attendance records",
     "attendance.correct": "Correct attendance records",

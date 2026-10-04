@@ -18,6 +18,7 @@ from .models import (
     RFIDDevice,
     RFIDEvent,
     ScanDirection,
+    TCPFrameLog,
     normalize_uid,
     uid_validator,
 )
@@ -232,7 +233,9 @@ class BuildingSerializer(serializers.ModelSerializer):
         from apps.accounts.models import UserRole
 
         missing = [
-            u.email for u in users if not UserRole.objects.filter(user=u, role__code=role).exists()
+            u.username
+            for u in users
+            if not UserRole.objects.filter(user=u, role__code=role).exists()
         ]
         if missing:
             raise serializers.ValidationError(
@@ -530,3 +533,27 @@ class DeviceConfigSerializer(serializers.ModelSerializer):
 
     def get_max_future_skew_seconds(self, obj) -> int:
         return settings.RFID_MAX_FUTURE_SKEW_SECONDS
+
+
+class TCPFrameLogSerializer(serializers.ModelSerializer):
+    device_name = serializers.CharField(source="device.name", read_only=True, default=None)
+    device_purpose = serializers.CharField(source="device.purpose", read_only=True, default=None)
+
+    class Meta:
+        model = TCPFrameLog
+        fields = [
+            "id",
+            "received_at",
+            "peer_ip",
+            "request",
+            "response",
+            "device_code",
+            "device",
+            "device_name",
+            "device_purpose",
+            "event",
+            "outcome",
+            "note",
+            "duration_ms",
+        ]
+        read_only_fields = fields

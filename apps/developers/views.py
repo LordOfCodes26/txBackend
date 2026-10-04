@@ -29,6 +29,7 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         "partial_update": ["developer.update"],
         "destroy": ["developer.delete"],
         "me": [],
+        "departments": ["developer.view"],
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = DeveloperFilter
@@ -63,6 +64,19 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         services.delete_developer(actor=self.request.user, developer=instance)
+
+    @extend_schema(responses={200: {"type": "array", "items": {"type": "string"}}})
+    @action(detail=False, methods=["get"])
+    def departments(self, request):
+        """The departments already used (sorted, no blanks), to pick from when typing one."""
+        names = (
+            self.get_queryset()
+            .exclude(department="")
+            .order_by("department")
+            .values_list("department", flat=True)
+            .distinct()
+        )
+        return Response(list(names))
 
     @extend_schema(responses=MyDeveloperProfileSerializer)
     @action(detail=False, methods=["get"])

@@ -133,7 +133,7 @@ def test_only_seller_role_users_can_be_linked(seller_manager, make_user):
     }
     seller_login = make_user(Roles.SELLER, email="shop@x.com")
     response = seller_manager.post(SELLERS, {"name": "Shop", "user": seller_login.pk})
-    assert (response.status_code, response.json()["user_email"]) == (201, "shop@x.com")
+    assert (response.status_code, response.json()["user_username"]) == (201, "shop")
 
     position = ServicePosition.objects.create(seller_id=response.json()["id"], name="Till")
     r = seller_manager.patch(
@@ -159,3 +159,16 @@ def test_store_access_needs_the_role_and_the_link(auth_client, make_user):
     UserRole.objects.filter(user=owner).delete()  # role taken away: no store access
     fresh = type(owner).objects.get(pk=owner.pk)  # as on the next request
     assert auth_client(fresh).get("/api/v1/goods/").status_code == 403
+
+
+def test_positions_of_active_sellers_only(auth_client, make_user):
+    from apps.sellers.models import Seller, ServicePosition
+
+    open_shop = Seller.objects.create(name="Open")
+    closed_shop = Seller.objects.create(name="Closed", status="CLOSED")
+    ServicePosition.objects.create(seller=open_shop, name="Open counter")
+    ServicePosition.objects.create(seller=open_shop, name="Old counter", is_active=False)
+    ServicePosition.objects.create(seller=closed_shop, name="Closed counter")
+    client = auth_client(make_user(Roles.ADMIN))
+    r = client.get("/api/v1/service-positions/?is_active=true&seller_status=ACTIVE")
+    assert [p["name"] for p in r.json()["results"]] == ["Open counter"]

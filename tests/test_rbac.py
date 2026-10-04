@@ -90,7 +90,7 @@ def test_admin_warns_when_seller_role_gets_global_permissions(client, django_use
     """A global permission on SELLER means every seller sees every store's data."""
     from apps.accounts.models import Permission, Role
 
-    admin = django_user_model.objects.create_superuser(email="root@x.com", password="Str0ng-pass!")
+    admin = django_user_model.objects.create_superuser(username="root", password="Str0ng-pass!")
     client.force_login(admin)
     role = Role.objects.get(code="SELLER")
     good_view = Permission.objects.get(codename="good.view")

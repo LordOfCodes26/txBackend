@@ -10,7 +10,7 @@ administrator PowerShell:
 
     powershell -ExecutionPolicy Bypass -File .\install-all.ps1
     powershell -ExecutionPolicy Bypass -File .\install-all.ps1 -ServerIp 192.168.1.10 `
-        -TimeZone Asia/Pyongyang -Language ko -AdminEmail admin@chonha.com -DevUser kim
+        -TimeZone Asia/Pyongyang -Language ko -AdminUser admin -DevUser kim
 
 Re-running is safe: it upgrades what is installed (safety backup first) and never
 overwrites developers' work. Data, settings and accounts are kept.
@@ -27,8 +27,8 @@ Web/API language when the browser doesn't choose: en or ko.
 Language on door and till reader screens: en or ko (ko only if they show Korean letters).
 .PARAMETER Hosts
 Extra host names or IPs clients use, comma separated.
-.PARAMETER AdminEmail
-Create the first admin with this email (asks for the password).
+.PARAMETER AdminUser
+Create the first admin with this username (asks for the password).
 .PARAMETER NoAdmin
 Don't create an admin account.
 .PARAMETER DevUser
@@ -52,7 +52,7 @@ param(
     [string]$Language = '',
     [string]$DeviceLanguage = '',
     [string]$Hosts = '',
-    [string]$AdminEmail = '',
+    [string]$AdminUser = '',
     [switch]$NoAdmin,
     [string]$DevUser = $env:USERNAME,
     [switch]$SeedDemo,
@@ -549,15 +549,15 @@ try {
         'from apps.accounts.models import User; print(int(User.objects.filter(is_superuser=True, is_active=True).exists()))') -Environment $django -PassThru
     if (($hasAdmin | Select-Object -Last 1) -ne '1' -and -not $NoAdmin) {
         Write-Step '10. First admin account'
-        if (-not $AdminEmail) { $AdminEmail = Read-Answer 'Admin email' 'admin@example.com' -AssumeYes:$Yes }
+        if (-not $AdminUser) { $AdminUser = Read-Answer 'Admin username' 'admin' -AssumeYes:$Yes }
         if ($env:DJANGO_SUPERUSER_PASSWORD) {
-            Invoke-Native "$cur\.venv\Scripts\python.exe" @('manage.py', 'createsuperuser', '--noinput', '--email', $AdminEmail) -Environment $django
+            Invoke-Native "$cur\.venv\Scripts\python.exe" @('manage.py', 'createsuperuser', '--noinput', '--username', $AdminUser) -Environment $django
         } elseif ($Yes) {
             Write-Note '-Yes without DJANGO_SUPERUSER_PASSWORD: create the admin later (see the README).'
         } else {
             Write-Note 'Choose a strong password (at least 8 characters, not only digits):'
             foreach ($k in $django.Keys) { [Environment]::SetEnvironmentVariable($k, $django[$k], 'Process') }
-            & "$cur\.venv\Scripts\python.exe" manage.py createsuperuser --email $AdminEmail
+            & "$cur\.venv\Scripts\python.exe" manage.py createsuperuser --username $AdminUser
             foreach ($k in $django.Keys) { [Environment]::SetEnvironmentVariable($k, $null, 'Process') }
         }
     }

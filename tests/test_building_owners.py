@@ -206,7 +206,7 @@ def test_owners_need_the_building_owner_role(auth_client, admin, make_user, site
         f"/api/v1/rfid/buildings/{site.b2.pk}/", {"owners": [plain.pk]}, format="json"
     )
     assert r.json()["error"]["details"] == {
-        "owners": ["These users don't have the BUILDING_OWNER role: plain@x.com"]
+        "owners": ["These users don't have the BUILDING_OWNER role: plain"]
     }
     r = auth_client(admin).patch(
         f"/api/v1/rfid/buildings/{site.b2.pk}/", {"managers": [site.owner.pk]}, format="json"

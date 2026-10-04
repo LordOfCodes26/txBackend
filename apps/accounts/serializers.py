@@ -2,7 +2,7 @@ from django.contrib.auth import password_validation
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from .models import Role, User
+from .models import Role, User, username_validator
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -18,7 +18,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "is_active", "roles", "date_joined", "last_login"]
+        fields = ["id", "username", "full_name", "is_active", "roles", "date_joined", "last_login"]
         read_only_fields = fields
 
 
@@ -33,26 +33,39 @@ class MeSerializer(UserSerializer):
         return sorted(user.rbac_permissions)
 
 
+def _unique_username(value: str, user: User | None = None) -> str:
+    value = value.strip().lower()
+    clash = User.objects.filter(username__iexact=value)
+    if user is not None:
+        clash = clash.exclude(pk=user.pk)
+    if clash.exists():
+        raise serializers.ValidationError(_("A user with this username already exists."))
+    return value
+
+
 class UserCreateSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    username = serializers.CharField(max_length=150, validators=[username_validator])
     full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
-    def validate_email(self, value):
-        value = value.lower()
-        if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError(_("A user with this email already exists."))
-        return value
+    def validate_username(self, value):
+        return _unique_username(value)
 
     def validate(self, attrs):
-        candidate = User(email=attrs["email"], full_name=attrs.get("full_name", ""))
+        candidate = User(username=attrs["username"], full_name=attrs.get("full_name", ""))
         password_validation.validate_password(attrs["password"], candidate)
         return attrs
 
 
 class UserUpdateSerializer(serializers.Serializer):
+    username = serializers.CharField(
+        max_length=150, required=False, validators=[username_validator]
+    )
     full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     is_active = serializers.BooleanField(required=False)
+
+    def validate_username(self, value):
+        return _unique_username(value, self.context.get("user"))
 
 
 class RoleAssignSerializer(serializers.Serializer):

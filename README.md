@@ -146,7 +146,7 @@ Commit both `django.po` and `django.mo` (the offline server has no gettext tools
 ## Logins for each role
 
 ```bash
-.venv/bin/python manage.py create_role_users --domain chonha.com   # admin@chonha.com, boss@chonha.com, ...
+.venv/bin/python manage.py create_role_users   # admin, boss, finance_manager, ... (--prefix chonha_ for chonha_admin, ...)
 ```
 
 Creates one user per role (skips existing ones) with random passwords printed once;

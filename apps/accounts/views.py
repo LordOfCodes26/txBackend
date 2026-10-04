@@ -101,8 +101,8 @@ class UserViewSet(
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = UserFilter
-    search_fields = ["email", "full_name"]
-    ordering_fields = ["email", "full_name", "date_joined", "last_login"]
+    search_fields = ["username", "full_name"]
+    ordering_fields = ["username", "full_name", "date_joined", "last_login"]
 
     @extend_schema(request=UserCreateSerializer, responses={201: UserSerializer})
     def create(self, request, *args, **kwargs):
@@ -114,7 +114,7 @@ class UserViewSet(
     @extend_schema(request=UserUpdateSerializer, responses=UserSerializer)
     def partial_update(self, request, *args, **kwargs):
         user = self.get_object()
-        serializer = UserUpdateSerializer(data=request.data, partial=True)
+        serializer = UserUpdateSerializer(data=request.data, partial=True, context={"user": user})
         serializer.is_valid(raise_exception=True)
         if serializer.validated_data:
             user = services.update_user(actor=request.user, user=user, **serializer.validated_data)

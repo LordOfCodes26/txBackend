@@ -101,8 +101,8 @@ def test_staff_assign_manager_and_building(auth_client, make_user, cafe):
         format="json",
     )
     assert r.status_code == 200, r.json()
-    assert (r.json()["manager_email"], r.json()["building_name"]) == (
-        "counter@cafe.x",
+    assert (r.json()["manager_username"], r.json()["building_name"]) == (
+        "counter",
         "Building 1",
     )
     assert names(auth_client(newbie).get(GOODS)) == ["Tea"]

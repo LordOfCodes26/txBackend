@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import Seller, ServicePosition
+from .models import Seller, SellerStatus, ServicePosition
 
 
 class SellerFilter(django_filters.FilterSet):
@@ -12,6 +12,10 @@ class SellerFilter(django_filters.FilterSet):
 
 
 class ServicePositionFilter(django_filters.FilterSet):
+    seller_status = django_filters.ChoiceFilter(
+        field_name="seller__status", choices=SellerStatus.choices
+    )
+
     class Meta:
         model = ServicePosition
-        fields = ["seller", "building", "manager", "is_active"]
+        fields = ["seller", "building", "manager", "is_active", "seller_status"]

@@ -8,7 +8,7 @@ the device sends and shows the answer:
 |---|---|---|
 | Door unit, way in | `$ID:Door1,TYPE:Input,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO`, `CARD_DENIED` |
 | Door unit, way out | `$ID:Door1,TYPE:Output,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO`, `CARD_DENIED` |
-| Till reader | `$ID:ID:Reader1,TYPE:Pay,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO` |
+| Till reader | `$ID:Reader1,TYPE:Pay,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO` |
 | Card assign reader | `$ID:Master1,TYPE:Master,UID=DC62B3E3$` | `CARD_OK`, `CARD_NO` |
 
 The list starts with the company's devices: Master1–2, Reader1–2, Door1-1…4

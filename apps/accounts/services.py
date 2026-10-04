@@ -35,12 +35,12 @@ def _ensure_other_admin_remains(user: User) -> None:
 
 
 def _user_snapshot(user: User) -> dict:
-    return {"email": user.email, "full_name": user.full_name, "is_active": user.is_active}
+    return {"username": user.username, "full_name": user.full_name, "is_active": user.is_active}
 
 
 @transaction.atomic
-def create_user(*, actor: User, email: str, password: str, full_name: str = "") -> User:
-    user = User.objects.create_user(email=email, password=password, full_name=full_name)
+def create_user(*, actor: User, username: str, password: str, full_name: str = "") -> User:
+    user = User.objects.create_user(username=username, password=password, full_name=full_name)
     record_audit("user.created", actor=actor, entity=user, new_values=_user_snapshot(user))
     return user
 

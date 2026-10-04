@@ -56,7 +56,7 @@ The installer asks a few questions (Enter keeps the suggestion in brackets):
 | Default language for the web and API | `en` (English) or `ko` (Korean) |
 | Language on door/till reader screens | `ko` only if the readers can show Korean letters |
 | IP address that computers, tills and doors will use | the fixed IP from section 3 |
-| Admin email, password | the first administrator account of the web app |
+| Admin username, password | the first administrator account of the web app |
 
 It then works for **10 to 30 minutes** (the antivirus checks tens of thousands of files):
 it unpacks the programs, creates the database, builds the web app, starts the services,
@@ -87,7 +87,7 @@ Instead of answering questions, give everything at once (in an administrator Pow
 the kit folder):
 
 ```powershell
-.\install.cmd -ServerIp 192.168.1.10 -TimeZone Asia/Pyongyang -Language ko -AdminEmail admin@chonha.com -DevUser kim
+.\install.cmd -ServerIp 192.168.1.10 -TimeZone Asia/Pyongyang -Language ko -AdminUser admin -DevUser kim
 ```
 
 | Option | Meaning |
@@ -95,7 +95,7 @@ the kit folder):
 | `-ServerIp IP` | the PC's fixed IP |
 | `-TimeZone Area/City` | company timezone |
 | `-Language en\|ko`, `-DeviceLanguage en\|ko` | web/API language, reader screen language |
-| `-AdminEmail EMAIL`, `-NoAdmin` | the first admin account, or none |
+| `-AdminUser NAME`, `-NoAdmin` | the first admin account, or none |
 | `-DevUser NAME` | whose development copies (default: you; `none` = no copies) |
 | `-SeedDemo` | fill the development copy with demo data |
 | `-DoorNetwork 192.168.1.0/24` | only these addresses may use the door port 9100 |
@@ -164,7 +164,7 @@ in `C:\Management\data\pgdata\log\`).
 (all answer `"status": "ok"`).
 
 **Management commands** (in an administrator command prompt):
-`C:\Management\manage.cmd <command>`, e.g. `C:\Management\manage.cmd changepassword admin@example.com`
+`C:\Management\manage.cmd <command>`, e.g. `C:\Management\manage.cmd changepassword admin`
 or `C:\Management\manage.cmd createsuperuser`.
 
 ## 8. Doors (attendance)
@@ -332,7 +332,7 @@ the commits, merge, test, and build the next kit (`scripts/build_windows_kit.sh`
 | Other PCs can't open the page at all | wrong IP, or another firewall (antivirus) blocks 443: check `ping <ip>`, and allow 443 in the antivirus |
 | A door is rejected | its ID or IP doesn't match its registration (section 8; the log says which) |
 | Times are off by hours | wrong timezone: `install.cmd -TimeZone Asia/Pyongyang` |
-| Forgot the admin password | `C:\Management\manage.cmd changepassword <email>` (administrator command prompt) |
+| Forgot the admin password | `C:\Management\manage.cmd changepassword <username>` (administrator command prompt) |
 | `/health/backup/` not ok | `C:\Management\logs\backup.log`; run a backup now (section 10) |
 
 ## 15. Removing it

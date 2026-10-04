@@ -191,3 +191,12 @@ def test_me_without_profile_is_404(auth_client, make_user):
 def test_put_is_not_allowed(manager_client, make_developer):
     dev = make_developer()
     assert manager_client.put(f"{URL}{dev.pk}/", payload(1)).status_code in (403, 405)
+
+
+def test_departments_to_pick_from(manager_client, make_developer):
+    make_developer(department="Research")
+    make_developer(department="Engineering")
+    make_developer(department="Research")
+    make_developer(department="")
+    r = manager_client.get(f"{URL}departments/")
+    assert r.json() == ["Engineering", "Research"]

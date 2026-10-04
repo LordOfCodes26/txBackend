@@ -13,5 +13,5 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["audit.view"], "retrieve": ["audit.view"]}
     filterset_class = AuditLogFilter
-    search_fields = ["actor_email", "action", "entity_id"]
+    search_fields = ["actor_username", "action", "entity_id"]
     ordering_fields = ["created_at", "id"]

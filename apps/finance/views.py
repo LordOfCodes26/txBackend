@@ -17,6 +17,7 @@ from .serializers import (
     AccountTransactionSerializer,
     AdjustmentSerializer,
     DepositSerializer,
+    DeskChangePinSerializer,
     DeveloperAccountSerializer,
     ResetPinSerializer,
     SetPinSerializer,
@@ -49,6 +50,7 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
         "me": [],
         "set_my_pin": [],
         "reset_pin": ["finance.adjust"],
+        "change_pin": ["finance.deposit"],
         "freeze": ["finance.adjust"],
         "unfreeze": ["finance.adjust"],
         "close": ["finance.adjust"],
@@ -63,6 +65,21 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
     def me(self, request):
         account = services.open_account(_own_developer(request))
         return Response(DeveloperAccountSerializer(account).data)
+
+    @extend_schema(request=DeskChangePinSerializer, responses={204: None})
+    @action(detail=True, methods=["post"], url_path="change-pin")
+    def change_pin(self, request, pk=None):
+        """PIN desk: the developer (identified by their card) types the current PIN and the new
+        one twice. A wrong current PIN counts like at the till (INVALID_PIN, then PIN_LOCKED)."""
+        serializer = DeskChangePinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.change_pin_at_desk(
+            actor=request.user,
+            account=self.get_object(),
+            current_pin=serializer.validated_data["current_pin"],
+            pin=serializer.validated_data["pin"],
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=SetPinSerializer, responses={204: None})
     @action(detail=False, methods=["post"], url_path="me/pin")

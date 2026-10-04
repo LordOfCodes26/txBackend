@@ -35,7 +35,7 @@ This folder contains everything needed. The server does **not** need internet ac
   - the company **timezone** (e.g. `Asia/Pyongyang`);
   - the **language**: English (`en`) or Korean (`ko`), for the web/API and for the
     reader screens (Korean on readers only if their screens can show Korean letters);
-  - the **email of the first admin** account.
+  - the **username of the first admin** account.
 
 ## 2. Copy the files
 
@@ -94,7 +94,7 @@ Company timezone (e.g. Asia/Seoul, Europe/Berlin) [UTC]:
 Server IP address that computers and doors will use [192.168.1.10]:
 Default language for the web and API: en = English, ko = Korean [en]:
 Language on door/till reader screens (ko only if they show Korean letters): en / ko [en]:
-Admin email [admin@example.com]:
+Admin username [admin]:
 Password: / Password (again):
 ```
 
@@ -102,7 +102,7 @@ Or give the answers up front:
 
 ```bash
 sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang \
-     --language ko --device-language en --admin-email admin@chonha.com
+     --language ko --device-language en --admin-user admin
 ```
 
 | Option | Meaning |
@@ -112,7 +112,7 @@ sudo bash install-backend.sh --server-ip 192.168.1.10 --timezone Asia/Pyongyang 
 | `--language en\|ko` | Web/API language when the browser doesn't choose one |
 | `--device-language en\|ko` | Language on door and till reader screens |
 | `--hosts "name1,name2"` | Extra host names / IPs clients use (the server's own are added) |
-| `--admin-email EMAIL` | First admin account (asks for its password) |
+| `--admin-user NAME` | First admin account (asks for its password) |
 | `--no-admin` | Don't create an admin account |
 | `--yes` | Don't ask for confirmation |
 | `--extract-only [DIR]` | Only check and unpack the bundle, don't install |
@@ -161,7 +161,7 @@ installer made a temporary one for the server IP (see step 7).
 2. Open `https://<server-ip>/api/docs/`: every endpoint, grouped (auth, developers, rfid,
    attendance, purchases, …), with what to send and what comes back.
 3. **To try a request there:** open `POST /api/v1/auth/token/` → *Try it out* → put your
-   email and password → *Execute* → copy the `access` value. Click **Authorize** at the top,
+   username and password → *Execute* → copy the `access` value. Click **Authorize** at the top,
    paste it, *Authorize*. Now *Try it out* works on every endpoint. A token lasts 15 minutes.
 
 ### Use it from a program or the terminal
@@ -170,7 +170,7 @@ Every request (except signing in) sends the token: `Authorization: Bearer <acces
 
 ```bash
 curl -sk https://<server-ip>/api/v1/auth/token/ -H 'Content-Type: application/json' \
-  -d '{"email": "admin@chonha.com", "password": "..."}'            # → {"access": "...", "refresh": "..."}
+  -d '{"username": "admin", "password": "..."}'            # → {"access": "...", "refresh": "..."}
 curl -sk https://<server-ip>/api/v1/developers/ -H "Authorization: Bearer <access>"
 ```
 
@@ -212,11 +212,11 @@ On the server, in `/opt/backend/current/docs/` (and in `~/backend-dev/docs/`):
    sudo systemctl reload nginx
    ```
 
-2. **Logins for each role** (`admin@chonha.com`, `boss@chonha.com`, …):
+2. **Logins for each role** (usernames `admin`, `boss`, …):
 
    ```bash
    sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
-     cd /opt/backend/current && .venv/bin/python manage.py create_role_users --domain chonha.com'
+     cd /opt/backend/current && .venv/bin/python manage.py create_role_users'
    ```
 
    Each new user gets a random password that is **shown only once**: store them safely.
@@ -277,12 +277,12 @@ command answers `token_not_valid`, run this step again.
 
 ```bash
 SERVER=https://localhost
-read -p "Admin email: " EMAIL; read -s -p "Password: " PASSWORD; echo
-TOKEN=$(EMAIL="$EMAIL" PASSWORD="$PASSWORD" python3 -c \
-  'import json, os; print(json.dumps({"email": os.environ["EMAIL"], "password": os.environ["PASSWORD"]}))' \
+read -p "Admin username: " LOGIN; read -s -p "Password: " PASSWORD; echo
+TOKEN=$(LOGIN="$LOGIN" PASSWORD="$PASSWORD" python3 -c \
+  'import json, os; print(json.dumps({"username": os.environ["LOGIN"], "password": os.environ["PASSWORD"]}))' \
   | curl -sk "$SERVER/api/v1/auth/token/" -H 'Content-Type: application/json' -d @- \
   | python3 -c 'import sys, json; print(json.load(sys.stdin).get("access", ""))')
-[ -n "$TOKEN" ] && echo "Signed in." || echo "Sign-in failed: check the email and password."
+[ -n "$TOKEN" ] && echo "Signed in." || echo "Sign-in failed: check the username and password."
 api() { curl -sk -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$@"; echo; }
 api "$SERVER/api/v1/auth/me/"          # shows your account: the sign-in worked
 ```

@@ -418,11 +418,11 @@ def test_till_frame_gets_card_ok_only_when_a_purchase_took_the_tap(shop):
     from apps.rfid.tcp import handle_frame
 
     _, card = make_developer(1)
-    frame = f"ID:ID:TILL-CAFE-1,TYPE:Pay,UID={card.uid}".encode()
+    frame = f"ID:TILL-CAFE-1,TYPE:Pay,UID={card.uid}".encode()
     assert handle_frame(frame, "10.0.5.21") == "CARD_NO\r\n"  # nobody is waiting
     pid = open_purchase(shop)
     assert handle_frame(frame, "10.0.5.21") == "CARD_OK\r\n"
     assert Purchase.objects.get(pk=pid).presented_event.uid == card.uid
     wait(shop, pid)
-    unknown = b"ID:ID:TILL-CAFE-1,TYPE:Pay,UID=04FFFFFF"
+    unknown = b"ID:TILL-CAFE-1,TYPE:Pay,UID=04FFFFFF"
     assert handle_frame(unknown, "10.0.5.21") == "CARD_NO\r\n"

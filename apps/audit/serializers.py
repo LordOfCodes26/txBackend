@@ -9,7 +9,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "actor",
-            "actor_email",
+            "actor_username",
             "action",
             "entity_type",
             "entity_id",

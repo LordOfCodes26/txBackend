@@ -1,4 +1,5 @@
 import getpass
+import re
 import secrets
 
 from django.contrib.auth.password_validation import validate_password
@@ -6,19 +7,24 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from apps.accounts.models import Role, User, UserRole
+from apps.accounts.models import USERNAME_PATTERN, Role, User, UserRole
 from apps.accounts.rbac import ROLES
+
+USERNAME_RE = re.compile(USERNAME_PATTERN)
 
 
 class Command(BaseCommand):
     help = (
-        "Create one login per role: <role>@<domain>, e.g. admin@chonha.com with the ADMIN "
-        "role. Existing users are skipped. Each new user gets a random password, printed once "
+        "Create one login per role, named after the role (admin, boss, finance_manager, ...; "
+        "with --prefix chonha_: chonha_admin, ...). Existing users are skipped. Each new "
+        "user gets a random password, printed once "
         "(or one password you type, with --ask-password)."
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("--domain", required=True, help="e.g. chonha.com")
+        parser.add_argument(
+            "--prefix", default="", help="Put this before each username, e.g. chonha_ (optional)."
+        )
         parser.add_argument(
             "--roles", nargs="+", metavar="ROLE", help="Only these roles (default: all)."
         )
@@ -28,10 +34,10 @@ class Command(BaseCommand):
             help="Type one password for all new users instead of random ones.",
         )
 
-    def handle(self, *args, domain: str, roles=None, ask_password=False, **options):
-        domain = domain.strip().lstrip("@").lower()
-        if not domain or "." not in domain or "@" in domain:
-            raise CommandError(f"Not a valid email domain: {domain!r}")
+    def handle(self, *args, prefix: str = "", roles=None, ask_password=False, **options):
+        prefix = prefix.strip().lower()
+        if prefix and not USERNAME_RE.fullmatch(prefix + "x" * 3):
+            raise CommandError(f"Not a valid username prefix: {prefix!r}")
         codes = [c.upper() for c in roles] if roles else list(ROLES)
         unknown = [c for c in codes if not Role.objects.filter(code=c).exists()]
         if unknown:
@@ -41,29 +47,29 @@ class Command(BaseCommand):
         created = []
         with transaction.atomic():
             for code in codes:
-                email = f"{code.lower()}@{domain}"
-                if User.objects.filter(email__iexact=email).exists():
-                    self.stdout.write(f"  {email:40} exists, skipped")
+                username = f"{prefix}{code.lower()}"
+                if User.objects.filter(username__iexact=username).exists():
+                    self.stdout.write(f"  {username:30} exists, skipped")
                     continue
                 password = shared or secrets.token_urlsafe(12)
                 user = User.objects.create_user(
-                    email=email, password=password, full_name=code.replace("_", " ").title()
+                    username=username, password=password, full_name=code.replace("_", " ").title()
                 )
                 UserRole.objects.create(user=user, role=Role.objects.get(code=code))
-                created.append((email, code, password))
+                created.append((username, code, password))
 
         if not created:
             self.stdout.write("No new users.")
             return
         self.stdout.write(self.style.SUCCESS(f"Created {len(created)} users:"))
-        for email, code, password in created:
+        for username, code, password in created:
             shown = "(the password you typed)" if shared else password
-            self.stdout.write(f"  {email:40} {code:17} {shown}")
+            self.stdout.write(f"  {username:30} {code:17} {shown}")
         if not shared:
             self.stdout.write(
                 self.style.WARNING(
                     "Passwords are shown only now: store them safely. Users change theirs with "
-                    "POST /api/v1/auth/password/ (or: manage.py changepassword <email>)."
+                    "POST /api/v1/auth/password/ (or: manage.py changepassword <username>)."
                 )
             )
 

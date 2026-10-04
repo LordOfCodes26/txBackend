@@ -312,3 +312,46 @@ class RFIDEvent(AppendOnlyModel):
 
     def __str__(self):
         return f"{self.uid} @ {self.device_id} {self.result}"
+
+
+class TCPLogOutcome(models.TextChoices):
+    OK = "OK", "Handled"
+    REJECTED = "REJECTED", "Unknown device or address"
+    INVALID = "INVALID", "Invalid packet"
+    REFUSED = "REFUSED", "Connection refused"
+    ERROR = "ERROR", "Server error"
+
+
+class TCPFrameLog(models.Model):
+    """Every packet the TCP listener received (request) and what it answered (response),
+    for the admins' TCP log.
+
+    Kept for RFID_TCP_LOG_DAYS; the listener deletes older rows itself.
+    """
+
+    received_at = models.DateTimeField(default=timezone.now, db_index=True)
+    peer_ip = models.GenericIPAddressField(null=True, blank=True)
+    request = models.TextField(blank=True, help_text="The packet as received, without the $ marks.")
+    device_code = models.CharField(max_length=50, blank=True, help_text="The ID it named.")
+    device = models.ForeignKey(
+        RFIDDevice, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    event = models.ForeignKey(
+        RFIDEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    response = models.TextField(blank=True, help_text="Exactly what was sent back.")
+    outcome = models.CharField(max_length=10, choices=TCPLogOutcome.choices)
+    note = models.CharField(max_length=300, blank=True, help_text="Why it was refused.")
+    duration_ms = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-received_at", "-id"]
+        indexes = [
+            models.Index(fields=["outcome", "received_at"]),
+            models.Index(fields=["peer_ip", "received_at"]),
+            models.Index(fields=["device_code", "received_at"]),
+        ]
+        verbose_name = "TCP log entry"
+
+    def __str__(self):
+        return f"{self.received_at:%Y-%m-%d %H:%M:%S} {self.peer_ip} {self.outcome}"

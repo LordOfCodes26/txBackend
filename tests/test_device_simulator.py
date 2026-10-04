@@ -59,7 +59,7 @@ def test_preset_matches_the_device_list():
     assert device("Door1-3").packet("DC62B3E3") == "ID:Door1,TYPE:Output,UID=DC62B3E3"
     assert device("Door2-3").type == "Input" and device("Door2-4").type == "Output"
     assert device("Door2-6").source_ip == "192.168.100.206"
-    assert device("Reader1").packet("X") == "ID:ID:Reader1,TYPE:Pay,UID=X"
+    assert device("Reader1").packet("X") == "ID:Reader1,TYPE:Pay,UID=X"
     assert device("Master2").packet("X") == "ID:Master2,TYPE:Master,UID=X"
     assert sim.clean_uid(" dc:62 b3-e3 ") == "DC62B3E3"
 

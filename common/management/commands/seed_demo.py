@@ -87,14 +87,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Demo people, cards and scans created."))
         self.stdout.write(f"Logins (password {password}; shown only now):")
         for code in ROLES:
-            self.stdout.write(f"  {code.lower()}@demo.local  ({code})")
+            self.stdout.write(f"  {code.lower()}  ({code})")
         for code, key in keys.items():
             self.stdout.write(f"Reader {code} API key: {key}")
 
     def _users(self, password):
         for code in ROLES:
             user = User.objects.create_user(
-                email=f"{code.lower()}@demo.local",
+                username=code.lower(),
                 password=password,
                 full_name=code.replace("_", " ").title(),
             )
@@ -120,7 +120,7 @@ class Command(BaseCommand):
             )
             leads.setdefault(dept, dev)
             developers.append(dev)
-        developer_user = User.objects.get(email="developer@demo.local")
+        developer_user = User.objects.get(username="developer")
         developers[0].user = developer_user
         developers[0].save(update_fields=["user"])
         return developers
@@ -173,7 +173,7 @@ class Command(BaseCommand):
         cafe = Seller.objects.create(
             name="Demo Cafe",
             contact_name="Cafe Owner",
-            user=User.objects.filter(email="seller@demo.local").first(),
+            user=User.objects.filter(username="seller").first(),
         )
         shop = Seller.objects.create(name="Demo Tech Shop", contact_name="Shop Owner")
         counter = ServicePosition.objects.create(seller=cafe, name="Counter 1", location="Lobby")
