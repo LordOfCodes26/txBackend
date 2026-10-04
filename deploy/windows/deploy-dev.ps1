@@ -175,7 +175,8 @@ if ($Frontend) {
 
 Write-Step 'Checks'
 $failed = $false
-foreach ($check in @(@('https://localhost/', 'frontend'), @('https://localhost/health/', 'backend'), @('https://localhost/health/db/', 'database'))) {
+$base = Get-LocalHttpsUrl (Get-WebPorts $EnvFile).Https
+foreach ($check in @(@("$base/", 'frontend'), @("$base/health/", 'backend'), @("$base/health/db/", 'database'))) {
     $code = Wait-HttpOk $check[0] 30
     Write-Note ('{0,-12} {1}  {2}' -f $check[1], $code, $check[0])
     if ($code -notmatch '^(200|30[1278])$') { $failed = $true }

@@ -65,8 +65,8 @@ param(
     [string]$DoorNetwork = '',
     [int]$DoorPort = 0,
     [int]$PgPort = 5432,
-    [int]$HttpPort = 80,
-    [int]$HttpsPort = 443,
+    [int]$HttpPort = 0,
+    [int]$HttpsPort = 0,
     [switch]$Yes
 )
 $ErrorActionPreference = 'Stop'
@@ -132,6 +132,15 @@ if ($DoorPort) {
     if ($DoorPort -lt 1 -or $DoorPort -gt 65535) { Stop-WithError "Not a port: $DoorPort" }
     $DoorPortNow = $DoorPort
 }
+# The web ports: WEB_HTTP_PORT / WEB_HTTPS_PORT in backend.env, kept unless -HttpPort/-HttpsPort.
+$web = @{ Http = 80; Https = 443 }
+if ($Upgrade) { $web = Get-WebPorts $EnvFile }
+if ($HttpPort) { $web.Http = $HttpPort }
+if ($HttpsPort) { $web.Https = $HttpsPort }
+$HttpPort = $web.Http
+$HttpsPort = $web.Https
+foreach ($p in @($HttpPort, $HttpsPort)) { if ($p -lt 1 -or $p -gt 65535) { Stop-WithError "Not a port: $p" } }
+if ($HttpPort -eq $HttpsPort) { Stop-WithError 'The HTTP and HTTPS ports must differ.' }
 Write-Note "install folder: $Root ($(if ($Upgrade) { 'UPGRADE: data and settings are kept' } else { 'new installation' }))"
 if ($BackendBundle) { Write-Note "backend:  $($BackendBundle.Name)$(if ($SkipBackend) { ' (skipped)' })" }
 Write-Note "frontend: $($FrontendPkg.Name)$(if ($FrontendFrom) { " (building from $FrontendFrom)" })"
@@ -238,6 +247,8 @@ Write-Note "Garnet on 127.0.0.1:$($Ports.Garnet)"
 $commit = ''
 if ($SkipBackend) {
     Write-Step '5. Backend: skipped (-SkipBackend)'
+    [void](Set-EnvValue $EnvFile 'WEB_HTTP_PORT' "$HttpPort")
+    [void](Set-EnvValue $EnvFile 'WEB_HTTPS_PORT' "$HttpsPort")
     if ($DoorPort -and (Set-EnvValue $EnvFile 'RFID_TCP_PORT' "$DoorPortNow")) {
         Stop-ServiceSafely $ServiceIds.Tcp
         Start-ServiceChecked $ServiceIds.Tcp $Logs -Port $DoorPortNow
@@ -340,6 +351,8 @@ END `$`$;
     }
     [void](Set-EnvValue $EnvFile 'SERVER_IP' $ServerIp)
     [void](Set-EnvValue $EnvFile 'RFID_TCP_PORT' "$DoorPortNow")
+    [void](Set-EnvValue $EnvFile 'WEB_HTTP_PORT' "$HttpPort")
+    [void](Set-EnvValue $EnvFile 'WEB_HTTPS_PORT' "$HttpsPort")
     $hostList = @('localhost', '127.0.0.1', $ServerIp, $env:COMPUTERNAME) + $ips
     if ($Hosts) { $hostList += ($Hosts -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
     $existingHosts = @()
@@ -445,6 +458,26 @@ Write-TextFile "$Root\change-door-port.bat" ((@(
             'pause'
         ) -join "`r`n") + "`r`n")
 
+# change-web-port.bat: move the web ports without reinstalling (web-port.ps1).
+Write-TextFile "$Root\change-web-port.bat" ((@(
+            '@echo off',
+            'rem Change the web ports (HTTP, HTTPS), e.g.  change-web-port.bat 8080 8443',
+            'rem (double-click: it asks for them). Asks for administrator rights.',
+            'setlocal',
+            'net session >nul 2>&1',
+            'if errorlevel 1 (',
+            '    if "%~1"=="" (',
+            "        powershell -NoProfile -Command `"Start-Process -FilePath '%~f0' -Verb RunAs`"",
+            '    ) else (',
+            "        powershell -NoProfile -Command `"Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs`"",
+            '    )',
+            '    exit /b',
+            ')',
+            "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Root\backend\current\deploy\windows\web-port.ps1`" -Root `"$Root`" %*",
+            'echo.',
+            'pause'
+        ) -join "`r`n") + "`r`n")
+
 # uninstall.bat in the install folder too, for when the kit is gone.
 $uninstallBat = "$Root\backend\current\deploy\windows\uninstall.bat"
 if (Test-Path -LiteralPath $uninstallBat) { Copy-Item -LiteralPath $uninstallBat -Destination "$Root\uninstall.bat" -Force }
@@ -513,27 +546,15 @@ Write-Note "frontend $feVersion running on 127.0.0.1:$($Ports.Frontend)"
 Write-Step '7. Web server (Caddy: HTTPS, one address for everything)'
 $settings = Read-EnvFile $EnvFile
 $serverIpNow = $settings['SERVER_IP']
-$sites = @("https://$serverIpNow", 'https://localhost', "https://$($env:COMPUTERNAME.ToLowerInvariant())")
-if ($HttpsPort -ne 443) { $sites = $sites | ForEach-Object { "$($_):$HttpsPort" } }
-$cert = "$Etc\tls\cert.pem"
-$key = "$Etc\tls\key.pem"
-if ((Test-Path -LiteralPath $cert) -and (Test-Path -LiteralPath $key)) {
-    $tls = "tls `"$(ConvertTo-ForwardSlash $cert)`" `"$(ConvertTo-ForwardSlash $key)`""
-    Write-Note "certificate: $cert (the company's)"
-} else {
-    $tls = 'tls internal'
+$tls = Write-Caddyfile $Root $HttpPort $HttpsPort
+if ($tls -eq 'tls internal') {
     Write-Note "certificate: Caddy's own (install $Root\certificate\management-root-ca.crt on the other PCs)"
+} else {
+    Write-Note "certificate: $Etc\tls\cert.pem (the company's)"
 }
-$caddyfile = Expand-Template (Read-TextFile "$Root\backend\current\deploy\windows\Caddyfile.template") @{
-    HTTP_PORT = $HttpPort; HTTPS_PORT = $HttpsPort; INTERNAL_PORT = $Ports.Internal; SITES = ($sites -join ', ')
-    TLS = $tls; WS_PORT = $Ports.Ws; WEB_PORT = $Ports.Web; FRONTEND_PORT = $Ports.Frontend
-    MEDIA_ROOT = "$RootFwd/data/media"
-}
-Write-TextFile "$Etc\Caddyfile" $caddyfile
-Invoke-Native "$Runtime\caddy\caddy.exe" @('validate', '--config', "$Etc\Caddyfile", '--adapter', 'caddyfile') -Quiet `
-    -Environment @{ XDG_DATA_HOME = "$Root\data\caddy\data"; XDG_CONFIG_HOME = "$Root\data\caddy\config" }
+Write-Note "web ports: HTTP $HttpPort, HTTPS $HttpsPort"
 $caddyXml = New-WinswXml -Id $ServiceIds.Caddy -Name 'Management web server (Caddy)' `
-    -Description "HTTPS on ports $HttpPort/$HttpsPort for the frontend and the backend." `
+    -Description 'HTTPS for the frontend and the backend (ports: WEB_HTTP_PORT/WEB_HTTPS_PORT in backend.env).' `
     -Executable "$Runtime\caddy\caddy.exe" -Arguments "run --config `"$Etc\Caddyfile`" --adapter caddyfile" `
     -WorkingDirectory "$Runtime\caddy" -LogPath $Logs -DependsOn @($ServiceIds.Web, $ServiceIds.Frontend) `
     -Environment @{ XDG_DATA_HOME = "$Root\data\caddy\data"; XDG_CONFIG_HOME = "$Root\data\caddy\config" }
@@ -552,10 +573,7 @@ if ($tls -eq 'tls internal') {
 
 # ============================================================================ 8. firewall
 Write-Step '8. Windows Firewall'
-Get-NetFirewallRule -Group $FirewallGroup -ErrorAction SilentlyContinue |
-    Where-Object { $_.DisplayName -like 'Management web*' } | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName 'Management web (HTTP/HTTPS)' -Group $FirewallGroup -Direction Inbound -Protocol TCP `
-    -LocalPort @($HttpPort, $HttpsPort) -Action Allow -Profile Any | Out-Null
+Set-WebFirewallRule $HttpPort $HttpsPort
 # Who may use the door port: -DoorNetwork, else as before (a re-run used to reset it to any).
 $doorRemote = @(Get-DoorRemoteAddress)
 if ($DoorNetwork) { $doorRemote = @($DoorNetwork -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
@@ -624,8 +642,7 @@ foreach ($svc in @($ServiceIds.Postgres, $ServiceIds.Garnet) + $AppServices + @(
     Write-Note ('{0,-28} {1}' -f $svc, $state)
     if ("$state" -ne 'Running') { $failed = $true }
 }
-$base = 'https://localhost'
-if ($HttpsPort -ne 443) { $base = "https://localhost:$HttpsPort" }
+$base = Get-LocalHttpsUrl $HttpsPort
 [void](Wait-HttpOk "$base/" 60)
 foreach ($check in @(
         @("$base/", 'frontend'), @("$base/health/", 'backend'), @("$base/health/db/", 'database'),

@@ -27,7 +27,8 @@ def test_install_cmd_has_windows_line_endings():
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.name)
 def test_every_placeholder_is_filled_by_the_installer(path):
-    installer = (WINDOWS / "install-all.ps1").read_text()
+    # The Caddyfile is rendered in common.ps1 (also used by change-web-port.bat).
+    installer = (WINDOWS / "install-all.ps1").read_text() + (WINDOWS / "common.ps1").read_text()
     for name in set(re.findall(r"__([A-Z0-9_]+)__", path.read_text())):
         assert re.search(rf"\b{name}\s*=", installer), f"{path.name}: nothing sets {name}"
 
@@ -142,3 +143,14 @@ def test_the_door_port_comes_from_the_settings():
         ), hard
     assert (WINDOWS / "door-port.ps1").exists()
     assert "change-door-port.bat" in (WINDOWS / "install-all.ps1").read_text()
+
+
+def test_the_web_ports_come_from_the_settings():
+    # Re-running install.cmd used to go back to 80/443, and deploys checked https://localhost/.
+    installer = (WINDOWS / "install-all.ps1").read_text()
+    assert "[int]$HttpPort = 0," in installer and "[int]$HttpsPort = 0," in installer
+    assert "$web = Get-WebPorts $EnvFile" in installer
+    assert "'WEB_HTTPS_PORT'" in installer
+    assert "https://localhost/" not in (WINDOWS / "deploy-dev.ps1").read_text()
+    assert (WINDOWS / "web-port.ps1").exists()
+    assert "change-web-port.bat" in installer

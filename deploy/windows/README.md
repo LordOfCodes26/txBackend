@@ -189,22 +189,19 @@ The development copy's door port (9101) is separate and doesn't change.
 ### Changing the web ports
 
 Browsers and till programs use **80** (HTTP) and **443** (HTTPS). To use other ports (e.g.
-when another program needs 443), run the installer again from the kit folder:
+when another program needs 443), in an administrator command prompt (HTTP port first):
 
 ```
-install.cmd -HttpPort 8080 -HttpsPort 8443
+C:\Management\change-web-port.bat 8080 8443
 ```
 
-It rewrites the web server's configuration and the firewall rule. The address is then
-`https://<this PC's IP>:8443/`: tell the users, and change it in every till program.
+(or double-click it: it asks for both). It saves the ports in `backend.env`, rewrites the web
+server's configuration, moves the firewall rule, restarts the web server and checks the site
+answers on the new port; if it doesn't, the old ports are put back. The address is then
+`https://<this PC's IP>:8443/`: **tell the users, and change it in every till program**.
 
-Two things to know (not yet automatic):
-
-- **Give the same options every time** you run `install.cmd`, including upgrades with a
-  newer kit: without them it goes back to 80/443.
-- `deploy-backend.bat`, `deploy-frontend.bat` and `deploy-all.bat` check
-  `https://localhost/` at the end. With other web ports that check fails although the
-  deploy itself worked: open `https://localhost:8443/` to confirm.
+Upgrades, `install.cmd` and the deploy files keep the ports you chose. (`install.cmd -HttpPort
+8080 -HttpsPort 8443` sets them too.)
 
 ## 8. Doors (attendance)
 

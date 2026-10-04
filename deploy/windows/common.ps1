@@ -381,6 +381,51 @@ function Get-DoorPort([string]$EnvFile) {
     return 9100
 }
 
+function Get-WebPorts([string]$EnvFile) {
+    # The web server's ports: WEB_HTTP_PORT / WEB_HTTPS_PORT in backend.env (default 80/443).
+    $values = Read-EnvFile $EnvFile
+    $ports = @{ Http = 80; Https = 443 }
+    if ($values.Contains('WEB_HTTP_PORT') -and "$($values['WEB_HTTP_PORT'])" -match '^\d+$') { $ports.Http = [int]$values['WEB_HTTP_PORT'] }
+    if ($values.Contains('WEB_HTTPS_PORT') -and "$($values['WEB_HTTPS_PORT'])" -match '^\d+$') { $ports.Https = [int]$values['WEB_HTTPS_PORT'] }
+    return $ports
+}
+
+function Get-LocalHttpsUrl([int]$HttpsPort) {
+    if ($HttpsPort -eq 443) { return 'https://localhost' }
+    return "https://localhost:$HttpsPort"
+}
+
+function Write-Caddyfile([string]$Root, [int]$HttpPort, [int]$HttpsPort) {
+    # Render etc\Caddyfile from the installed backend's template and check it. Returns the
+    # tls line: the company's certificate in etc\tls when present, else Caddy's own.
+    $etc = "$Root\etc"
+    $serverIp = (Read-EnvFile "$etc\backend.env")['SERVER_IP']
+    $sites = @("https://$serverIp", 'https://localhost', "https://$($env:COMPUTERNAME.ToLowerInvariant())")
+    if ($HttpsPort -ne 443) { $sites = @($sites | ForEach-Object { "$($_):$HttpsPort" }) }
+    $cert = "$etc\tls\cert.pem"
+    $key = "$etc\tls\key.pem"
+    $tls = 'tls internal'
+    if ((Test-Path -LiteralPath $cert) -and (Test-Path -LiteralPath $key)) {
+        $tls = "tls `"$(ConvertTo-ForwardSlash $cert)`" `"$(ConvertTo-ForwardSlash $key)`""
+    }
+    $text = Expand-Template (Read-TextFile "$Root\backend\current\deploy\windows\Caddyfile.template") @{
+        HTTP_PORT = $HttpPort; HTTPS_PORT = $HttpsPort; INTERNAL_PORT = $Script:Ports.Internal; SITES = ($sites -join ', ')
+        TLS = $tls; WS_PORT = $Script:Ports.Ws; WEB_PORT = $Script:Ports.Web; FRONTEND_PORT = $Script:Ports.Frontend
+        MEDIA_ROOT = "$(ConvertTo-ForwardSlash $Root)/data/media"
+    }
+    Write-TextFile "$etc\Caddyfile" $text
+    Invoke-Native "$Root\runtime\caddy\caddy.exe" @('validate', '--config', "$etc\Caddyfile", '--adapter', 'caddyfile') -Quiet `
+        -Environment @{ XDG_DATA_HOME = "$Root\data\caddy\data"; XDG_CONFIG_HOME = "$Root\data\caddy\config" }
+    return $tls
+}
+
+function Set-WebFirewallRule([int]$HttpPort, [int]$HttpsPort) {
+    Get-NetFirewallRule -Group $Script:FirewallGroup -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Management web*' } | Remove-NetFirewallRule
+    New-NetFirewallRule -DisplayName 'Management web (HTTP/HTTPS)' -Group $Script:FirewallGroup -Direction Inbound -Protocol TCP `
+        -LocalPort @($HttpPort, $HttpsPort) -Action Allow -Profile Any | Out-Null
+}
+
 function Get-DoorRemoteAddress {
     # Who may reach the door port now (kept when the port or the installation changes).
     $rule = Get-NetFirewallRule -Group $Script:FirewallGroup -ErrorAction SilentlyContinue |
