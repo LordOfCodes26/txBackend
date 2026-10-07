@@ -60,7 +60,9 @@ install -d -o root -g backend -m 750 "${ETC}" "${ETC}/tls"
 install -d -o backend -g backend -m 750 /var/lib/backend /var/lib/backend/media
 
 echo "==> Environment file"
+FIRST_INSTALL=0
 if [[ ! -f "${ENV_FILE}" ]]; then
+    FIRST_INSTALL=1
     DB_PASSWORD="$(openssl rand -hex 24)"
     SECRET_KEY="$(openssl rand -hex 50)"
     HOSTS="localhost,127.0.0.1,$(hostname),$(hostname -I | tr ' ' ',' | sed 's/,*$//')"
@@ -112,6 +114,12 @@ run_manage() {
 }
 run_manage check --deploy --fail-level ERROR
 run_manage migrate --noinput
+# First install only: the company's roles (deploy/roles.json). Upgrades keep the roles
+# as they were edited on this server (Users -> Roles).
+if [[ "${FIRST_INSTALL}" == 1 && -f "${RELEASE}/deploy/roles.json" ]]; then
+    echo "==> Roles"
+    run_manage load_roles "${RELEASE}/deploy/roles.json"
+fi
 run_manage collectstatic --noinput
 
 echo "==> Activate"

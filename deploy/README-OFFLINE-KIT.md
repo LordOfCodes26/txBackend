@@ -190,13 +190,18 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
 
 1. **Certificate:** put the company's certificate in place, then reload nginx:
    `sudo cp cert.pem /etc/backend/tls/cert.pem; sudo cp key.pem /etc/backend/tls/key.pem; sudo systemctl reload nginx`
-2. **Logins for each role** (usernames `admin`, `boss`, …):
+2. **Roles:** a first install sets the company's roles and their permissions from
+   `deploy/roles.json` (Admin always has everything; Seller works on its own store only).
+   Change them later in the web app under **Users → Roles**. Upgrades never overwrite them.
+   To copy roles from another server: `<command>` = `export_roles --output roles.json` there,
+   then `load_roles roles.json` here.
+3. **Logins for each role** (usernames `admin`, `boss`, …):
    `<command>` = `create_role_users`. Each password is **shown once**.
-3. **Link the accounts:** a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER
+4. **Link the accounts:** a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER
    logins to their buildings, DEVELOPER logins to developer profiles (in the web app).
-4. **Doors and tills:** see **10. Connecting the door devices** and **11. Connecting the till
+5. **Doors and tills:** see **10. Connecting the door devices** and **11. Connecting the till
    readers**.
-5. **Backups to a second place:** set `OFFSITE_DIR=` or `OFFSITE_RSYNC=` in
+6. **Backups to a second place:** set `OFFSITE_DIR=` or `OFFSITE_RSYNC=` in
    `/etc/backend/backup.conf` (backups are made every night into `/var/backups/backend`).
 
 ## 8. Developing on the server

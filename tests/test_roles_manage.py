@@ -206,3 +206,40 @@ def test_excel_import_split_by_kind(auth_client, make_user):
     client = auth_client(make_user("CARD_CLERK"))
     assert client.get("/api/v1/imports/cards/template/").status_code == 200
     assert client.get("/api/v1/imports/balances/template/").status_code == 403
+
+
+def test_load_roles_sets_exact_permissions(tmp_path):
+    import json
+
+    from django.core.management import call_command
+
+    path = tmp_path / "roles.json"
+    path.write_text(
+        json.dumps(
+            {
+                "roles": [
+                    {"code": "BOSS", "name": "Boss", "permissions": ["stats.view", "user.view"]},
+                    {"code": "ADMIN", "name": "Admin", "permissions": []},
+                    {"code": "GUARD", "name": "Guard", "permissions": ["scan.view", "no.such"]},
+                ]
+            }
+        )
+    )
+    call_command("load_roles", str(path))
+    assert codes("BOSS") == {"stats.view", "user.view"}
+    assert codes("ADMIN") == set(PERMISSIONS)  # Admin always keeps everything
+    assert codes("GUARD") == {"scan.view"}  # unknown permissions are skipped
+    assert not Role.objects.get(code="GUARD").is_system
+
+
+def test_shipped_roles_file_is_valid():
+    import json
+    from pathlib import Path
+
+    from django.conf import settings
+
+    roles = json.loads((Path(settings.BASE_DIR) / "deploy" / "roles.json").read_text())["roles"]
+    assert {r["code"] for r in roles} >= {"ADMIN", "BOSS", "SELLER", "DEVELOPER"}
+    for role in roles:
+        assert set(role["permissions"]) <= set(PERMISSIONS), role["code"]
+    assert next(r for r in roles if r["code"] == "SELLER")["permissions"] == []
