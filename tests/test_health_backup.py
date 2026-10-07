@@ -75,7 +75,7 @@ def test_reports_wal_archiver_state(client, status_file):
 
 @pytest.mark.django_db
 def test_without_pitr_only_nightly_dumps_are_required(client, status_file, settings):
-    # The Windows kit: verified nightly dumps, no base backups or WAL archiving.
+    # Verified nightly dumps only, no base backups or WAL archiving.
     settings.BACKUP_REQUIRE_PITR = False
     status_file(**healthy(last_base_backup_at=""))
     r = client.get("/health/backup/")
@@ -84,7 +84,7 @@ def test_without_pitr_only_nightly_dumps_are_required(client, status_file, setti
 
 
 def test_redis_failure_is_logged_with_its_reason(client, settings, caplog):
-    # The endpoint only says "error"; the log says why (it took two rounds on Windows).
+    # The endpoint only says "error"; the log says why.
     settings.REDIS_URL = "redis://127.0.0.1:1/0"
     with caplog.at_level("WARNING", logger="common.health"):
         r = client.get("/health/redis/")

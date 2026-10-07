@@ -189,7 +189,6 @@ curl -sk https://<server-ip>/api/v1/developers/ -H "Authorization: Bearer <acces
 | `sellers/`, `service-positions/`, `goods/`, `inventory/movements/` | Stores, counters, goods, stock |
 | `purchases/` | Till sales (and `purchases/performance/`: sales per counter) |
 | `rentals/`, `bookings/` | Courts and bookings |
-| `seller-finance/accounts/`, `…/transactions/`, `…/payouts/`, `…/adjustments/` | Stores' money and payouts |
 | `stats/` | Company statistics (BOSS dashboard) |
 | `audit-logs/` | Who changed what |
 | `realtime/ticket/` | A ticket to open the live-updates connection |

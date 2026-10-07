@@ -15,7 +15,6 @@ pytestmark = pytest.mark.django_db
 GOODS = "/api/v1/goods/"
 POSITIONS = "/api/v1/service-positions/"
 PURCHASES = "/api/v1/purchases/"
-PAYOUTS = "/api/v1/seller-finance/payouts/"
 
 
 @pytest.fixture
@@ -81,13 +80,6 @@ def test_manager_edits_own_position_but_not_its_setup(auth_client, cafe):
     assert client.post(POSITIONS, {"name": "New"}).status_code == 403
     assert client.delete(f"{POSITIONS}{cafe.kiosk.pk}/").status_code == 403
     assert client.get(f"{POSITIONS}{cafe.counter.pk}/").status_code == 404
-
-
-def test_manager_has_no_access_to_seller_money(auth_client, cafe):
-    client = auth_client(cafe.manager)
-    assert client.get(PAYOUTS).status_code == 403
-    assert client.post(PAYOUTS, {"amount": "1.00"}).status_code == 403
-    assert auth_client(cafe.owner).get(PAYOUTS).status_code == 200
 
 
 def test_staff_assign_manager_and_building(auth_client, make_user, cafe):

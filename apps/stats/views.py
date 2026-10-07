@@ -37,7 +37,7 @@ class PeriodSerializer(serializers.Serializer):
 class CompanyStatsView(APIView):
     """Company statistics for the BOSS dashboard (`stats.view`): developers, who is
     inside now, daily attendance, developer money (balances, deposits, spending) and
-    seller money (earnings, payouts) and store sales, for a period of company-local days.
+    store sales, for a period of company-local days.
     Building owners get the same figures limited to their buildings (`buildings`)."""
 
     permission_classes = [HasPermissions]
@@ -53,18 +53,18 @@ class CompanyStatsView(APIView):
 
 
 class FinanceStatsView(APIView):
-    """Finance dashboard (`finance.view` + `seller_finance.view`): developer money
-    (balances, deposits, spending), seller money and a per-seller comparison of sales,
-    bookings, earnings, payouts and balances, for a period of company-local days.
+    """Finance dashboard (`finance.view`): developer money (balances, deposits,
+    spending) and a per-seller comparison of sales and bookings, for a period of
+    company-local days.
     Building owners get the figures of their buildings (`buildings`)."""
 
     permission_classes = [HasPermissions]
-    required_permissions = {"get": ["finance.view", "seller_finance.view"]}
+    required_permissions = {"get": ["finance.view"]}
 
     @extend_schema(parameters=[PeriodSerializer], responses=OpenApiTypes.OBJECT)
     def get(self, request):
         period = PeriodSerializer(data=request.query_params)
         period.is_valid(raise_exception=True)
         data = period.validated_data
-        buildings = building_scope(request.user, "seller_finance.view")
+        buildings = building_scope(request.user, "finance.view")
         return Response(finance_stats(data["date_from"], data["date_to"], buildings))

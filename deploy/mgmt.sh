@@ -118,6 +118,8 @@ deploy_backend() {
         die "A Python package the code needs isn't in the offline wheelhouse: new packages need a kit built with internet."
     fi
     chown -R backend:backend "$release"
+    chown -R root:root "$release/scripts" "$release/deploy"   # root runs these
+    chmod -R go-w "$release/scripts" "$release/deploy"
     manage "$release" check --deploy --fail-level ERROR >/dev/null
     note "database migrations..."
     manage "$release" migrate --noinput
@@ -132,6 +134,7 @@ deploy_backend() {
         die "Deploy failed (the previous release is running again). Logs: journalctl -u backend-web -u backend-tcp -n 80"
     fi
     UNUSED_RELEASE=""
+    install -o root -g root -m 0755 "$release/scripts/backup/admin.py" /usr/local/sbin/backend-backup-admin
     keep_last_3 "$BASE/releases" "$BASE/current"
     note "backend $commit is live"
 }
@@ -294,11 +297,15 @@ uninstall() {
     confirm "Continue?" no || { note "Cancelled: nothing was changed."; return 0; }
     local unit door http https
     door=$(door_port); http=$(http_port); https=$(https_port)
-    for unit in "${BACKEND_SERVICES[@]}" frontend backend-backup.timer backend-basebackup.timer; do
+    for unit in "${BACKEND_SERVICES[@]}" frontend backend-backup.timer backend-basebackup.timer \
+            backend-backup-admin.socket; do
         systemctl disable --now "$unit" >/dev/null 2>&1 || true
     done
     rm -f /etc/systemd/system/backend-{web,ws,tcp,worker}.service /etc/systemd/system/frontend.service \
-        /etc/systemd/system/backend-{backup,basebackup}.{service,timer}
+        /etc/systemd/system/backend-{backup,basebackup}.{service,timer} \
+        /etc/systemd/system/backend-backup-admin.socket /etc/systemd/system/backend-backup-admin@.service \
+        /usr/local/sbin/backend-backup-admin
+    rm -rf /etc/systemd/system/backend-backup.timer.d
     systemctl daemon-reload
     systemctl reset-failed >/dev/null 2>&1 || true   # forget the stopped services' last state
     note "services and backup schedule removed"

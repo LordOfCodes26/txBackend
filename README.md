@@ -15,7 +15,7 @@ cp .env.example .env            # then set DJANGO_SECRET_KEY
 .venv/bin/celery -A config worker -l info
 ```
 
-**Development guide for the Windows server** (development copy, ports and how to change
+**Development guide** (the development copy on the offline server, ports and how to change
 them, testing with devices, demo data, putting changes live):
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
@@ -76,7 +76,7 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
   rebuilds attendance from it; days that already have attendance are skipped. Then
   `manage.py seed_purchases_month [--month 2026-09]` adds that month's purchases by
   developers who were present, with ledger, seller and stock entries dated in the month; it
-  closes the month with an allowance deposit, seller payouts and a stock delivery so current
+  closes the month with an allowance deposit and a stock delivery so current
   balances and stock don't change, and checks that everything reconciles.
 
 ## Deploying to an offline server

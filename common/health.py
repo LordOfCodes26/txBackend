@@ -57,10 +57,9 @@ def _parse(ts: str | None):
         return None
 
 
-@require_GET
-def health_backup(request):
-    """Backup freshness: 503 when backups are missing, stale, unverified or WAL archiving
-    fails; 200 with `warnings` (e.g. no off-site copy) otherwise. With
+def backup_health() -> dict:
+    """Backup freshness: `status` "error" when backups are missing, stale, unverified or
+    WAL archiving fails, with `errors`; `warnings` (e.g. no off-site copy) otherwise. With
     BACKUP_REQUIRE_PITR off, base backups and WAL archiving aren't required."""
     errors, warnings = [], []
     try:
@@ -105,7 +104,7 @@ def health_backup(request):
             "last_archived_at": last_ok.isoformat() if last_ok else None,
         }
         if not settings.BACKUP_REQUIRE_PITR:
-            pass  # nightly dumps only (e.g. the Windows kit): archiving is reported, not required
+            pass  # nightly dumps only: archiving is reported, not required
         elif archive_mode != "on":
             errors.append("WAL archiving is off (no point-in-time recovery)")
         elif last_fail and (not last_ok or last_fail > last_ok):
@@ -124,4 +123,11 @@ def health_backup(request):
         "offsite_copy_at": status.get("offsite_copy_at"),
         "wal_archiver": archiver,
     }
-    return JsonResponse(body, status=503 if errors else 200)
+    return body
+
+
+@require_GET
+def health_backup(request):
+    """503 when the backups need attention (see `backup_health`), else 200."""
+    body = backup_health()
+    return JsonResponse(body, status=503 if body["errors"] else 200)

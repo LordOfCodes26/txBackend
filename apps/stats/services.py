@@ -21,18 +21,10 @@ from apps.developers.models import Developer, DeveloperStatus
 from apps.finance.models import AccountTransaction, DeveloperAccount, TransactionKind
 from apps.purchases.models import Purchase, PurchaseKind, PurchaseStatus
 from apps.rfid.models import Building
-from apps.rfid.scope import sellers_with_positions_in, sellers_within
-from apps.seller_finance.models import (
-    PayoutStatus,
-    SellerAccount,
-    SellerPayment,
-    SellerTransaction,
-    SellerTransactionKind,
-)
+from apps.rfid.scope import sellers_with_positions_in
 from apps.sellers.models import Seller
 
 ZERO = Decimal("0.00")
-PENDING_PAYOUTS = (PayoutStatus.REQUESTED, PayoutStatus.APPROVED, PayoutStatus.PROCESSING)
 
 
 def _days(first: date, last: date) -> list[date]:
@@ -110,19 +102,12 @@ def money(first: date, last: date, buildings=None) -> dict:
     start, end = _local_bounds(first, last)
     accounts = DeveloperAccount.objects.all()
     period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
-    seller_accounts = SellerAccount.objects.all()
-    seller_period = SellerTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
-    payouts = SellerPayment.objects.filter(status__in=PENDING_PAYOUTS)
     sales = Purchase.objects.filter(
         status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
     )
     if buildings is not None:
         accounts = accounts.filter(developer__building__in=buildings)
         period = period.filter(account__developer__building__in=buildings)
-        own_stores = sellers_within(buildings)
-        seller_accounts = seller_accounts.filter(seller__in=own_stores)
-        seller_period = seller_period.filter(account__seller__in=own_stores)
-        payouts = payouts.filter(seller__in=own_stores)
         sales = sales.filter(service_position__building__in=buildings)
     by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
     totals = period.aggregate(
@@ -150,11 +135,6 @@ def money(first: date, last: date, buildings=None) -> dict:
         for day in _days(first, last)
     ]
 
-    seller_totals = seller_period.aggregate(
-        earnings=Sum("amount", filter=Q(kind=SellerTransactionKind.SALE)),
-        payouts=Sum("amount", filter=Q(kind=SellerTransactionKind.PAYOUT)),
-    )
-    pending = payouts.aggregate(count=Count("pk"), amount=Sum("amount"))
     store_sales = sales.aggregate(
         sales_total=Sum("total", filter=Q(kind=PurchaseKind.SALE)),
         sales_count=Count("pk", filter=Q(kind=PurchaseKind.SALE)),
@@ -173,15 +153,6 @@ def money(first: date, last: date, buildings=None) -> dict:
             "count": totals["spending_count"],
         },
         "daily": daily,
-        "sellers": {
-            "total_balance": _money(seller_accounts.aggregate(t=Sum("balance"))["t"]),
-            "earnings": _money(seller_totals["earnings"]),
-            "payouts_paid": _money(-(seller_totals["payouts"] or ZERO)),
-            "payouts_pending": {
-                "count": pending["count"],
-                "amount": _money(pending["amount"]),
-            },
-        },
         "store_sales": {
             "sales_total": _money(store_sales["sales_total"]),
             "sales_count": store_sales["sales_count"],
@@ -217,21 +188,15 @@ def company_stats(first: date, last: date, buildings=None) -> dict:
 
 def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
     """Per seller (store), for the finance dashboard: store sales and bookings in the
-    period, ledger earnings and payouts in the period, pending payouts and balance now.
-
-    Limited to `buildings`: stores with a position there, sales at those positions, and
-    seller-wide money (ledger, payouts, balance) only for stores entirely inside them
-    (null otherwise, like `money`)."""
+    period. Limited to `buildings`: stores with a position there, sales at those positions."""
     start, end = _local_bounds(first, last)
     sellers = Seller.objects.all()
     sales = Purchase.objects.filter(
         status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
     )
-    whole = None
     if buildings is not None:
         sellers = sellers_with_positions_in(buildings)
         sales = sales.filter(service_position__building__in=buildings)
-        whole = set(sellers_within(buildings).values_list("pk", flat=True))
 
     sold = {
         row["seller"]: row
@@ -244,25 +209,6 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
         )
     }
-    ledger = {
-        row["account__seller"]: row
-        for row in SellerTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
-        .order_by()
-        .values("account__seller")
-        .annotate(
-            earnings=Sum("amount", filter=Q(kind=SellerTransactionKind.SALE)),
-            payouts=Sum("amount", filter=Q(kind=SellerTransactionKind.PAYOUT)),
-        )
-    }
-    pending = {
-        row["seller"]: row["amount"]
-        for row in SellerPayment.objects.filter(status__in=PENDING_PAYOUTS)
-        .order_by()
-        .values("seller")
-        .annotate(amount=Sum("amount"))
-    }
-    balances = dict(SellerAccount.objects.values_list("seller", "balance"))
-
     rows = []
     for seller in sellers.order_by("name"):
         s = sold.get(seller.pk, {})
@@ -275,25 +221,63 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             "bookings_total": _money(s.get("bookings_total")),
             "bookings_count": s.get("bookings_count", 0),
         }
-        if whole is None or seller.pk in whole:
-            money_row = ledger.get(seller.pk, {})
-            row |= {
-                "earnings": _money(money_row.get("earnings")),
-                "payouts_paid": _money(-(money_row.get("payouts") or ZERO)),
-                "payouts_pending": _money(pending.get(seller.pk)),
-                "balance": _money(balances.get(seller.pk)),
-            }
-        else:
-            row |= dict.fromkeys(("earnings", "payouts_paid", "payouts_pending", "balance"))
         rows.append(row)
     rows.sort(key=lambda r: Decimal(r["sales_total"]) + Decimal(r["bookings_total"]), reverse=True)
     return rows
 
 
+def developer_money(first: date, last: date, buildings=None) -> list[dict]:
+    """Per developer with deposits or spending in the period: deposit total and count,
+    spending total and count, and the balance now. Biggest deposit total first (then the
+    most deposits). Limited to the developers of `buildings`."""
+    start, end = _local_bounds(first, last)
+    period = AccountTransaction.objects.filter(
+        created_at__gte=start,
+        created_at__lt=end,
+        kind__in=(TransactionKind.DEPOSIT, TransactionKind.PURCHASE),
+    )
+    if buildings is not None:
+        period = period.filter(account__developer__building__in=buildings)
+    rows = (
+        period.order_by()
+        .values(
+            "account__developer",
+            "account__developer__employee_number",
+            "account__developer__full_name",
+            "account__developer__building__code",
+            "account__balance",
+        )
+        .annotate(
+            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
+            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
+        )
+    )
+    out = [
+        {
+            "id": row["account__developer"],
+            "employee_number": row["account__developer__employee_number"],
+            "full_name": row["account__developer__full_name"],
+            "building": row["account__developer__building__code"],
+            "deposits": _money(row["deposits"]),
+            "deposit_count": row["deposit_count"],
+            "spending": _money(-(row["spending"] or ZERO)),
+            "spending_count": row["spending_count"],
+            "balance": _money(row["account__balance"]),
+        }
+        for row in rows
+    ]
+    out.sort(key=lambda r: (-Decimal(r["deposits"]), -r["deposit_count"], r["employee_number"]))
+    return out
+
+
 def finance_stats(first: date, last: date, buildings=None) -> dict:
-    """The money half of `company_stats` plus the per-seller comparison."""
+    """The money half of `company_stats`, the per-seller comparison and the per-developer
+    deposits and spending."""
     return {
         **_frame(first, last, buildings),
         "money": money(first, last, buildings),
         "sellers": seller_comparison(first, last, buildings),
+        "developers": developer_money(first, last, buildings),
     }

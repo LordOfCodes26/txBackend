@@ -33,6 +33,9 @@ PERMISSIONS: dict[str, str] = {
     "rfid.block": "Block RFID cards",
     "rfid.device.manage": "Register and manage RFID readers",
     "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",
+    "system.backup": "See backups, run one now, change backup settings and download backups",
+    "system.delete_records": "Delete a record for good, with its history (after a backup)",
+    "system.data_reset": "Delete all data except users, roles, readers and stores (after a backup)",
     # Attendance
     "attendance.view": "View attendance records",
     "attendance.correct": "Correct attendance records",
@@ -40,10 +43,6 @@ PERMISSIONS: dict[str, str] = {
     "finance.view": "View developer accounts and ledgers",
     "finance.deposit": "Deposit funds to developer accounts",
     "finance.adjust": "Make manual balance adjustments",
-    # Seller finance
-    "seller_finance.view": "View seller balances, ledgers and payouts",
-    "seller_finance.payout": "Request on behalf of sellers, approve, reject and pay payouts",
-    "seller_finance.adjust": "Make manual seller balance adjustments",
     # Purchases
     "purchase.view": "View purchases",
     "purchase.create": "Create purchases",
@@ -101,7 +100,7 @@ ROLES: dict[str, RoleSpec] = {
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
-        _prefixed("finance", "seller_finance") | {"developer.view", "purchase.view", "audit.view"},
+        _prefixed("finance") | {"developer.view", "purchase.view", "audit.view"},
     ),
     # Every permission of this role is narrowed to the user's buildings
     # (Building.managers); see apps/rfid/scope.py.

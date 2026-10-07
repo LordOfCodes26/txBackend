@@ -20,7 +20,6 @@ from apps.purchases import services as purchases
 from apps.purchases.models import Purchase
 from apps.rfid import services as rfid
 from apps.rfid.models import RFIDCard, RFIDCardAssignment
-from apps.seller_finance.services import seller_ledger_mismatches
 from apps.sellers.models import Seller, ServicePosition
 
 GOODS = "/api/v1/goods/"
@@ -329,7 +328,7 @@ def test_closed_weekday_has_no_slots(desk, world):
 
 
 @pytest.mark.django_db
-def test_booking_charges_developer_and_credits_seller(desk, world):
+def test_booking_charges_developer(desk, world):
     pid, draft = add_booking(desk, world, tomorrow_at(14), slots=2)
     assert draft.status_code == 201, draft.json()
     assert draft.json()["kind"] == "BOOKING"
@@ -355,9 +354,8 @@ def test_booking_charges_developer_and_credits_seller(desk, world):
         Decimal("40.00"),
         world.developer.pk,
     )
-    assert world.seller.account.balance == Decimal("40.00")
     assert AuditLog.objects.filter(action="booking.created").exists()
-    assert finance.ledger_mismatches() == [] and seller_ledger_mismatches() == []
+    assert finance.ledger_mismatches() == []
 
 
 @pytest.mark.django_db
@@ -531,7 +529,7 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
         + DeveloperAccount.objects.get(pk=acc2.pk).balance
     )
     assert total == Decimal("180.00")  # exactly one 20.00 charge
-    assert finance.ledger_mismatches() == [] and seller_ledger_mismatches() == []
+    assert finance.ledger_mismatches() == []
 
 
 # --- Gaps found in review ------------------------------------------------------------------
@@ -803,7 +801,7 @@ def test_change_booking_time(desk, world, paid):
     assert [s["start_time"] for s in slots if s["state"] == "BOOKED"] == ["14:00", "15:00"]
     # No money moved.
     assert balance(world) == Decimal("60.00")
-    assert finance.ledger_mismatches() == [] and seller_ledger_mismatches() == []
+    assert finance.ledger_mismatches() == []
     log = AuditLog.objects.get(action="booking.changed")
     assert log.old_values["start"] == tomorrow_at(10).isoformat()
     # Overlapping its own old time is fine.

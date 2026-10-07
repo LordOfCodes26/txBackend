@@ -20,7 +20,7 @@ def test_health_redis_reports_failure(client):
 
 
 def test_health_redis_uses_resp2(client, settings):
-    # redis-py 8's RESP3 CLIENT MAINT_NOTIFICATIONS probe hangs Garnet (Windows kit).
+    # redis-py 8's RESP3 CLIENT MAINT_NOTIFICATIONS probe hangs servers that ignore it.
     settings.REDIS_CONNECTION_KWARGS = {"protocol": 2}
     with mock.patch("common.health.redis.Redis.from_url") as from_url:
         from_url.return_value.ping.return_value = True

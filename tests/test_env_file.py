@@ -1,4 +1,4 @@
-"""DJANGO_ENV_FILE: Windows services have no EnvironmentFile, so settings name the file."""
+"""DJANGO_ENV_FILE: a settings file named by path is read like the .env file."""
 
 import os
 import subprocess
@@ -41,10 +41,9 @@ def test_settings_are_read_from_the_named_file(tmp_path):
         "DATABASE_URL=postgres://u:p@localhost:5432/db\n"
         "TIME_ZONE=Asia/Seoul\n"
         "BACKUP_REQUIRE_PITR=false\n"
-        # Windows paths are written with forward slashes.
-        "MEDIA_ROOT=C:/Management/data/media\n"
+        "MEDIA_ROOT=/srv/data/media\n"
     )
-    assert run_with(env_file) == "Asia/Seoul False C:/Management/data/media"
+    assert run_with(env_file) == "Asia/Seoul False /srv/data/media"
 
 
 def test_the_process_environment_wins_over_the_file(tmp_path):

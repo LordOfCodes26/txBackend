@@ -3,7 +3,7 @@
 For: the Next.js app in `/root/frontend`. Goal: an admin links a user who has the
 **SELLER** role to a store (seller), and optionally a position manager to a sell
 position. That user then sees and manages **only that store** (goods, stock, till,
-bookings, payouts).
+bookings).
 
 Most of it already exists: `/sellers/[id]` has a "Linked user" dropdown and
 `/positions/[id]` has a "Position manager" dropdown. This guide fixes four gaps:
@@ -168,7 +168,7 @@ empty, and menus for sellers must come from the store link instead:
 const seller = await djangoFetch<Seller | null>("/api/v1/sellers/me/", { accessToken })
   .catch(() => null);           // 404 SELLER_PROFILE_NOT_FOUND = not a seller
 const isSeller = seller !== null && seller.status === "ACTIVE";
-// show Goods, Stock, Till, Bookings, Payouts when isSeller (the API narrows them to the store)
+// show Goods, Stock, Till, Bookings when isSeller (the API narrows them to the store)
 ```
 
 Check `canManage(...)` in `src/lib/current-user.ts`: if it only looks at permissions,

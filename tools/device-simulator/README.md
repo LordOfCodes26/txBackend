@@ -56,7 +56,7 @@ and card assign readers are recognised by their ID alone, from any address.
 The server must know the devices: register them in the web app under **Readers → New
 device** (doors: code `Door1`, name `Door1-1`, building, IP `192.168.100.151`; tills:
 `Reader1`; card assign readers: `Master1`). Unregistered devices always get `CARD_NO`; the
-server log (`journalctl -u backend-tcp` or `logs\mgmt-tcp.out.log` on Windows) says why.
+server log (`journalctl -u backend-tcp`) and the TCP log page say why.
 
 ## Make an .exe (optional)
 

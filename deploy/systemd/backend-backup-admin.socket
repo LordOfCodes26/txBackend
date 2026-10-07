@@ -1,0 +1,13 @@
+[Unit]
+Description=Backups page helper socket (only the backend web service may connect)
+
+[Socket]
+ListenStream=/run/backend-backup-admin.sock
+SocketUser=root
+SocketGroup=backend
+SocketMode=0660
+Accept=yes
+MaxConnections=8
+
+[Install]
+WantedBy=sockets.target

@@ -46,15 +46,6 @@ def sellers_with_positions_in(buildings):
     return Seller.objects.filter(positions__building__in=buildings).distinct()
 
 
-def sellers_within(buildings):
-    """Sellers whose active positions are ALL in `buildings` (and that have one there):
-    their seller-wide money (balance, payouts) belongs to those buildings only."""
-    from apps.sellers.models import ServicePosition
-
-    outside = ServicePosition.objects.exclude(building__in=buildings).values("seller")
-    return sellers_with_positions_in(buildings).exclude(pk__in=outside)
-
-
 def ensure_in_scope(user, permission: str, building_id, field: str = "building") -> None:
     """Reject a change that would put data outside the user's buildings."""
     scope = building_scope(user, permission)

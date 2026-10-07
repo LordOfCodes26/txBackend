@@ -15,8 +15,6 @@ from apps.finance.models import TransactionKind
 from apps.goods.models import Good
 from apps.purchases.models import Purchase, PurchaseKind
 from apps.rfid.models import Building
-from apps.seller_finance.models import SellerPayment
-from apps.seller_finance.services import credit_sale, open_seller_account
 from apps.sellers.models import Seller, ServicePosition
 
 pytestmark = pytest.mark.django_db
@@ -65,16 +63,6 @@ def site(make_user):
                 account_transaction=txn,
                 confirmed_at=timezone.now(),
             )
-            credit_sale(
-                seller=position.seller,
-                amount=Decimal(total),
-                reference=f"purchase:test-{position.pk}",
-                actor=None,
-            )
-    open_seller_account(cafe)
-    open_seller_account(shop)
-    SellerPayment.objects.create(seller=shop, amount=Decimal("2.00"), status="REQUESTED")
-    SellerPayment.objects.create(seller=cafe, amount=Decimal("9.00"), status="REQUESTED")
 
     class S:
         pass
@@ -121,14 +109,6 @@ def test_stores_in_own_building(client, site):
     assert sorted(r["service_position_name"] for r in perf) == ["Cafe B1", "Shop B1"]
 
 
-def test_seller_money_only_for_stores_entirely_in_own_buildings(client, site):
-    """Cafe also sells in Building 2: its balance and payouts aren't the owner's to see."""
-    accounts = rows(client.get("/api/v1/seller-finance/accounts/"))
-    assert [a["seller"]["id"] for a in accounts] == [site.shop.pk]
-    payouts = rows(client.get("/api/v1/seller-finance/payouts/"))
-    assert [p["seller"]["id"] for p in payouts] == [site.shop.pk]
-
-
 def test_read_only_and_no_company_wide_lists(client, site):
     for path in ("/api/v1/users/", "/api/v1/roles/", "/api/v1/audit-logs/"):
         assert client.get(path).status_code == 403, path
@@ -161,8 +141,7 @@ def test_statistics_of_own_buildings(client, site):
         "bookings_total": "0.00",
         "bookings_count": 0,
     }
-    assert money["sellers"]["total_balance"] == "5.00"  # Shop only
-    assert money["sellers"]["payouts_pending"] == {"count": 1, "amount": "2.00"}
+    assert "sellers" not in money  # no seller balances any more
 
 
 def test_boss_sees_the_whole_company(auth_client, make_user, site):

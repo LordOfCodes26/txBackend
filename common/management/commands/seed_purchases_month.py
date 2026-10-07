@@ -22,14 +22,6 @@ from apps.rfid.models import (
     RFIDEvent,
     ScanResult,
 )
-from apps.seller_finance.models import (
-    PayoutStatus,
-    SellerAccount,
-    SellerPayment,
-    SellerTransaction,
-    SellerTransactionKind,
-)
-from apps.seller_finance.services import seller_ledger_mismatches
 from apps.sellers.models import ServicePosition
 
 MARK = "demo-month"
@@ -39,8 +31,8 @@ ZERO = Decimal("0.00")
 class Command(BaseCommand):
     help = (
         "Demo data: a month of purchases by developers who were present (per attendance), "
-        "with ledger, seller and stock entries dated in that month. Each month is closed "
-        "out (allowance deposit, seller payout, stock delivery) so today's balances and stock "
+        "with ledger and stock entries dated in that month. Each month is closed "
+        "out (allowance deposit, stock delivery) so today's balances and stock "
         "stay exactly as they are. Runs once per month."
     )
 
@@ -73,13 +65,13 @@ class Command(BaseCommand):
 
         plans = self._plan(presence, cards, counters)
         with transaction.atomic():
-            self._write(plans, first, last, tag)
+            self._write(plans, first, tag)
         self.stdout.write(f"Created {len(plans)} purchases for {first:%Y-%m}.")
 
-        problems = ledger_mismatches() + seller_ledger_mismatches() + stock_mismatches()
+        problems = ledger_mismatches() + stock_mismatches()
         if problems:
             raise CommandError(f"Reconciliation failed: {problems[:3]}")
-        self.stdout.write(self.style.SUCCESS("Ledgers, seller sales and stock reconcile."))
+        self.stdout.write(self.style.SUCCESS("Ledgers and stock reconcile."))
 
     # -- planning --------------------------------------------------------------------------
 
@@ -134,21 +126,18 @@ class Command(BaseCommand):
 
     # -- writing ----------------------------------------------------------------------------
 
-    def _write(self, plans, first, last, tag):
+    def _write(self, plans, first, tag):
         accounts = {a.developer_id: a for a in DeveloperAccount.objects.all()}
         spend = defaultdict(lambda: ZERO)
-        sales = defaultdict(lambda: ZERO)
         sold = defaultdict(int)
-        for _, dev, _, position, _, lines in plans:
+        for _, dev, _, _, _, lines in plans:
             total = sum((g.price * q for g, q in lines.items()), ZERO)
             spend[dev.pk] += total
-            sales[position.seller_id] += total
             for g, q in lines.items():
                 if g.track_stock:
                     sold[g.pk] += q
 
         month_start = _at(first, 6)
-        month_end = _at(last, 23)
 
         # Monthly allowance covering the month's spending (keeps today's balances intact).
         running = {}
@@ -176,8 +165,6 @@ class Command(BaseCommand):
                 created_at=month_start - timedelta(hours=1),
             )
             stock[good_id] = qty
-        seller_running = defaultdict(lambda: ZERO)
-        seller_accounts = {a.seller_id: a for a in SellerAccount.objects.all()}
 
         for i, (moment, dev, card, position, reader, lines) in enumerate(plans):
             account = accounts[dev.pk]
@@ -227,16 +214,6 @@ class Command(BaseCommand):
                 reference=reference,
                 created_at=moment,
             )
-            seller_running[position.seller_id] += total
-            SellerTransaction.objects.create(
-                account=seller_accounts[position.seller_id],
-                kind=SellerTransactionKind.SALE,
-                amount=total,
-                balance_after=seller_running[position.seller_id],
-                description="Sale",
-                reference=reference,
-                created_at=moment,
-            )
             Purchase.objects.filter(pk=purchase.pk).update(
                 status=PurchaseStatus.CONFIRMED,
                 developer=dev,
@@ -259,34 +236,6 @@ class Command(BaseCommand):
                 entity_id=str(purchase.pk),
                 new_values={"developer": dev.pk, "total": str(total)},
                 created_at=moment,
-            )
-
-        # Month-end payout of each seller's sales (keeps today's seller balances intact).
-        for seller_id, amount in sales.items():
-            payment = SellerPayment.objects.create(
-                seller_id=seller_id,
-                amount=amount,
-                status=PayoutStatus.REQUESTED,
-                note=f"Payout {first:%b %Y}",
-                idempotency_key=f"{tag}-payout-{seller_id}",
-            )
-            txn = SellerTransaction.objects.create(
-                account=seller_accounts[seller_id],
-                kind=SellerTransactionKind.PAYOUT,
-                amount=-amount,
-                balance_after=ZERO,
-                description=f"Payout ({first:%b %Y})",
-                reference=f"payout:{payment.pk}",
-                created_at=month_end,
-            )
-            SellerPayment.objects.filter(pk=payment.pk).update(
-                status=PayoutStatus.PAID,
-                transaction=txn,
-                payment_reference=f"DEMO-{first:%Y%m}",
-                approved_at=month_end - timedelta(hours=2),
-                paid_at=month_end,
-                created_at=month_end - timedelta(days=1),
-                updated_at=month_end,
             )
 
 

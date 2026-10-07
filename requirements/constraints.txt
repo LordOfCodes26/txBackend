@@ -26,6 +26,7 @@ djangorestframework==3.18.1
 djangorestframework_simplejwt==5.5.1
 drf-spectacular==0.30.0
 drf-spectacular-sidecar==2026.9.1
+et-xmlfile==2.0.0
 factory_boy==3.3.3
 Faker==40.40.0
 gunicorn==26.2.0
@@ -39,6 +40,7 @@ jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kombu==5.6.2
 msgpack==1.2.3
+openpyxl==3.1.5
 packaging==26.3
 pillow==12.3.0
 pluggy==1.6.0
@@ -69,7 +71,6 @@ ujson==6.0.0
 uritemplate==4.2.0
 uvicorn==0.54.0
 vine==5.1.0
-waitress==3.0.2
 wcwidth==0.9.1
 websockets==17.1
 whitenoise==6.12.0

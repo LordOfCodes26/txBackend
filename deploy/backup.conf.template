@@ -13,5 +13,14 @@ KEEP_BASE_BACKUPS=4
 OFFSITE_DIR=
 # ... or an rsync target over SSH, e.g. backup@10.0.0.50:/srv/backups/backend
 OFFSITE_RSYNC=
+# Nightly backup time (HH:MM). Change it on the Backups page (Admin): it also updates the timer.
+BACKUP_TIME=02:30
+# The systemd units the Backups page manages (staging uses other names).
+BACKUP_UNIT=backend-backup
+BASE_BACKUP_UNIT=backend-basebackup
+# Restoring from the Backups page runs as this systemd job (staging uses another name).
+RESTORE_UNIT=backend-restore
+# Largest backup file the Backups page accepts as an upload (bytes; 2 GB).
+UPLOAD_MAX_BYTES=2147483648
 # Status file read by GET /health/backup/ (must be readable by the web service).
 STATUS_FILE=/var/lib/backend/backup-status.json

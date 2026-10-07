@@ -1,0 +1,10 @@
+[Unit]
+Description=Backups page helper (status, run now, settings, download)
+
+[Service]
+# Root: the backups belong to root and postgres. The helper checks every request.
+ExecStart=/usr/local/sbin/backend-backup-admin --socket
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+TimeoutStopSec=30min

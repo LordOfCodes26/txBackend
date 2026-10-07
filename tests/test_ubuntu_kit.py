@@ -69,6 +69,3 @@ def test_apply_web_ports_rewrites_the_nginx_site(tmp_path):
 def test_port_changes_refuse_the_development_ports(port):
     # Free until a developer starts the development servers, then they would clash.
     assert port in MGMT.read_text().split("OWN_PORTS=(")[1].split(")")[0].split()
-    windows = BACKEND / "deploy" / "windows"
-    for script in ("door-port.ps1", "web-port.ps1"):
-        assert "8100, 3000, 9101)" in (windows / script).read_text(), script

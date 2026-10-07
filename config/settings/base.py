@@ -6,8 +6,8 @@ import environ
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 env = environ.Env()
-# Settings come from the process environment, then from DJANGO_ENV_FILE (Windows services,
-# which have no EnvironmentFile), then from the project's .env (development).
+# Settings come from the process environment, then from DJANGO_ENV_FILE (a settings file
+# named by path), then from the project's .env (development).
 for _env_file in (env("DJANGO_ENV_FILE", default=""), BASE_DIR / ".env"):
     if _env_file and Path(_env_file).exists():
         environ.Env.read_env(Path(_env_file), overwrite=False)
@@ -42,7 +42,6 @@ INSTALLED_APPS = [
     "apps.goods",
     "apps.finance",
     "apps.purchases",
-    "apps.seller_finance",
     "apps.bookings",
     "apps.realtime",
 ]
@@ -91,8 +90,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --- Redis / cache / Celery -------------------------------------------------
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
 # redis-py 8 defaults to RESP3 and probes CLIENT MAINT_NOTIFICATIONS on connect.
-# Garnet (and older Redis) does not answer that probe: the socket hangs until the
-# timeout, /health/redis/ returns 503, and Garnet can crash (NativeOverlapped).
+# Older Redis servers (and Redis-compatible ones) don't answer that probe: the socket
+# hangs until the timeout and /health/redis/ returns 503.
 REDIS_CONNECTION_KWARGS = {"protocol": 2}
 
 CACHES = {
@@ -184,7 +183,6 @@ SPECTACULAR_SETTINGS = {
         "AttendanceEventTypeEnum": "apps.attendance.models.EventType",
         "SellerStatusEnum": "apps.sellers.models.SellerStatus",
         "AccountStatusEnum": "apps.finance.models.AccountStatus",
-        "PayoutStatusEnum": "apps.seller_finance.models.PayoutStatus",
         "GoodKindEnum": "apps.goods.models.GoodKind",
         "ScanDirectionEnum": "apps.rfid.models.ScanDirection",
         "DeviceDirectionEnum": "apps.rfid.models.DeviceDirection",
@@ -274,9 +272,21 @@ PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", defa
 BACKUP_STATUS_FILE = env("BACKUP_STATUS_FILE", default="/var/lib/backend/backup-status.json")
 BACKUP_MAX_DUMP_AGE_HOURS = env.int("BACKUP_MAX_DUMP_AGE_HOURS", default=26)
 BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=8)
-# Point-in-time recovery (base backups + WAL archiving) is required on Linux; the Windows
-# kit makes nightly verified dumps only and turns this off.
+# Point-in-time recovery (base backups + WAL archiving) is required; turn this off only
+# where nightly verified dumps are the whole backup.
 BACKUP_REQUIRE_PITR = env.bool("BACKUP_REQUIRE_PITR", default=True)
+# The Backups page talks to the root helper scripts/backup/admin.py: through its systemd
+# socket (installed by the kit), or, when BACKUP_ADMIN_COMMAND is set, by running it
+# directly (a web service that already runs as root, e.g. staging).
+BACKUP_ADMIN_SOCKET = env("BACKUP_ADMIN_SOCKET", default="/run/backend-backup-admin.sock")
+BACKUP_ADMIN_COMMAND = env("BACKUP_ADMIN_COMMAND", default="")
+
+# --- Data reset -----------------------------------------------------------------
+# System -> Data reset (manage.py reset_data): the backup made first goes to
+# DATA_RESET_BACKUP_DIR (default: reset-backups next to MEDIA_ROOT); PG_DUMP is the
+# pg_dump program (default: from the PATH).
+DATA_RESET_BACKUP_DIR = env("DATA_RESET_BACKUP_DIR", default="")
+PG_DUMP = env("PG_DUMP", default="")
 
 # --- Test console -------------------------------------------------------------
 # A staging-only page (/test-console/) to exercise doors and tills end to end.

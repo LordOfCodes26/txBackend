@@ -17,7 +17,6 @@ from apps.goods.exceptions import InsufficientStock
 from apps.goods.models import Good, GoodKind, MovementKind
 from apps.realtime.notify import notify_purchase
 from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
-from apps.seller_finance.services import credit_sale
 from apps.sellers.models import SellerStatus, ServicePosition
 
 from .exceptions import (
@@ -416,8 +415,6 @@ def confirm_purchase(
             description=f"Purchase at {purchase.seller.name}",
             reference=reference,
         )
-        # 100% of the sale goes to the seller (no commission).
-        credit_sale(seller=position.seller, amount=total, reference=reference, actor=actor)
 
         purchase.status = PurchaseStatus.CONFIRMED
         purchase.developer = developer

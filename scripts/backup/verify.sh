@@ -22,10 +22,6 @@ SELECT json_build_object(
      SELECT count(*) FROM finance_developeraccount a
      WHERE a.balance <> COALESCE((SELECT sum(amount) FROM finance_accounttransaction t
                                   WHERE t.account_id = a.id), 0)),
-  'seller_ledger_mismatches', (
-     SELECT count(*) FROM seller_finance_selleraccount a
-     WHERE a.balance <> COALESCE((SELECT sum(amount) FROM seller_finance_sellertransaction t
-                                  WHERE t.account_id = a.id), 0)),
   'stock_mismatches', (
      SELECT count(*) FROM goods_good g
      WHERE g.track_stock AND g.quantity <> COALESCE((SELECT sum(quantity_delta)
@@ -37,8 +33,7 @@ echo "verify: $result"
 python3 - "$result" <<'PY'
 import json, sys
 r = json.loads(sys.argv[1])
-problems = [k for k in ("developer_ledger_mismatches", "seller_ledger_mismatches",
-                        "stock_mismatches") if r[k]]
+problems = [k for k in ("developer_ledger_mismatches", "stock_mismatches") if r[k]]
 if r["migrations"] == 0:
     problems.append("no migrations table rows")
 if problems:

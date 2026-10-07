@@ -2,7 +2,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import diff, record_audit, snapshot
-from apps.seller_finance.services import open_seller_account
 
 from .exceptions import PositionHasGoods
 from .models import Seller, ServicePosition
@@ -14,7 +13,6 @@ POSITION_FIELDS = ["seller", "name", "location", "building", "manager", "is_acti
 @transaction.atomic
 def create_seller(*, actor, **data) -> Seller:
     seller = Seller.objects.create(**data)
-    open_seller_account(seller)
     record_audit(
         "seller.created", actor=actor, entity=seller, new_values=snapshot(seller, SELLER_FIELDS)
     )

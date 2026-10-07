@@ -101,6 +101,10 @@ python3 -m venv "${RELEASE}/.venv"
 "${RELEASE}/.venv/bin/pip" install --quiet --no-index --find-links "${BUNDLE}/wheelhouse" \
     -r "${RELEASE}/requirements/prod.txt"
 chown -R backend:backend "${RELEASE}"
+# Root runs these (backup timers, sudo mgmt, the Backups page helper): the web service
+# must not be able to change them.
+chown -R root:root "${RELEASE}/scripts" "${RELEASE}/deploy"
+chmod -R go-w "${RELEASE}/scripts" "${RELEASE}/deploy"
 
 run_manage() {
     runuser -u backend -- bash -c \
@@ -129,6 +133,11 @@ ln -sfn /etc/nginx/sites-available/backend.conf /etc/nginx/sites-enabled/backend
 "${RELEASE}/deploy/mgmt.sh" apply-web-ports
 # `sudo mgmt ...`: deploys from the development copies, port changes, uninstall.
 ln -sfn "${BASE}/current/deploy/mgmt.sh" /usr/local/sbin/mgmt
+# The Backups page's helper: systemd runs it as root for each connection to its socket,
+# which only the backend group may open.
+install -o root -g root -m 0755 "${RELEASE}/scripts/backup/admin.py" /usr/local/sbin/backend-backup-admin
+install -m 644 "${RELEASE}/deploy/systemd/backend-backup-admin.socket" \
+    "${RELEASE}/deploy/systemd/backend-backup-admin@.service" /etc/systemd/system/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 
@@ -146,7 +155,7 @@ systemctl daemon-reload
 systemctl enable backend-web backend-worker backend-ws backend-tcp nginx redis-server postgresql
 systemctl restart backend-web backend-worker backend-ws backend-tcp
 systemctl reload nginx || systemctl restart nginx
-systemctl enable --now backend-backup.timer backend-basebackup.timer
+systemctl enable --now backend-backup.timer backend-basebackup.timer backend-backup-admin.socket
 if ! ls -1d /var/backups/backend/base/*/ >/dev/null 2>&1; then
     # Point-in-time recovery needs a base backup to start from.
     "${RELEASE}/scripts/backup/base_backup.sh"

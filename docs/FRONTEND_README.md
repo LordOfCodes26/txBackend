@@ -186,9 +186,6 @@ const can = (code: string) => me.permissions.includes(code);
 | `finance.view` | All developer accounts and transactions |
 | `finance.deposit` | Deposit money to developer accounts |
 | `finance.adjust` | Manual corrections; freeze, unfreeze, close, reopen accounts; reset PINs |
-| `seller_finance.view` | All seller balances, ledgers and payouts |
-| `seller_finance.payout` | Request payouts for any seller; approve, reject, mark processing, pay |
-| `seller_finance.adjust` | Manual seller balance corrections |
 | `purchase.view` | All purchases |
 | `purchase.create` / `.confirm` / `.cancel` | Run any seller's till (normally sellers use their own; see below) |
 
@@ -199,7 +196,7 @@ Default roles, which admins can change:
 | ADMIN | Everything: users, roles, settings and all data |
 | BOSS | **Read-only**: every `*.view` permission (all lists and details) plus `stats.view` (the statistics dashboard). Can't create, change or delete anything |
 | MANAGER | Developers, RFID, attendance, user list, audit log, seller/goods view |
-| FINANCE_MANAGER | Developer and seller finance, developer view, purchase view, audit log |
+| FINANCE_MANAGER | Developer finance, developer view, purchase view, audit log |
 | DEVELOPER | Nothing global: only their own data via `/me/` endpoints |
 | SELLER | Nothing global; see *Seller self-service* below |
 | BUILDING_OWNER | Like BOSS (read-only + statistics) but **only their buildings**, including the stores there; no users, roles or audit log (see *Building owners* below) |
@@ -226,8 +223,7 @@ Find candidates with `GET /users/?role=SELLER`. The store then shows `user_email
 A user linked to an **ACTIVE** seller manages that seller's own catalogue without any
 global permission: service positions, goods, images, stock and stock history. The
 same endpoints serve both cases, and the same goes for the **till** (purchases at their
-own service positions) and **their own money** (balance, ledger, requesting and cancelling
-payouts); the backend narrows lists to the seller's own
+own service positions); the backend narrows lists to the seller's own
 objects and returns `404` for other sellers' objects. To tell whether the user is a
 seller, call `GET /sellers/me/` (`404 SELLER_PROFILE_NOT_FOUND` means no). A
 SUSPENDED or CLOSED seller gets `403` on catalogue endpoints.
@@ -270,7 +266,6 @@ everything a BOSS sees, limited to their buildings:
 | People | Developers whose home `building` is theirs; their cards, attendance, occupancy, developer accounts and ledger |
 | Doors | Their buildings' door devices and scans |
 | Stores | Sellers with a position in their buildings; those positions, their goods and stock history; purchases, bookings and `/purchases/performance/` of those positions |
-| Seller money | Balance, ledger and payouts only of stores whose positions are **all** in their buildings (a store that also sells elsewhere shows its sales here, not its seller-wide money) |
 | Statistics | `GET /stats/` with every figure limited to their buildings (`buildings` in the response) |
 
 Users, roles and the audit log are company-wide, so building owners don't get them (`403`).
@@ -305,7 +300,6 @@ position manager is narrowed further than the seller's owner (`Seller.user`):
 | Goods, images, stock, stock history | all the seller's positions | **only their position(s)** |
 | Till sales, booking checkouts, bookings, counter WebSocket | all positions | **only their position(s)** |
 | Service positions | list, create, edit, delete, assign managers / building | list and edit **their own** (name, location); can't change `manager`, `building`, `is_active`, can't create or delete |
-| Seller money (balance, ledger, payouts) | yes | **no** (`403`) |
 
 `GET /sellers/me/` returns the seller for both. To know which positions a manager has,
 list `GET /service-positions/` (it's already narrowed). Other positions' objects return
@@ -361,8 +355,7 @@ Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASS
 `INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
 `PIN_NOT_SET`, `CARD_NOT_PRESENTED`, `MANUAL_CARD_ENTRY_DISABLED`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
-`details: {locked_until}`), `INSUFFICIENT_SELLER_BALANCE` (`details: {available}`),
-`INVALID_PAYOUT_TRANSITION`, `SELF_APPROVAL_FORBIDDEN`, `OWN_SELLER_FORBIDDEN`,
+`details: {locked_until}`),
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
 `DAILY_LIMIT_REACHED` (`details: {max_slots_per_day, already_booked, remaining}`),
 `ALREADY_BOOKED_THEN` (`details: {booking, good, start, end}`),
@@ -399,7 +392,7 @@ bookmarked and survive a reload. Debounce search input (~300 ms).
 
 ### Money-moving requests need an `Idempotency-Key`
 
-Deposits, adjustments, purchase confirmation (also for bookings) and payout requests require an
+Deposits, adjustments and purchase confirmation (also for bookings) require an
 `Idempotency-Key` header:
 
 ```ts
@@ -912,40 +905,6 @@ Example `attendance` message:
 Close codes: `4401` (bad or used ticket), `4403` (no `attendance.view`). Reconnect with
 backoff; the first message after reconnecting is a fresh snapshot.
 
-### Seller finance and payouts
-
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| GET | `/seller-finance/accounts/` | `seller_finance.view` | Every seller's `balance`, `reserved`, `available_balance` |
-| GET | `/seller-finance/accounts/me/` | logged in | The seller's own account |
-| GET | `/seller-finance/transactions/` | `seller_finance.view`, or own seller | Ledger. Filters: `seller`, `kind`, `reference`, `created_after`, `created_before` |
-| GET | `/seller-finance/payouts/` | `seller_finance.view`, or own seller | Filters: `seller`, `status`, `created_after`, `created_before` |
-| POST | `/seller-finance/payouts/` | own seller, or `seller_finance.payout` | `{amount, note?}` (+ `seller` for finance staff) + `Idempotency-Key` |
-| POST | `/seller-finance/payouts/{id}/approve/` | `seller_finance.payout` | Not by the requester |
-| POST | `/seller-finance/payouts/{id}/processing/` | `seller_finance.payout` | Optional step |
-| POST | `/seller-finance/payouts/{id}/pay/` | `seller_finance.payout` | `{payment_reference}` (transfer or receipt no.) |
-| POST | `/seller-finance/payouts/{id}/reject/` | `seller_finance.payout` | `{reason}` |
-| POST | `/seller-finance/payouts/{id}/cancel/` | own seller, or `seller_finance.payout` | Only while REQUESTED |
-| POST | `/seller-finance/adjustments/` | `seller_finance.adjust` | `{seller, amount, reason}`, signed + `Idempotency-Key` |
-
-- Every confirmed purchase credits its seller with the full amount (no commission), in
-  the same transaction that charges the developer. Ledger `kind`: `SALE` (+),
-  `PAYOUT` (−), `ADJUSTMENT` (±); `reference` is `purchase:<id>` or `payout:<id>`.
-- Payout `status`: `REQUESTED` → `APPROVED` → (`PROCESSING` →) `PAID`, or `REJECTED` /
-  `CANCELLED`. Show the allowed buttons per status:
-
-  | Status | Seller | Finance |
-  |---|---|---|
-  | REQUESTED | Cancel | Approve (not own request), Reject |
-  | APPROVED | none | Processing, Pay, Reject |
-  | PROCESSING | none | Pay, Reject |
-  | PAID / REJECTED / CANCELLED | none | none |
-
-- **Open payouts reserve money:** `available_balance` = `balance` − `reserved`. A request
-  above `available_balance` fails with `INSUFFICIENT_SELLER_BALANCE`. The balance itself
-  drops only when a payout is PAID.
-- Hide Approve on payouts the logged-in user requested (`requested_by` = `me.id`).
-
 ### Company statistics (BOSS dashboard)
 
 `GET /stats/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` (`stats.view`: BOSS and ADMIN).
@@ -973,17 +932,14 @@ most 366 days. One request returns the whole dashboard:
                            "total_balance": "18420.00"},
     "deposits": {"total": "23000.00", "count": 230},
     "spending": {"total": "11870.50", "count": 2145},
-    "daily": [{"date": "2026-09-02", "deposits": "0.00", "spending": "412.50"}, ...],
-    "sellers": {"total_balance": "1530.00", "earnings": "11870.50", "payouts_paid": "10340.50",
-                "payouts_pending": {"count": 2, "amount": "640.00"}}
+    "daily": [{"date": "2026-09-02", "deposits": "0.00", "spending": "412.50"}, ...]
   }
 }
 ```
 
 - `buildings` is `null` for BOSS / ADMIN (whole company). For a **building owner** it lists
   their buildings, and every figure is limited to them: their developers (home building)
-  and those developers' money, the stores in their buildings (`store_sales`), and seller
-  money only of stores entirely in their buildings.
+  and those developers' money, and the stores in their buildings (`store_sales`).
 - `money.store_sales`: confirmed till sales and court bookings at the positions in scope
   during the period: `{sales_total, sales_count, bookings_total, bookings_count}`.
 - `daily` lists **every** day of the period (zeros included), ready for a chart.
@@ -992,10 +948,8 @@ most 366 days. One request returns the whole dashboard:
 - `present` = developers with attendance that day; `avg_worked_hours` is per present person.
   The overall averages only count days with attendance (weekends don't pull them down).
 - Money is a string with 2 decimals (`CURRENCY`). `spending` = till purchases and bookings.
-  `earnings` = sellers' sales in the period, `payouts_paid` = payouts paid in the period,
-  `payouts_pending` = all payouts not yet paid (requested, approved, processing).
 - The BOSS can open any list for details (developers, attendance, purchases, accounts,
-  payouts, audit log, `/purchases/performance/` per store) but every change returns `403`.
+  audit log, `/purchases/performance/` per store) but every change returns `403`.
 
 ### Audit log
 
@@ -1030,8 +984,6 @@ before → after table.
 | My balance, statement and PIN | `finance/accounts/me/`, `finance/transactions/me/`, `finance/accounts/me/pin/` | anyone with a developer profile |
 | **Till** (choose position, build bucket, card + PIN confirm) | `purchases/`, `goods/?service_position=&is_active=true&in_stock=true` | active seller |
 | Sales history | `purchases/?status=CONFIRMED` | active seller, or `purchase.view` |
-| My earnings and payouts (seller) | `seller-finance/accounts/me/`, `seller-finance/transactions/`, `seller-finance/payouts/` | active seller |
-| Seller balances and payout queue (finance) | `seller-finance/accounts/`, `seller-finance/payouts/?status=REQUESTED` | `seller_finance.view` |
 | My purchases | `purchases/me/` | anyone with a developer profile |
 | Playground desk: day schedule → book a court (card tap + PIN) → change a booking | `rentals/schedule/`, `bookings/checkout/`, `bookings/checkout/{id}/confirm/`, `bookings/{id}/change/` | the playground's seller, or `purchase.create` + `purchase.confirm` |
 | Rental schedule (seller) | `bookings/?date=` | active seller, or `purchase.view` |

@@ -167,7 +167,6 @@ curl -sk https://<server-ip>/api/v1/developers/ -H "Authorization: Bearer <acces
 | `sellers/`, `service-positions/`, `goods/`, `inventory/movements/` | Stores, counters, goods, stock |
 | `purchases/` | Till sales (and `purchases/performance/`: sales per counter) |
 | `rentals/`, `bookings/` | Courts and bookings |
-| `seller-finance/accounts/`, `…/transactions/`, `…/payouts/`, `…/adjustments/` | Stores' money and payouts |
 | `stats/` | Company statistics (BOSS dashboard) |
 | `audit-logs/` | Who changed what |
 | `realtime/ticket/` | A ticket to open the live-updates connection |
@@ -201,6 +200,9 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    `/etc/backend/backup.conf` (backups are made every night into `/var/backups/backend`).
 
 ## 8. Developing on the server
+
+The full guide (ports and how to change them, settings, testing with devices, demo data):
+`docs/DEVELOPMENT.md` in `~/backend-dev`.
 
 The development copies are yours (not root's) and **separate from the installed system**:
 their own database (on its own PostgreSQL, port 5433) and settings. Experiments never

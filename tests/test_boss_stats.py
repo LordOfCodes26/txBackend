@@ -15,8 +15,6 @@ from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.finance.models import TransactionKind
 from apps.rfid.models import Building
-from apps.seller_finance.models import SellerPayment
-from apps.seller_finance.services import credit_sale
 from apps.sellers.models import Seller
 
 pytestmark = pytest.mark.django_db
@@ -53,7 +51,6 @@ def test_roles_in_the_catalog():
         "/api/v1/purchases/",
         "/api/v1/purchases/performance/",
         "/api/v1/bookings/",
-        "/api/v1/seller-finance/payouts/",
         "/api/v1/audit-logs/",
         STATS,
     ],
@@ -139,9 +136,6 @@ def test_money(boss_client, make_user):
             description="test",
             reference="t",
         )
-    seller = Seller.objects.create(name="Cafe")
-    credit_sale(seller=seller, amount=Decimal("30.00"), reference="t", actor=None)
-    SellerPayment.objects.create(seller=seller, amount=Decimal("10.00"), status="REQUESTED")
 
     body = boss_client.get(STATS).json()["money"]
     assert body["developer_accounts"]["total_balance"] == "70.00"
@@ -151,12 +145,7 @@ def test_money(boss_client, make_user):
     assert today == [
         {"date": timezone.localdate().isoformat(), "deposits": "100.00", "spending": "30.00"}
     ]
-    assert body["sellers"] == {
-        "total_balance": "30.00",
-        "earnings": "30.00",
-        "payouts_paid": "0.00",
-        "payouts_pending": {"count": 1, "amount": "10.00"},
-    }
+    assert "sellers" not in body
 
 
 def test_migration_keeps_existing_bosses_working(make_user):
