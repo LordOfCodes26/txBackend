@@ -53,18 +53,18 @@ class CompanyStatsView(APIView):
 
 
 class FinanceStatsView(APIView):
-    """Finance dashboard (`finance.view`): developer money (balances, deposits,
+    """Finance dashboard (`finance.stats.view`): developer money (balances, deposits,
     spending) and a per-seller comparison of sales and bookings, for a period of
     company-local days.
     Building owners get the figures of their buildings (`buildings`)."""
 
     permission_classes = [HasPermissions]
-    required_permissions = {"get": ["finance.view"]}
+    required_permissions = {"get": ["finance.stats.view"]}
 
     @extend_schema(parameters=[PeriodSerializer], responses=OpenApiTypes.OBJECT)
     def get(self, request):
         period = PeriodSerializer(data=request.query_params)
         period.is_valid(raise_exception=True)
         data = period.validated_data
-        buildings = building_scope(request.user, "finance.view")
+        buildings = building_scope(request.user, "finance.stats.view")
         return Response(finance_stats(data["date_from"], data["date_to"], buildings))

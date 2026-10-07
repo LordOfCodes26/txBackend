@@ -96,7 +96,7 @@ def money_workbook(user, first: date, last: date) -> bytes:
         .prefetch_related(Prefetch("items", PurchaseItem.objects.select_related("good")))
         .order_by("confirmed_at", "id")
     )
-    scope = building_scope(user, "finance.view")
+    scope = building_scope(user, "finance.stats.view")
     if scope is not None:
         accounts = accounts.filter(developer__building__in=scope)
         transactions = transactions.filter(account__developer__building__in=scope)
@@ -252,7 +252,7 @@ def goods_workbook(user, first: date, last: date) -> bytes:
 def finance_stats_workbook(user, first: date, last: date) -> bytes:
     """The finance statistics page as a workbook: the totals, each day, each seller and
     each developer (by deposit total), with the same building limits as the page."""
-    stats = finance_stats(first, last, building_scope(user, "finance.view"))
+    stats = finance_stats(first, last, building_scope(user, "finance.stats.view"))
     money = stats["money"]
     label, value = Column("label", _("Figure"), width=28), Column("value", _("Value"), width=18)
     summary = [
@@ -379,7 +379,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                 p.seller.name,
                 p.service_position.name,
                 *who,
-                p.reader.code if p.reader else None,
+                (p.reader.name or p.reader.code) if p.reader else None,
                 sum(i.quantity for i in items),
                 p.total,
             ]

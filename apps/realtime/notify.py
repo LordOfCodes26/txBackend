@@ -55,6 +55,7 @@ def notify_attendance_scan(event) -> None:
         data.pop("purchase", None)
         building = event.device.building
         data["device_code"] = event.device.code
+        data["device_name"] = event.device.name or event.device.code
         data["building"] = (
             None
             if building is None

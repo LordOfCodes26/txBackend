@@ -96,6 +96,9 @@ class PurchaseSerializer(serializers.ModelSerializer):
     seller = SellerSummarySerializer(read_only=True)
     service_position_name = serializers.CharField(source="service_position.name", read_only=True)
     reader = serializers.SlugRelatedField(slug_field="code", read_only=True)
+    reader_name = serializers.SerializerMethodField(
+        help_text="The reader's name (its code when it has none)."
+    )
     developer = DeveloperSummarySerializer(read_only=True)
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
     items = PurchaseItemSerializer(many=True, read_only=True)
@@ -123,6 +126,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "service_position",
             "service_position_name",
             "reader",
+            "reader_name",
             "items",
             "total",
             "currency",
@@ -162,6 +166,10 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    def get_reader_name(self, obj) -> str | None:
+        reader = obj.reader
+        return (reader.name or reader.code) if reader else None
 
 
 def _readers():

@@ -48,9 +48,14 @@ AREAS: dict[str, dict[str, str]] = {
         "attendance.correct": "Add manual attendance records and void wrong ones",
     },
     "Money": {
-        "finance.view": "See wallets, transactions and finance statistics",
+        "finance.view": "See wallets, balances and transactions",
+        "finance.stats.view": "See finance statistics and download money reports",
         "finance.deposit": "Deposit money into wallets",
-        "finance.adjust": "Make manual balance corrections",
+        "finance.adjust": "Make manual balance corrections (with a reason)",
+        "finance.pin_change": "Change a developer's PIN at the PIN desk (they type the new one)",
+        "finance.pin_reset": "Reset a forgotten PIN so the developer sets a new one",
+        "finance.freeze": "Freeze and unfreeze wallets (spending stops, deposits still work)",
+        "finance.close": "Close and reopen wallets (only a zero balance can close)",
     },
     "Sales": {
         "purchase.view": "See purchases and sales statistics",

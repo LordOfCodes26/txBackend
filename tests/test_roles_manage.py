@@ -156,3 +156,35 @@ def test_excel_needs_its_own_permissions(auth_client, make_user):
     assert client.get("/api/v1/rfid/cards/export/").status_code == 200
     # Readers are a separate right now.
     assert client.get("/api/v1/rfid/devices/").status_code == 403
+
+
+def test_wallet_permissions_split_and_keep_old_roles():
+    migration = importlib.import_module("apps.accounts.migrations.0006_finer_wallet_permissions")
+    desk = Role.objects.create(code="MONEY_DESK", name="Money desk")
+    old = ["finance.view", "finance.deposit", "finance.adjust"]
+    desk.permissions.set(Permission.objects.filter(codename__in=old))
+    migration.forward(django_apps, None)
+    assert {
+        "finance.stats.view",
+        "finance.pin_change",
+        "finance.pin_reset",
+        "finance.freeze",
+        "finance.close",
+    } <= codes("MONEY_DESK")
+
+
+def test_freezing_needs_finance_freeze(auth_client, make_user):
+    from apps.developers.models import Developer
+    from apps.finance import services as finance
+
+    account = finance.open_account(Developer.objects.create(employee_number="E1", full_name="Ada"))
+    adjuster = Role.objects.create(code="ADJUSTER", name="Adjuster")
+    rights = ["finance.view", "finance.adjust"]
+    adjuster.permissions.set(Permission.objects.filter(codename__in=rights))
+    person = make_user("ADJUSTER")
+    client = auth_client(person)
+    url = f"/api/v1/finance/accounts/{account.pk}/freeze/"
+    assert client.post(url, {"reason": "Lost card"}).status_code == 403
+    adjuster.permissions.add(Permission.objects.get(codename="finance.freeze"))
+    person.invalidate_rbac_cache()
+    assert client.post(url, {"reason": "Lost card"}).status_code == 200

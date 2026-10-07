@@ -13,6 +13,7 @@ from .models import AttendanceRecord, DailyAttendance, DeveloperPresence
 class AttendanceRecordSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(read_only=True)
     device_code = serializers.CharField(source="device.code", read_only=True, default=None)
+    device_name = serializers.SerializerMethodField(help_text="The door unit's name or code.")
 
     class Meta:
         model = AttendanceRecord
@@ -25,6 +26,7 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
             "direction",
             "source",
             "device_code",
+            "device_name",
             "rfid_event",
             "note",
             "created_by",
@@ -34,6 +36,9 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
             "voided_at",
         ]
         read_only_fields = fields
+
+    def get_device_name(self, record) -> str | None:
+        return (record.device.name or record.device.code) if record.device else None
 
 
 class ManualRecordSerializer(serializers.Serializer):
@@ -104,11 +109,16 @@ class PersonInsideSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(read_only=True)
     building = serializers.SerializerMethodField()
     device_code = serializers.CharField(source="record.device.code", read_only=True, default=None)
+    device_name = serializers.SerializerMethodField(help_text="The door unit's name or code.")
 
     class Meta:
         model = DeveloperPresence
-        fields = ["developer", "building", "since", "device_code"]
+        fields = ["developer", "building", "since", "device_code", "device_name"]
         read_only_fields = fields
+
+    def get_device_name(self, presence) -> str | None:
+        device = presence.record.device if presence.record else None
+        return (device.name or device.code) if device else None
 
     def get_building(self, presence) -> dict | None:
         b = presence.building

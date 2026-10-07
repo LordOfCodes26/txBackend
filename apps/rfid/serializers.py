@@ -268,6 +268,7 @@ class RFIDDeviceWithKeySerializer(RFIDDeviceSerializer):
 
 class RFIDEventSerializer(serializers.ModelSerializer):
     device_code = serializers.CharField(source="device.code", read_only=True)
+    device_name = serializers.SerializerMethodField(help_text="The reader's name, else its code.")
     developer = DeveloperSummarySerializer(read_only=True)
 
     class Meta:
@@ -276,6 +277,7 @@ class RFIDEventSerializer(serializers.ModelSerializer):
             "id",
             "device",
             "device_code",
+            "device_name",
             "client_event_id",
             "uid",
             "card",
@@ -286,6 +288,9 @@ class RFIDEventSerializer(serializers.ModelSerializer):
             "result",
         ]
         read_only_fields = fields
+
+    def get_device_name(self, event) -> str:
+        return event.device.name or event.device.code
 
 
 # Field names used by the door devices: {"ID": "Door1", "Type": "in", "UID": "..."}.

@@ -85,9 +85,9 @@ class TemplateView(APIView):
 
 EXPORTS = {
     "developers": ("developer.view", False),
-    "money": ("finance.view", True),
+    "money": ("finance.stats.view", True),
     "goods": ("good.view", True),
-    "finance-stats": ("finance.view", True),
+    "finance-stats": ("finance.stats.view", True),
 }
 
 

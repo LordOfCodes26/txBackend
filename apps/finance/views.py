@@ -49,12 +49,12 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
         "retrieve": ["finance.view"],
         "me": [],
         "set_my_pin": [],
-        "reset_pin": ["finance.adjust"],
-        "change_pin": ["finance.deposit"],
-        "freeze": ["finance.adjust"],
-        "unfreeze": ["finance.adjust"],
-        "close": ["finance.adjust"],
-        "reopen": ["finance.adjust"],
+        "reset_pin": ["finance.pin_reset"],
+        "change_pin": ["finance.pin_change"],
+        "freeze": ["finance.freeze"],
+        "unfreeze": ["finance.freeze"],
+        "close": ["finance.close"],
+        "reopen": ["finance.close"],
     }
     filterset_class = DeveloperAccountFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
