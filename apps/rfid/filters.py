@@ -54,10 +54,13 @@ class RFIDEventFilter(django_filters.FilterSet):
 
 class RFIDDeviceFilter(django_filters.FilterSet):
     online = django_filters.BooleanFilter(method="filter_online")
+    assigned = django_filters.BooleanFilter(
+        field_name="seller", lookup_expr="isnull", exclude=True, help_text="Has a seller"
+    )
 
     class Meta:
         model = RFIDDevice
-        fields = ["is_active", "purpose", "building", "seller", "online"]
+        fields = ["is_active", "purpose", "building", "seller", "online", "assigned"]
 
     def filter_online(self, queryset, name, value):
         from datetime import timedelta

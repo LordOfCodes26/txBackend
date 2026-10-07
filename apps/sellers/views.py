@@ -1,12 +1,14 @@
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from apps.rfid.scope import BuildingScopedMixin, sellers_with_positions_in
 from common.permissions import HasPermissions
 
-from . import services
+from . import onboarding, services
 from .access import CatalogPermission, SellerScopedQuerysetMixin
 from .exceptions import SellerProfileNotFound
 from .filters import SellerFilter, ServicePositionFilter
@@ -37,6 +39,7 @@ class SellerViewSet(
         "create": ["seller.create"],
         "partial_update": ["seller.update"],
         "me": [],
+        "onboard": ["seller.create"],
     }
     http_method_names = ["get", "post", "patch", "head", "options"]
     filterset_class = SellerFilter
@@ -51,6 +54,24 @@ class SellerViewSet(
     def perform_update(self, serializer):
         serializer.instance = services.update_seller(
             actor=self.request.user, seller=serializer.instance, **serializer.validated_data
+        )
+
+    @extend_schema(request=onboarding.StoreSerializer, responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["post"])
+    def onboard(self, request):
+        """New store in one step: its login (new SELLER user, existing one, or none), the
+        seller, its first counter and optionally its till reader. All or nothing."""
+        missing = [
+            p
+            for p in onboarding.required_permissions(request.data)
+            if not request.user.has_rbac_perm(p)
+        ]
+        if missing:
+            raise PermissionDenied()
+        body = onboarding.StoreSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        return Response(
+            onboarding.create_store(actor=request.user, data=body.validated_data), status=201
         )
 
     @extend_schema(responses=SellerSerializer)

@@ -36,3 +36,8 @@ class DeveloperNotAssignable(RFIDConflict):
 class InvalidCardTransition(RFIDConflict):
     code = "INVALID_CARD_TRANSITION"
     default_detail = _("The card cannot move to this status from its current status.")
+
+
+class NotATillReader(DomainError):
+    code = "NOT_A_TILL_READER"
+    default_detail = _("Only till readers are assigned to a seller.")

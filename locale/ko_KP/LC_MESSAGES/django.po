@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-07 07:44+0000\n"
+"POT-Creation-Date: 2026-10-07 08:40+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -314,6 +314,9 @@ msgstr "퇴직하였거나 삭제된 개발자에게는 카드를 배정할수 �
 msgid "The card cannot move to this status from its current status."
 msgstr "카드를 현재 상태에서 이 상태로 바꿀수 없습니다."
 
+msgid "Only till readers are assigned to a seller."
+msgstr "판매대 인식기만 판매자에게 배정됩니다."
+
 msgid "You can only manage data of your own building."
 msgstr "자기 건물의 자료만 관리할수 있습니다."
 
@@ -440,6 +443,16 @@ msgstr "당신의 계정은 판매자와 련결되여있지 않습니다."
 msgid "Move or delete this position's goods before deleting it."
 msgstr "삭제하기전에 이 매대의 상품들을 옮기거나 삭제하십시오."
 
+msgid "This field is required."
+msgstr "이 항목은 반드시 입력하여야 합니다."
+
+msgid "Choose the store's login."
+msgstr "매장의 가입 계정을 선택하십시오."
+
+#, python-format
+msgid "This reader is already assigned to %(seller)s."
+msgstr "이 인식기는 이미 %(seller)s에 배정되였습니다."
+
 msgid "This user doesn't have the SELLER role."
 msgstr "이 리용자에게는 SELLER 역할이 없습니다."
 
@@ -463,9 +476,6 @@ msgstr "매대를 다른 판매자에게 옮길수 없습니다."
 
 msgid "You can only create positions for your own seller."
 msgstr "자기 판매자의 매대만 만들수 있습니다."
-
-msgid "This field is required."
-msgstr "이 항목은 반드시 입력하여야 합니다."
 
 msgid "This seller already has a position with this name."
 msgstr "이 판매자에게는 이미 이 이름의 매대가 있습니다."

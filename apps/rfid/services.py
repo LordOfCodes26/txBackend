@@ -17,6 +17,7 @@ from .exceptions import (
     DeveloperAlreadyHasCard,
     DeveloperNotAssignable,
     InvalidCardTransition,
+    NotATillReader,
 )
 from .models import (
     AssignmentEndReason,
@@ -236,6 +237,31 @@ def update_device(*, actor, device: RFIDDevice, **changes) -> RFIDDevice:
         record_audit(
             "rfid.device_updated", actor=actor, entity=device, old_values=old, new_values=new
         )
+    return device
+
+
+@transaction.atomic
+def assign_reader(*, actor, device: RFIDDevice, seller) -> RFIDDevice:
+    """Assign a till reader to a seller (or `None`: unassign). Sales still being built at
+    the old seller stop using it; confirmed sales keep it."""
+    from apps.purchases.models import Purchase, PurchaseStatus
+
+    device = RFIDDevice.objects.select_for_update().get(pk=device.pk)
+    if device.purpose != DevicePurpose.TILL:
+        raise NotATillReader()
+    old = device.seller
+    if old == seller:
+        return device
+    Purchase.objects.filter(reader=device, status=PurchaseStatus.DRAFT).update(reader=None)
+    device.seller = seller
+    device.save(update_fields=["seller", "updated_at"])
+    record_audit(
+        "rfid.reader_assigned" if seller else "rfid.reader_unassigned",
+        actor=actor,
+        entity=device,
+        old_values={"seller": old.name if old else None},
+        new_values={"seller": seller.name if seller else None},
+    )
     return device
 
 

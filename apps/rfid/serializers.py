@@ -9,6 +9,7 @@ from rest_framework import serializers
 from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
 from apps.finance.serializers import NewPinSerializer
+from apps.sellers.models import Seller
 
 from .models import (
     Building,
@@ -557,3 +558,9 @@ class TCPFrameLogSerializer(serializers.ModelSerializer):
             "duration_ms",
         ]
         read_only_fields = fields
+
+
+class AssignSellerSerializer(serializers.Serializer):
+    seller = serializers.PrimaryKeyRelatedField(
+        queryset=Seller.objects.all(), allow_null=True, help_text="null: unassign"
+    )

@@ -45,6 +45,7 @@ from .models import (
 from .permissions import IsRFIDDevice
 from .scope import BuildingScopedMixin, building_scope, ensure_in_scope
 from .serializers import (
+    AssignSellerSerializer,
     BatchResultSerializer,
     BatchScanSerializer,
     BuildingSerializer,
@@ -234,6 +235,7 @@ class RFIDDeviceViewSet(
         "create": ["rfid.device.manage"],
         "partial_update": ["rfid.device.manage"],
         "rotate_key": ["rfid.device.manage"],
+        "assign_seller": ["rfid.device.manage"],
     }
     http_method_names = ["get", "post", "patch", "head", "options"]
     filterset_class = RFIDDeviceFilter
@@ -265,6 +267,18 @@ class RFIDDeviceViewSet(
         key = services.rotate_device_key(actor=request.user, device=device)
         device.refresh_from_db()
         return Response(RFIDDeviceWithKeySerializer(device, context={"api_key": key}).data)
+
+    @extend_schema(request=AssignSellerSerializer, responses=RFIDDeviceSerializer)
+    @action(detail=True, methods=["post"], url_path="assign-seller")
+    def assign_seller(self, request, pk=None):
+        """Assign this till reader to a seller (`{"seller": id}`), or unassign it
+        (`{"seller": null}`). Readers are registered without a seller."""
+        body = AssignSellerSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        device = services.assign_reader(
+            actor=request.user, device=self.get_object(), seller=body.validated_data["seller"]
+        )
+        return Response(RFIDDeviceSerializer(device).data)
 
 
 class DeviceLanguageMixin:
