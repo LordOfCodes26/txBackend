@@ -1,5 +1,7 @@
+from django.db.models import Count
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -17,12 +19,14 @@ from common.permissions import HasPermissions
 from . import services
 from .filters import UserFilter
 from .models import Role, User
+from .rbac import AREAS
 from .serializers import (
     LogoutSerializer,
     MeSerializer,
     PasswordChangeSerializer,
     RoleAssignSerializer,
     RoleSerializer,
+    RoleWriteSerializer,
     UserCreateSerializer,
     UserSerializer,
     UserUpdateSerializer,
@@ -139,11 +143,77 @@ class UserViewSet(
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class RoleViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Role.objects.prefetch_related("permissions")
+class RoleViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Roles and what each allows. `role.manage` creates roles, changes their name,
+    description and permissions (PATCH `permissions` replaces the whole list) and deletes
+    custom roles nobody has. Nobody can grant a permission they don't hold; the Admin
+    role always keeps every permission."""
+
+    queryset = Role.objects.prefetch_related("permissions").annotate(
+        user_count=Count("user_roles", distinct=True)
+    )
     serializer_class = RoleSerializer
     permission_classes = [HasPermissions]
-    required_permissions = {"list": ["role.view"], "retrieve": ["role.view"]}
+    required_permissions = {
+        "list": ["role.view"],
+        "retrieve": ["role.view"],
+        "create": ["role.manage"],
+        "partial_update": ["role.manage"],
+        "destroy": ["role.manage"],
+    }
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     lookup_field = "code"
     pagination_class = None
     filter_backends = []
+
+    def _saved(self, role, code=status.HTTP_200_OK):
+        return Response(RoleSerializer(self.get_queryset().get(pk=role.pk)).data, status=code)
+
+    @extend_schema(request=RoleWriteSerializer, responses={201: RoleSerializer})
+    def create(self, request, *args, **kwargs):
+        body = RoleWriteSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        role = services.create_role(actor=request.user, **body.validated_data)
+        return self._saved(role, status.HTTP_201_CREATED)
+
+    @extend_schema(request=RoleWriteSerializer, responses=RoleSerializer)
+    def partial_update(self, request, *args, **kwargs):
+        role = self.get_object()
+        body = RoleWriteSerializer(data=request.data, context={"role": role})
+        body.is_valid(raise_exception=True)
+        role = services.update_role(actor=request.user, role=role, **body.validated_data)
+        return self._saved(role)
+
+    def destroy(self, request, *args, **kwargs):
+        services.delete_role(actor=request.user, role=self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PermissionCatalogView(APIView):
+    """Every permission by area, in the order the role pages show them. Any signed-in
+    user may read it (names and descriptions only), e.g. for their own account page."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": []}
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    def get(self, request):
+        return Response(
+            [
+                {
+                    "area": area,
+                    "permissions": [
+                        {"codename": codename, "description": description}
+                        for codename, description in permissions.items()
+                    ],
+                }
+                for area, permissions in AREAS.items()
+            ]
+        )

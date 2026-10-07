@@ -36,6 +36,7 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
 
 class AccountTransactionSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(source="account.developer", read_only=True)
+    actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
 
     class Meta:
         model = AccountTransaction
@@ -49,6 +50,7 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
             "description",
             "reference",
             "actor",
+            "actor_username",
             "created_at",
         ]
         read_only_fields = fields

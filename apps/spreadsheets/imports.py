@@ -190,7 +190,7 @@ class CardImporter(Importer):
 
     title = _("Cards")
     columns = CARD_COLUMNS
-    permissions = ["rfid.assign"]
+    permissions = ["card.assign"]
 
     def apply(self, ctx, number, row):
         uid = normalize_uid(text(row.get("card_uid")))
@@ -222,7 +222,7 @@ class CardImporter(Importer):
 
         if employee:
             self.once(ctx, "employee_number", employee)
-            developer = _developer(ctx, employee, "rfid.assign")
+            developer = _developer(ctx, employee, "card.assign")
             current = RFIDCardAssignment.objects.filter(card=card, unassigned_at__isnull=True)
             if not current.filter(developer=developer).exists():
                 rfid.assign_card(actor=ctx.actor, card=card, developer=developer)

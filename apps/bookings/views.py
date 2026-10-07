@@ -93,15 +93,15 @@ class BookingViewSet(
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {
-        "list": ["purchase.view"],
-        "retrieve": ["purchase.view"],
-        "change": ["purchase.create"],
+        "list": ["booking.view"],
+        "retrieve": ["booking.view"],
+        "change": ["booking.change"],
     }
     seller_actions = ("list", "retrieve", "change")
     lookup_value_regex = r"\d+"
     position_lookup = "good__service_position"
     building_lookup = "good__service_position__building"
-    scope_permission = "purchase.view"
+    scope_permission = "booking.view"
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
     ordering_fields = ["start", "created_at"]
@@ -165,15 +165,15 @@ class BookingCheckoutViewSet(
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {
-        "create": ["purchase.create"],
-        "retrieve": ["purchase.view"],
-        "confirm": ["purchase.confirm"],
-        "cancel": ["purchase.cancel"],
-        "wait": ["purchase.create"],
-        "stop_waiting": ["purchase.create"],
+        "create": ["booking.create"],
+        "retrieve": ["booking.view"],
+        "confirm": ["booking.create"],
+        "cancel": ["booking.cancel"],
+        "wait": ["booking.create"],
+        "stop_waiting": ["booking.create"],
     }
     seller_actions = ("create", "retrieve", "confirm", "cancel", "wait", "stop_waiting")
-    scope_permission = "purchase.view"
+    scope_permission = "booking.view"
     position_lookup = "service_position"
     building_lookup = "service_position__building"
 

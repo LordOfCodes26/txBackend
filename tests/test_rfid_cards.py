@@ -1,9 +1,13 @@
+import io
+
 import pytest
 from django.db import IntegrityError, transaction
+from openpyxl import load_workbook
 
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
+from apps.rfid import services as rfid
 from apps.rfid.models import Building, CardStatus, RFIDCard, RFIDCardAssignment
 
 pytestmark = pytest.mark.django_db
@@ -289,3 +293,46 @@ def test_finance_replaces_a_forgotten_pin(auth_client, make_user, make_developer
     finance.verify_pin(account=account, pin="5093")
     with pytest.raises(InvalidPin):
         finance.verify_pin(account=account, pin="4826")
+
+
+# --- Excel exports ----------------------------------------------------------------
+
+
+def rows(response):
+    sheet = load_workbook(io.BytesIO(response.content)).worksheets[0]
+    return [row for row in sheet.iter_rows(values_only=True)][1:]
+
+
+def test_cards_export_follows_the_list_filters(client, make_card, make_developer):
+    held, spare = make_card(label="Ada's"), make_card()
+    make_card(status=CardStatus.BLOCKED)
+    dev = make_developer(full_name="Ada")
+    RFIDCardAssignment.objects.create(card=held, developer=dev)
+
+    r = client.get(f"{CARDS}export/")
+    assert r.status_code == 200 and 'filename="cards-' in r["Content-Disposition"]
+    assert len(rows(r)) == 3
+    assert [(c[0], c[2], c[5]) for c in rows(client.get(f"{CARDS}export/?assigned=true"))] == [
+        (held.uid, "Active", "Ada")
+    ]
+    assert [c[0] for c in rows(client.get(f"{CARDS}export/?assigned=false&status=ACTIVE"))] == [
+        spare.uid
+    ]
+
+
+def test_readers_export_follows_the_list_filters(client):
+    rfid.register_device(actor=None, code="Door1", name="Front", purpose="ATTENDANCE")
+    rfid.register_device(actor=None, code="Till1", name="Cafe", purpose="TILL")
+    all_rows = rows(client.get("/api/v1/rfid/devices/export/"))
+    assert [(r[0], r[2], r[8]) for r in all_rows] == [
+        ("Door1", "Door", "Offline"),
+        ("Till1", "Till reader", "Offline"),
+    ]
+    assert [r[0] for r in rows(client.get("/api/v1/rfid/devices/export/?purpose=TILL"))] == [
+        "Till1"
+    ]
+
+
+def test_exports_need_rfid_view(auth_client, make_user):
+    seller = auth_client(make_user(Roles.SELLER))
+    assert seller.get(f"{CARDS}export/").status_code == 403

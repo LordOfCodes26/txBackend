@@ -1,16 +1,18 @@
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.rfid.scope import BuildingScopedMixin
-from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
+from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin, acting_seller
 
 from . import services
 from .filters import GoodFilter, InventoryMovementFilter
-from .models import Good, InventoryMovement
+from .models import Good, GoodKind, InventoryMovement
 from .serializers import (
     GoodImageSerializer,
     GoodSerializer,
@@ -70,17 +72,27 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     def owner_position_id(obj):
         return obj.service_position_id
 
+    def _check_court(self, kind) -> None:
+        """Courts need `court.manage`, except for a store managing its own courts."""
+        user = self.request.user
+        if kind == GoodKind.RENTAL and not user.has_rbac_perm("court.manage"):
+            if acting_seller(user) is None:
+                raise PermissionDenied(_("Your account cannot add or change courts."))
+
     def perform_create(self, serializer):
+        self._check_court(serializer.validated_data.get("kind"))
         serializer.instance = services.create_good(
             actor=self.request.user, **serializer.validated_data
         )
 
     def perform_update(self, serializer):
+        self._check_court(serializer.instance.kind)
         serializer.instance = services.update_good(
             actor=self.request.user, good=serializer.instance, **serializer.validated_data
         )
 
     def perform_destroy(self, instance):
+        self._check_court(instance.kind)
         services.delete_good(actor=self.request.user, good=instance)
 
     def _good_response(self, good, code=status.HTTP_200_OK):

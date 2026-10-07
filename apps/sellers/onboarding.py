@@ -105,12 +105,12 @@ class StoreSerializer(serializers.Serializer):
 
 
 def required_permissions(data: dict) -> list[str]:
-    """seller.create always; making a login needs user.manage, a reader rfid.device.manage."""
-    needed = ["seller.create", "seller.update"]
+    """seller.create always; making a login needs user.manage, a reader reader.manage."""
+    needed = ["seller.create", "counter.manage"]
     if data.get("login", "new") == "new":
         needed.append("user.manage")
     if data.get("till_reader"):
-        needed.append("rfid.device.manage")
+        needed.append("reader.manage")
     return needed
 
 

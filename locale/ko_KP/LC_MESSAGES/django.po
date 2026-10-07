@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-07 08:40+0000\n"
+"POT-Creation-Date: 2026-10-07 14:04+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -26,6 +26,24 @@ msgstr "이 리용자는 이미 이 역할을 가지고있습니다."
 
 msgid "The user does not have this role."
 msgstr "이 리용자에게는 이 역할이 없습니다."
+
+msgid "The Admin role always has every permission."
+msgstr "관리자 역할은 항상 모든 권한을 가집니다."
+
+msgid "Built-in roles cannot be deleted."
+msgstr "기본 역할은 삭제할수 없습니다."
+
+msgid "Take this role away from its users before deleting it."
+msgstr "삭제하기전에 이 역할을 가진 사용자들에게서 역할을 빼십시오."
+
+msgid "This field is required."
+msgstr "이 항목은 반드시 입력하여야 합니다."
+
+msgid "A role with this code exists."
+msgstr "이 코드를 가진 역할이 이미 있습니다."
+
+msgid "A role's code cannot change."
+msgstr "역할 코드는 바꿀수 없습니다."
 
 msgid "A user with this username already exists."
 msgstr "이 리용자이름을 가진 리용자가 이미 있습니다."
@@ -111,6 +129,12 @@ msgstr "이 리용자는 다른 개발자와 련결되여있습니다."
 msgid "The out date cannot be before the start date."
 msgstr "퇴직날자는 입직날자보다 앞설수 없습니다."
 
+msgid "Only active cards can be assigned."
+msgstr "활성카드만 배정할수 있습니다."
+
+msgid "This card is already assigned to a developer."
+msgstr "이 카드는 이미 개발자에게 배정되였습니다."
+
 msgid "Developer account has insufficient balance."
 msgstr "개발자계정의 잔고가 부족합니다."
 
@@ -181,8 +205,8 @@ msgstr "화상은 %(limit)s MB를 넘을수 없습니다."
 msgid "Must be after the opening time (same day)."
 msgstr "시작시간보다 뒤여야 합니다 (같은 날)."
 
-msgid "You can only use your own service positions."
-msgstr "자기의 봉사매대만 리용할수 있습니다."
+msgid "You can only use your own counters."
+msgstr "자기의 매대만 리용할수 있습니다."
 
 msgid "A good cannot move to another seller."
 msgstr "상품을 다른 판매자에게 옮길수 없습니다."
@@ -192,6 +216,9 @@ msgstr "새로 만들 때에만 지정할수 있습니다. 재고조작을 리�
 
 msgid "The kind of a good cannot be changed; create a new good."
 msgstr "상품의 종류는 바꿀수 없습니다. 새 상품을 만드십시오."
+
+msgid "Your store has no active counter."
+msgstr "매장에 쓸수 있는 매대가 없습니다."
 
 msgid "Only RENTAL goods have rental settings."
 msgstr "임대(RENTAL) 상품만 임대설정을 가질수 있습니다."
@@ -223,6 +250,9 @@ msgstr "%(kind)s에는 반드시 있어야 합니다."
 msgid "A reason is required for %(kind)s."
 msgstr "%(kind)s에는 리유를 입력하여야 합니다."
 
+msgid "Your account cannot add or change courts."
+msgstr "이 계정은 운동장을 추가하거나 변경할수 없습니다."
+
 msgid "Only draft purchases can be changed."
 msgstr "작성중인 구입만 변경할수 있습니다."
 
@@ -232,8 +262,8 @@ msgstr "확정하기전에 적어도 한개의 상품을 추가하십시오."
 msgid "This good is not available for sale."
 msgstr "이 상품은 판매할수 없습니다."
 
-msgid "The seller or service position is not active."
-msgstr "판매자 또는 봉사매대가 활성상태가 아닙니다."
+msgid "The seller or counter is not active."
+msgstr "판매자 또는 매대가 활성상태가 아닙니다."
 
 msgid "This card cannot be used for purchases."
 msgstr "이 카드로는 구입할수 없습니다."
@@ -253,8 +283,8 @@ msgstr "카드번호를 입력하는것은 허용되지 않습니다. 카드를 
 msgid "Choose one of the seller's till readers first."
 msgstr "먼저 판매자의 판매대판독기를 선택하십시오."
 
-msgid "You can only sell at your own service positions."
-msgstr "자기의 봉사매대에서만 판매할수 있습니다."
+msgid "You can only sell at your own counters."
+msgstr "자기의 매대에서만 판매할수 있습니다."
 
 msgid "Courts are booked separately, not added to a till purchase."
 msgstr "경기장은 판매대구입에 추가하지 않고 따로 예약합니다."
@@ -298,12 +328,6 @@ msgstr "장치인증정보가 옳지 않습니다."
 
 msgid "No door device with this ID is registered for this IP."
 msgstr "이 IP주소에 이 ID로 등록된 출입문장치가 없습니다."
-
-msgid "Only active cards can be assigned."
-msgstr "활성카드만 배정할수 있습니다."
-
-msgid "This card is already assigned to a developer."
-msgstr "이 카드는 이미 개발자에게 배정되였습니다."
 
 msgid "This developer already has an active card. Use replace instead."
 msgstr "이 개발자에게는 이미 활성카드가 있습니다. 교체를 리용하십시오."
@@ -440,11 +464,8 @@ msgstr "건물책임자는 건물을 삭제할수 없습니다."
 msgid "Your account is not linked to a seller."
 msgstr "당신의 계정은 판매자와 련결되여있지 않습니다."
 
-msgid "Move or delete this position's goods before deleting it."
+msgid "Move or delete this counter's goods before deleting it."
 msgstr "삭제하기전에 이 매대의 상품들을 옮기거나 삭제하십시오."
-
-msgid "This field is required."
-msgstr "이 항목은 반드시 입력하여야 합니다."
 
 msgid "Choose the store's login."
 msgstr "매장의 가입 계정을 선택하십시오."
@@ -462,22 +483,22 @@ msgstr "이 이름을 가진 판매자가 이미 있습니다."
 msgid "This user is already linked to another seller."
 msgstr "이 리용자는 이미 다른 판매자와 련결되여있습니다."
 
-msgid "This user manages a sell position and can't also own a seller."
+msgid "This user manages a counter and can't also own a seller."
 msgstr "이 리용자는 판매매대를 책임지고있으므로 판매자의 소유자로 될수 없습니다."
 
-msgid "This user is a seller's owner and can't also manage a position."
+msgid "This user is a seller's owner and can't also manage a counter."
 msgstr "이 리용자는 판매자의 소유자이므로 매대책임자로 될수 없습니다."
 
 msgid "Only the seller's owner or staff can change this."
 msgstr "판매자의 소유자 또는 관리일군만 이것을 변경할수 있습니다."
 
-msgid "A position cannot move to another seller."
+msgid "A counter cannot move to another seller."
 msgstr "매대를 다른 판매자에게 옮길수 없습니다."
 
-msgid "You can only create positions for your own seller."
+msgid "You can only create counters for your own seller."
 msgstr "자기 판매자의 매대만 만들수 있습니다."
 
-msgid "This seller already has a position with this name."
+msgid "This seller already has a counter with this name."
 msgstr "이 판매자에게는 이미 이 이름의 매대가 있습니다."
 
 msgid "Full name"
@@ -531,8 +552,8 @@ msgstr "판매번호"
 msgid "Seller"
 msgstr "판매자"
 
-msgid "Service position"
-msgstr "매장"
+msgid "Counter"
+msgstr "매대"
 
 msgid "Items"
 msgstr "품목"
@@ -570,6 +591,168 @@ msgstr "이후 재고"
 msgid "Reason"
 msgstr "리유"
 
+msgid "Figure"
+msgstr "항목"
+
+msgid "Value"
+msgstr "값"
+
+msgid "From"
+msgstr "시작"
+
+msgid "To"
+msgstr "끝"
+
+msgid "Deposits"
+msgstr "입금"
+
+msgid "Deposit count"
+msgstr "입금 건수"
+
+msgid "Spending"
+msgstr "지출"
+
+msgid "Payment count"
+msgstr "지불 건수"
+
+msgid "Money held now"
+msgstr "현재 보관금"
+
+msgid "Developer accounts"
+msgstr "개발자 계좌"
+
+msgid "Summary"
+msgstr "요약"
+
+msgid "Daily"
+msgstr "날자별"
+
+msgid "Date"
+msgstr "날자"
+
+msgid "Sellers"
+msgstr "판매자"
+
+msgid "Till sales"
+msgstr "계산 판매"
+
+msgid "Sales count"
+msgstr "판매 건수"
+
+msgid "Court bookings"
+msgstr "운동장 예약"
+
+msgid "Booking count"
+msgstr "예약 건수"
+
+msgid "Balance now"
+msgstr "현재 잔고"
+
+msgid "Paid"
+msgstr "지불됨"
+
+msgid "Draft"
+msgstr "초안"
+
+msgid "Cancelled"
+msgstr "취소됨"
+
+msgid "Sale"
+msgstr "판매"
+
+msgid "Booking"
+msgstr "예약"
+
+msgid "Status"
+msgstr "상태"
+
+msgid "Buyer no."
+msgstr "구매자 번호"
+
+msgid "Buyer"
+msgstr "구매자"
+
+msgid "Reader"
+msgstr "인식기"
+
+msgid "Quantity"
+msgstr "수량"
+
+msgid "Unit price"
+msgstr "단가"
+
+msgid "Line total"
+msgstr "금액"
+
+msgid "Booked from"
+msgstr "예약 시작"
+
+msgid "Active"
+msgstr "활성"
+
+msgid "Blocked"
+msgstr "차단됨"
+
+msgid "Retired"
+msgstr "폐기됨"
+
+msgid "Door"
+msgstr "출입문"
+
+msgid "Till reader"
+msgstr "계산 인식기"
+
+msgid "Card assign reader"
+msgstr "카드 배정 인식기"
+
+msgid "Cards"
+msgstr "카드"
+
+msgid "Card UID"
+msgstr "카드 UID"
+
+msgid "Label"
+msgstr "표시"
+
+msgid "Holder"
+msgstr "소지자"
+
+msgid "Assigned at"
+msgstr "배정 시간"
+
+msgid "Updated"
+msgstr "갱신"
+
+msgid "Yes"
+msgstr "예"
+
+msgid "No"
+msgstr "아니"
+
+msgid "Online"
+msgstr "련결됨"
+
+msgid "Offline"
+msgstr "끊김"
+
+msgid "Readers"
+msgstr "인식기"
+
+msgid "Code"
+msgstr "코드"
+
+msgid "Name"
+msgstr "이름"
+
+msgid "Place"
+msgstr "장소"
+
+msgid "Door IP"
+msgstr "출입문 IP"
+
+msgid "Last seen"
+msgstr "마지막 신호"
+
 msgid "Phone"
 msgstr "전화"
 
@@ -590,12 +773,6 @@ msgstr "시작일"
 
 msgid "Last working day"
 msgstr "마지막 근무일"
-
-msgid "Status"
-msgstr "상태"
-
-msgid "Card UID"
-msgstr "카드 UID"
 
 msgid "Card label"
 msgstr "카드번호"
@@ -621,9 +798,6 @@ msgstr "이 코드나 이름을 가진 건물이 없습니다."
 #, python-format
 msgid "Use one of: %(values)s."
 msgstr "다음중 하나를 쓰십시오: %(values)s."
-
-msgid "Cards"
-msgstr "카드"
 
 msgid "UID must be 4-32 hexadecimal characters."
 msgstr "UID는 4-32자리의 16진수여야 합니다."

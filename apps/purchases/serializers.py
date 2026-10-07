@@ -198,7 +198,7 @@ class PurchaseCreateSerializer(serializers.Serializer):
         if (own is not None and position.seller_id != own.pk) or (
             positions is not None and position.pk not in positions
         ):
-            raise serializers.ValidationError(_("You can only sell at your own service positions."))
+            raise serializers.ValidationError(_("You can only sell at your own counters."))
         return position
 
 

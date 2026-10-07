@@ -13,5 +13,6 @@ urlpatterns = [
     path("auth/logout/", views.LogoutView.as_view(), name="auth-logout"),
     path("auth/me/", views.MeView.as_view(), name="auth-me"),
     path("auth/password/", views.PasswordChangeView.as_view(), name="auth-password"),
+    path("permissions/", views.PermissionCatalogView.as_view(), name="permission-catalog"),
     *router.urls,
 ]

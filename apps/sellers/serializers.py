@@ -64,7 +64,7 @@ class SellerSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("This user is already linked to another seller."))
         if user is not None and ServicePosition.objects.filter(manager=user).exists():
             raise serializers.ValidationError(
-                _("This user manages a sell position and can't also own a seller.")
+                _("This user manages a counter and can't also own a seller.")
             )
         return user
 
@@ -112,7 +112,7 @@ class ServicePositionSerializer(serializers.ModelSerializer):
         _ensure_seller_login(user)
         if user is not None and Seller.objects.filter(user=user).exists():
             raise serializers.ValidationError(
-                _("This user is a seller's owner and can't also manage a position.")
+                _("This user is a seller's owner and can't also manage a counter.")
             )
         return user
 
@@ -127,13 +127,13 @@ class ServicePositionSerializer(serializers.ModelSerializer):
         if self.instance is not None:
             if "seller" in attrs and attrs["seller"] != self.instance.seller:
                 raise serializers.ValidationError(
-                    {"seller": [_("A position cannot move to another seller.")]}
+                    {"seller": [_("A counter cannot move to another seller.")]}
                 )
             seller = self.instance.seller
         elif own is not None:
             if attrs.get("seller") not in (None, own):
                 raise serializers.ValidationError(
-                    {"seller": [_("You can only create positions for your own seller.")]}
+                    {"seller": [_("You can only create counters for your own seller.")]}
                 )
             seller = attrs["seller"] = own
         else:
@@ -148,6 +148,6 @@ class ServicePositionSerializer(serializers.ModelSerializer):
                 clash = clash.exclude(pk=self.instance.pk)
             if clash.exists():
                 raise serializers.ValidationError(
-                    {"name": [_("This seller already has a position with this name.")]}
+                    {"name": [_("This seller already has a counter with this name.")]}
                 )
         return attrs

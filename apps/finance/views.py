@@ -146,7 +146,7 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
 
 
 class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = AccountTransaction.objects.select_related("account__developer")
+    queryset = AccountTransaction.objects.select_related("account__developer", "actor")
     building_lookup = "account__developer__building"
     serializer_class = AccountTransactionSerializer
     permission_classes = [HasPermissions]

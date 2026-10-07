@@ -3,14 +3,43 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from .models import Role, User, username_validator
+from .rbac import PERMISSIONS
 
 
 class RoleSerializer(serializers.ModelSerializer):
     permissions = serializers.SlugRelatedField(slug_field="codename", many=True, read_only=True)
+    user_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Role
-        fields = ["id", "code", "name", "description", "is_system", "permissions"]
+        fields = ["id", "code", "name", "description", "is_system", "permissions", "user_count"]
+
+
+class RoleWriteSerializer(serializers.Serializer):
+    """Create (code, name, ...) or change (name, description, permissions) a role."""
+
+    code = serializers.RegexField(
+        r"^[A-Z][A-Z0-9_]{1,49}$",
+        required=False,
+        help_text="Capital letters, digits and _ (create only), e.g. NIGHT_GUARD.",
+    )
+    name = serializers.CharField(max_length=100, required=False)
+    description = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    permissions = serializers.ListField(
+        child=serializers.ChoiceField(choices=sorted(PERMISSIONS)), required=False
+    )
+
+    def validate(self, attrs):
+        role = self.context.get("role")
+        if role is None:
+            for field in ("code", "name"):
+                if not attrs.get(field):
+                    raise serializers.ValidationError({field: [_("This field is required.")]})
+            if Role.objects.filter(code=attrs["code"]).exists():
+                raise serializers.ValidationError({"code": [_("A role with this code exists.")]})
+        elif "code" in attrs:
+            raise serializers.ValidationError({"code": [_("A role's code cannot change.")]})
+        return attrs
 
 
 class UserSerializer(serializers.ModelSerializer):

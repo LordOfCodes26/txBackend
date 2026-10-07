@@ -97,9 +97,9 @@ class ServicePositionViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, vie
     required_permissions = {
         "list": ["seller.view"],
         "retrieve": ["seller.view"],
-        "create": ["seller.update"],
-        "partial_update": ["seller.update"],
-        "destroy": ["seller.update"],
+        "create": ["counter.manage"],
+        "partial_update": ["counter.manage"],
+        "destroy": ["counter.manage"],
     }
     seller_actions = ("list", "retrieve", "create", "partial_update", "destroy")
     scope_permission = "seller.view"

@@ -87,6 +87,8 @@ def _good_snapshot(good: Good) -> dict:
 
 @transaction.atomic
 def create_good(*, actor, initial_quantity: int = 0, rental: dict | None = None, **data) -> Good:
+    if data.get("service_position") is None and data.get("kind") == GoodKind.RENTAL:
+        data["service_position"] = playground_position(actor)
     if data.get("kind", GoodKind.PRODUCT) != GoodKind.PRODUCT:
         data["track_stock"] = False
     good = Good.objects.create(**data)
@@ -103,6 +105,21 @@ def create_good(*, actor, initial_quantity: int = 0, rental: dict | None = None,
         )
         good.refresh_from_db()
     return good
+
+
+PLAYGROUND = "Playground"
+
+
+def playground_position(actor):
+    """The first court with no position yet: the Playground store and its desk (made once)."""
+    from apps.sellers import services as sellers
+    from apps.sellers.models import Seller, ServicePosition
+
+    seller = Seller.objects.filter(name__iexact=PLAYGROUND).first() or sellers.create_seller(
+        actor=actor, name=PLAYGROUND
+    )
+    position = ServicePosition.objects.filter(seller=seller, is_active=True).order_by("id").first()
+    return position or sellers.create_position(actor=actor, seller=seller, name=PLAYGROUND)
 
 
 @transaction.atomic

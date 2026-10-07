@@ -1,7 +1,9 @@
 from decimal import Decimal
 
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -11,6 +13,9 @@ from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
 from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
+from apps.spreadsheets.exports import purchases_workbook
+from apps.spreadsheets.xlsx import XLSX
+from apps.stats.views import PeriodSerializer
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
 
@@ -35,6 +40,7 @@ PERFORMANCE_FIGURES = ("sales_count", "sales_total", "bookings_count", "bookings
 SELLER_ACTIONS = (
     "list",
     "performance",
+    "export",
     "retrieve",
     "create",
     "add_item",
@@ -77,6 +83,7 @@ class PurchaseViewSet(
         "list": ["purchase.view"],
         "retrieve": ["purchase.view"],
         "performance": ["purchase.view"],
+        "export": ["purchase.view", "excel.export"],
         "create": ["purchase.create"],
         "add_item": ["purchase.create"],
         "item": ["purchase.create"],
@@ -169,6 +176,20 @@ class PurchaseViewSet(
             for r in rows
         ]
         return Response(PerformanceSerializer(data, many=True).data)
+
+    @extend_schema(parameters=[PeriodSerializer], responses={(200, XLSX): OpenApiTypes.BINARY})
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """The purchases of a period (`date_from`, `date_to`; default the last 30 days) as
+        .xlsx: a Purchases sheet and an Items sheet. Takes the list filters too (`status`,
+        `seller`, ...) and is narrowed like the list."""
+        period = PeriodSerializer(data=request.query_params)
+        period.is_valid(raise_exception=True)
+        first, last = period.validated_data["date_from"], period.validated_data["date_to"]
+        book = purchases_workbook(self.filter_queryset(self.get_queryset()), first, last)
+        response = HttpResponse(book, content_type=XLSX)
+        response["Content-Disposition"] = f'attachment; filename="purchases-{first}-to-{last}.xlsx"'
+        return response
 
     @extend_schema(
         parameters=[

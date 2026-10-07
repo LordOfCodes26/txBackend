@@ -26,3 +26,21 @@ class RoleNotAssigned(DomainError):
     status_code = status.HTTP_404_NOT_FOUND
     code = "ROLE_NOT_ASSIGNED"
     default_detail = _("The user does not have this role.")
+
+
+class RoleLocked(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "ROLE_LOCKED"
+    default_detail = _("The Admin role always has every permission.")
+
+
+class SystemRole(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "SYSTEM_ROLE"
+    default_detail = _("Built-in roles cannot be deleted.")
+
+
+class RoleInUse(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "ROLE_IN_USE"
+    default_detail = _("Take this role away from its users before deleting it.")

@@ -75,7 +75,7 @@ def test_card_needs_card_assign_rights(auth_client, make_user, card):
     from apps.accounts.models import Role
 
     user = make_user(Roles.MANAGER)
-    Role.objects.get(code=Roles.MANAGER).permissions.filter(codename="rfid.assign").delete()
+    Role.objects.get(code=Roles.MANAGER).permissions.filter(codename="card.assign").delete()
     client = auth_client(user)
     r = new(client, card=card.pk, pin="4826", pin_confirm="4826")
     assert r.status_code == 403 and not Developer.objects.exists()

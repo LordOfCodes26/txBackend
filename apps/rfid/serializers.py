@@ -122,6 +122,7 @@ class RFIDCardAssignmentSerializer(serializers.ModelSerializer):
 class RFIDDeviceSerializer(serializers.ModelSerializer):
     online = serializers.BooleanField(source="is_online", read_only=True)
     seller_name = serializers.CharField(source="seller.name", read_only=True, default=None)
+    building_name = serializers.CharField(source="building.name", read_only=True, default=None)
 
     class Meta:
         model = RFIDDevice
@@ -136,6 +137,7 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "allowed_ip",
             "seller",
             "seller_name",
+            "building_name",
             "is_active",
             "online",
             "last_seen_at",

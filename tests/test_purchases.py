@@ -1,3 +1,4 @@
+import io
 import threading
 import uuid
 from datetime import timedelta
@@ -6,6 +7,7 @@ from decimal import Decimal
 import pytest
 from django.db import connection, transaction
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
@@ -483,3 +485,38 @@ def test_two_buyers_race_for_last_items(world, make_user):
         pk=acc2.pk
     ).balance == Decimal("92.00")
     assert_books_balanced()
+
+
+# --- Excel export ---------------------------------------------------------------
+
+
+def sheets(response):
+    book = load_workbook(io.BytesIO(response.content))
+    return {ws.title: [row for row in ws.iter_rows(values_only=True)] for ws in book.worksheets}
+
+
+@pytest.mark.django_db
+def test_export_purchases_and_items(auth_client, make_user, till, world):
+    paid = new_purchase(till, world, (world.tea, 2), (world.cake, 1))
+    assert confirm(till, paid).status_code in (200, 201)
+    new_purchase(till, world, (world.coffee, 1))  # a draft
+    today = timezone.localdate().isoformat()
+
+    r = till.get(f"{PURCHASES}export/?date_from={today}&date_to={today}")
+    assert r.status_code == 200 and "purchases-" in r["Content-Disposition"]
+    book = sheets(r)
+    assert [row[2] for row in book["Purchases"][1:]] == ["Paid", "Draft"]
+    first = book["Purchases"][1]
+    assert first[0] == paid and first[6:8] == ("E1", "Ada") and first[9:] == (3, 9)
+    assert [(row[7], row[8], row[10]) for row in book["Items"][1:3]] == [
+        ("Tea", 2, 5),
+        ("Cake", 1, 4),
+    ]
+
+    only_paid = sheets(till.get(f"{PURCHASES}export/?date_from={today}&status=CONFIRMED"))
+    assert len(only_paid["Purchases"]) == 2  # header + the paid one
+
+    # Another store gets an empty file, not this store's sales.
+    other = make_user(Roles.SELLER)
+    Seller.objects.create(name="Other", user=other)
+    assert len(sheets(auth_client(other).get(f"{PURCHASES}export/"))["Purchases"]) == 1

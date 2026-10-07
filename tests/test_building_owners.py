@@ -86,7 +86,7 @@ def test_role_is_boss_minus_company_wide_lists():
     perms = set(
         Role.objects.get(code=Roles.BUILDING_OWNER).permissions.values_list("codename", flat=True)
     )
-    assert perms == VIEW - {"user.view", "role.view", "audit.view"}
+    assert perms == (VIEW - {"user.view", "role.view", "audit.view"}) | {"excel.export"}
 
 
 def test_people_and_money_of_own_building(client, site):

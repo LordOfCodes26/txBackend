@@ -41,7 +41,7 @@ class SimulatedDoorScanView(APIView):
     """Simulate a door scan as if `door` had sent `{"ID", "Type", "UID"}` over TCP."""
 
     permission_classes = [HasPermissions]
-    required_permissions = {"post": ["rfid.device.manage"]}
+    required_permissions = {"post": ["reader.manage"]}
 
     @extend_schema(
         request=inline_serializer(

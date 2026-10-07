@@ -140,6 +140,9 @@ def test_good_filters(seller_manager, make_good):
     assert names("in_stock=false") == ["Cake"]
     assert names("price_min=4&price_max=10") == ["Cake"]
     assert names("search=hair") == ["Haircut"]
+    make_good(name="Court", kind="RENTAL", track_stock=False, price="10.00")
+    assert names("rental=true") == ["Court"]
+    assert "Court" not in names("rental=false")
 
 
 # --- Seller scoping -------------------------------------------------------------
@@ -356,3 +359,36 @@ def test_image_validation(seller_manager, make_good, settings):
     assert seller_manager.post(url, {"image": png()}, format="multipart").status_code == 201
     r = seller_manager.post(url, {"image": png()}, format="multipart")
     assert r.json()["error"]["code"] == "TOO_MANY_IMAGES"
+
+
+# --- Courts without a service position --------------------------------------------
+
+COURT = {
+    "name": "Court A",
+    "price": "10.00",
+    "kind": "RENTAL",
+    "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00"},
+}
+
+
+@pytest.mark.django_db
+def test_first_court_makes_the_playground_store_then_courts_join_it(seller_manager):
+    r = seller_manager.post(GOODS, COURT, format="json")
+    assert r.status_code == 201, r.json()
+    assert r.json()["seller"]["name"] == "Playground"
+    r2 = seller_manager.post(GOODS, COURT | {"name": "Court B"}, format="json")
+    assert r2.json()["service_position"] == r.json()["service_position"]
+    assert Seller.objects.filter(name="Playground").count() == 1
+
+
+@pytest.mark.django_db
+def test_store_court_goes_to_its_own_position(seller_client, position):
+    r = seller_client.post(GOODS, COURT, format="json")
+    assert r.status_code == 201, r.json()
+    assert r.json()["service_position"] == position.pk
+
+
+@pytest.mark.django_db
+def test_other_goods_still_need_a_position(seller_manager):
+    r = seller_manager.post(GOODS, {"name": "Tea", "price": "2.00"}, format="json")
+    assert r.status_code == 400 and "service_position" in r.json()["error"]["details"]

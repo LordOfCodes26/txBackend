@@ -14,49 +14,84 @@ from dataclasses import dataclass, field
 
 from django.db import transaction
 
+# Every permission, by area, with what it allows. The areas order the role pages.
+AREAS: dict[str, dict[str, str]] = {
+    "Users and access": {
+        "user.view": "See user accounts",
+        "user.manage": "Create, change and deactivate user accounts",
+        "role.view": "See roles and what each one allows",
+        "role.assign": "Give roles to users and take them away",
+        "role.manage": "Create roles and change what each role allows",
+        "audit.view": "Read the audit log",
+        "stats.view": "See company statistics (people, attendance, money)",
+    },
+    "Developers": {
+        "developer.view": "See developers and their profiles",
+        "developer.create": "Add developers",
+        "developer.update": "Change developers' profiles and status",
+        "developer.delete": "Delete developers (soft delete)",
+    },
+    "Cards": {
+        "card.view": "See RFID cards and who held them",
+        "card.register": "Register new cards and change their labels",
+        "card.assign": "Assign, replace, unassign and retire cards",
+        "card.block": "Block and unblock cards",
+    },
+    "Readers and buildings": {
+        "reader.view": "See door units, till readers and card assign readers",
+        "reader.manage": "Register readers, change them, renew their keys and assign till readers",
+        "building.manage": "Add, rename and delete buildings",
+        "scan.view": "See card scans at doors and tills",
+    },
+    "Attendance": {
+        "attendance.view": "See who is inside, attendance and statistics",
+        "attendance.correct": "Add manual attendance records and void wrong ones",
+    },
+    "Money": {
+        "finance.view": "See wallets, transactions and finance statistics",
+        "finance.deposit": "Deposit money into wallets",
+        "finance.adjust": "Make manual balance corrections",
+    },
+    "Sales": {
+        "purchase.view": "See purchases and sales statistics",
+        "purchase.create": "Open a till and build a purchase",
+        "purchase.confirm": "Take payment for a purchase (card and PIN)",
+        "purchase.cancel": "Cancel a purchase that is not paid yet",
+    },
+    "Playground": {
+        "booking.view": "See court bookings and the playground desk",
+        "booking.create": "Book a court at the desk (card and PIN)",
+        "booking.change": "Move a booking to another time or court",
+        "booking.cancel": "Cancel a court checkout that is not paid yet",
+        "court.manage": "Add courts and change their prices and rules",
+    },
+    "Stores and goods": {
+        "seller.view": "See stores and their counters",
+        "seller.create": "Add stores",
+        "seller.update": "Change stores",
+        "counter.manage": "Add, change and delete stores' counters",
+        "good.view": "See goods and stock movements",
+        "good.create": "Add goods",
+        "good.update": "Change goods, prices and photos",
+        "good.delete": "Delete goods (soft delete)",
+        "good.stock": "Restock, write off and count stock",
+    },
+    "Excel": {
+        "excel.export": "Download lists as Excel (only data you can see)",
+        "excel.import": "Import developers, cards and opening balances from Excel",
+    },
+    "System": {
+        "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",
+        "system.backup": "See backups, run one now, change backup settings, restore and download",
+        "system.delete_records": "Delete a record for good, with its history (after a backup)",
+        "system.data_reset": (
+            "Delete all data except users, roles, readers and stores (after a backup)"
+        ),
+    },
+}
+
 PERMISSIONS: dict[str, str] = {
-    # Users & access control
-    "user.view": "View user accounts",
-    "user.manage": "Create, update and deactivate user accounts",
-    "role.view": "View roles and their permissions",
-    "role.assign": "Assign and remove roles on users",
-    "audit.view": "View the audit log",
-    "stats.view": "View company statistics (people, attendance, money)",
-    # Developers
-    "developer.view": "View developers",
-    "developer.create": "Create developers",
-    "developer.update": "Update developers",
-    "developer.delete": "Delete developers",
-    # RFID
-    "rfid.view": "View RFID cards, devices and events",
-    "rfid.assign": "Assign and replace RFID cards",
-    "rfid.block": "Block RFID cards",
-    "rfid.device.manage": "Register and manage RFID readers",
-    "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",
-    "system.backup": "See backups, run one now, change backup settings and download backups",
-    "system.delete_records": "Delete a record for good, with its history (after a backup)",
-    "system.data_reset": "Delete all data except users, roles, readers and stores (after a backup)",
-    # Attendance
-    "attendance.view": "View attendance records",
-    "attendance.correct": "Correct attendance records",
-    # Finance
-    "finance.view": "View developer accounts and ledgers",
-    "finance.deposit": "Deposit funds to developer accounts",
-    "finance.adjust": "Make manual balance adjustments",
-    # Purchases
-    "purchase.view": "View purchases",
-    "purchase.create": "Create purchases",
-    "purchase.confirm": "Confirm purchases",
-    "purchase.cancel": "Cancel purchases",
-    # Sellers & goods
-    "seller.view": "View sellers",
-    "seller.create": "Create sellers",
-    "seller.update": "Update sellers",
-    "good.view": "View goods",
-    "good.create": "Create goods",
-    "good.update": "Update goods",
-    "good.delete": "Delete goods",
-    "good.stock": "Restock, write off and adjust stock",
+    codename: description for area in AREAS.values() for codename, description in area.items()
 }
 
 ALL = frozenset(PERMISSIONS)
@@ -90,17 +125,22 @@ def _prefixed(*prefixes: str) -> frozenset[str]:
 # records (own account, own goods), enforced by object-level scoping in each module.
 ROLES: dict[str, RoleSpec] = {
     Roles.ADMIN: RoleSpec("Admin", "Full access: users, roles, settings and all data", ALL),
-    Roles.BOSS: RoleSpec("Boss", "Sees all data and statistics, read-only", VIEW),
+    Roles.BOSS: RoleSpec(
+        "Boss", "Sees all data and statistics, read-only", VIEW | {"excel.export"}
+    ),
     Roles.MANAGER: RoleSpec(
         "Manager",
-        "Manages developers, RFID and attendance",
-        _prefixed("developer", "rfid", "attendance")
-        | {"user.view", "role.view", "audit.view", "seller.view", "good.view"},
+        "Manages developers, cards, readers and attendance",
+        _prefixed("developer", "card", "reader", "building", "scan", "attendance")
+        | {"user.view", "role.view", "audit.view", "seller.view", "good.view"}
+        | {"excel.export", "excel.import"},
     ),
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
-        _prefixed("finance") | {"developer.view", "purchase.view", "audit.view"},
+        _prefixed("finance")
+        | {"developer.view", "purchase.view", "booking.view", "audit.view"}
+        | {"excel.export", "excel.import"},
     ),
     # Every permission of this role is narrowed to the user's buildings
     # (Building.managers); see apps/rfid/scope.py.
@@ -111,13 +151,20 @@ ROLES: dict[str, RoleSpec] = {
             "developer.view",
             "developer.create",
             "developer.update",
-            "rfid.view",
-            "rfid.assign",
-            "rfid.block",
-            "rfid.device.manage",
+            "card.view",
+            "card.register",
+            "card.assign",
+            "card.block",
+            "reader.view",
+            "reader.manage",
+            "building.manage",
+            "scan.view",
             "attendance.view",
             "attendance.correct",
             "purchase.view",
+            "booking.view",
+            "excel.export",
+            "excel.import",
         },
     ),
     # Like BOSS (read-only + statistics) but narrowed to the user's buildings
@@ -126,7 +173,7 @@ ROLES: dict[str, RoleSpec] = {
     Roles.BUILDING_OWNER: RoleSpec(
         "Building owner",
         "Sees the data, stores and statistics of their own buildings, read-only",
-        VIEW - {"user.view", "role.view", "audit.view"},
+        (VIEW - {"user.view", "role.view", "audit.view"}) | {"excel.export"},
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.SELLER: RoleSpec("Seller", "Self-service access to own goods and sales"),

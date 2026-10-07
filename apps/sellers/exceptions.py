@@ -13,4 +13,4 @@ class SellerProfileNotFound(DomainError):
 class PositionHasGoods(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "POSITION_HAS_GOODS"
-    default_detail = _("Move or delete this position's goods before deleting it.")
+    default_detail = _("Move or delete this counter's goods before deleting it.")

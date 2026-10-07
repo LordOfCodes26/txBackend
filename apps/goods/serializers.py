@@ -63,7 +63,11 @@ class PositionSummarySerializer(serializers.ModelSerializer):
 
 
 class GoodSerializer(serializers.ModelSerializer):
-    service_position = serializers.PrimaryKeyRelatedField(queryset=ServicePosition.objects.all())
+    service_position = serializers.PrimaryKeyRelatedField(
+        queryset=ServicePosition.objects.all(),
+        required=False,
+        help_text="Required, except for a new RENTAL (court): then the playground's position.",
+    )
     position_detail = PositionSummarySerializer(source="service_position", read_only=True)
     seller = SellerSummarySerializer(source="service_position.seller", read_only=True)
     price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
@@ -116,10 +120,28 @@ class GoodSerializer(serializers.ModelSerializer):
         if (own is not None and position.seller_id != own.pk) or (
             positions is not None and position.pk not in positions
         ):
-            raise serializers.ValidationError(_("You can only use your own service positions."))
+            raise serializers.ValidationError(_("You can only use your own counters."))
         if self.instance is not None and position.seller_id != self.instance.seller_id:
             raise serializers.ValidationError(_("A good cannot move to another seller."))
         return position
+
+    def _court_position(self):
+        """Where a new court goes when no position is given: a store's own first position;
+        for everyone else the position of the existing courts. None: create_good makes the
+        Playground store."""
+        own = self.context.get("own_seller")
+        positions = ServicePosition.objects.filter(is_active=True).order_by("id")
+        if own is not None:
+            mine = self.context.get("own_positions")
+            positions = positions.filter(seller=own)
+            return (positions.filter(pk__in=mine) if mine is not None else positions).first()
+        court = (
+            Good.objects.filter(kind=GoodKind.RENTAL, service_position__is_active=True)
+            .select_related("service_position")
+            .order_by("-id")
+            .first()
+        )
+        return court.service_position if court else None
 
     def validate(self, attrs):
         errors = {}
@@ -133,6 +155,14 @@ class GoodSerializer(serializers.ModelSerializer):
             kind = self.instance.kind
         else:
             kind = attrs.get("kind", GoodKind.PRODUCT)
+
+        if self.instance is None and attrs.get("service_position") is None:
+            if kind == GoodKind.RENTAL:
+                attrs["service_position"] = self._court_position()
+                if attrs["service_position"] is None and self.context.get("own_seller") is not None:
+                    errors["service_position"] = [_("Your store has no active counter.")]
+            else:
+                errors["service_position"] = [_("This field is required.")]
 
         if kind == GoodKind.PRODUCT:
             if attrs.get("rental"):

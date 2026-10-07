@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from django.utils import translation
+from django.http import HttpResponse
+from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -138,3 +139,11 @@ def as_date(value) -> date | str | None:
     if isinstance(value, datetime):
         return value.date()
     return value
+
+
+def xlsx_file(content: bytes, name: str):
+    """An .xlsx download named `<name>-<today>.xlsx`."""
+    response = HttpResponse(content, content_type=XLSX)
+    stamp = timezone.localdate().isoformat()
+    response["Content-Disposition"] = f'attachment; filename="{name}-{stamp}.xlsx"'
+    return response

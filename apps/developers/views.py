@@ -75,7 +75,7 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         purchase PIN, in the same transaction (needs `rfid.assign`)."""
         self._new_card = None
         if request.data.get("card"):
-            if not request.user.has_rbac_perm("rfid.assign"):
+            if not request.user.has_rbac_perm("card.assign"):
                 raise PermissionDenied()
             part = NewDeveloperCardSerializer(data=request.data)
             developer = self.get_serializer(data=request.data)

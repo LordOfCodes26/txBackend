@@ -30,7 +30,9 @@ def _importer(kind: str, user):
     if importer is None:
         raise NotFound()
     # Developers: either right is enough here; each row checks create or update.
-    if not any(user.has_rbac_perm(p) for p in importer.permissions):
+    if not user.has_rbac_perm("excel.import") or not any(
+        user.has_rbac_perm(p) for p in importer.permissions
+    ):
         raise PermissionDenied()
     return importer
 
@@ -48,8 +50,8 @@ class ImportSerializer(serializers.Serializer):
 class ImportView(APIView):
     """POST an .xlsx (`file`, `dry_run`) for `developers`, `cards` or `balances`.
     All or nothing: every error is listed with its Excel row; nothing is saved if there is
-    one. `dry_run=true` only checks. Permissions: developer.create/update, rfid.assign,
-    finance.deposit."""
+    one. `dry_run=true` only checks. Permissions: excel.import and developer.create/update,
+    card.assign or finance.deposit."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"post": []}  # per kind, in _importer
@@ -85,13 +87,15 @@ EXPORTS = {
     "developers": ("developer.view", False),
     "money": ("finance.view", True),
     "goods": ("good.view", True),
+    "finance-stats": ("finance.view", True),
 }
 
 
 class ExportView(APIView):
-    """GET `developers`, `money` or `goods` as .xlsx. `money` and `goods` take a period
-    (`date_from`, `date_to`; default the last 30 days) for the transactions, purchases and
-    stock movements. Limited to the user's buildings like the lists."""
+    """GET `developers`, `money`, `goods` or `finance-stats` (the finance statistics page)
+    as .xlsx. All but `developers` take a period (`date_from`, `date_to`; default the last
+    30 days); `developers` takes the developer list's filters and search. Limited to the
+    user's buildings like the lists."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"get": []}  # per kind, below
@@ -101,13 +105,18 @@ class ExportView(APIView):
         if kind not in EXPORTS:
             raise NotFound()
         permission, period = EXPORTS[kind]
-        if not request.user.has_rbac_perm(permission):
+        if not request.user.has_rbac_perms([permission, "excel.export"]):
             raise PermissionDenied()
         stamp = timezone.localdate().isoformat()
         if not period:
-            return _file(exports.developers_workbook(request.user), f"developers-{stamp}.xlsx")
+            book = exports.developers_workbook(request.user, request.query_params)
+            return _file(book, f"developers-{stamp}.xlsx")
         dates = PeriodSerializer(data=request.query_params)
         dates.is_valid(raise_exception=True)
         first, last = dates.validated_data["date_from"], dates.validated_data["date_to"]
-        build = exports.money_workbook if kind == "money" else exports.goods_workbook
+        build = {
+            "money": exports.money_workbook,
+            "goods": exports.goods_workbook,
+            "finance-stats": exports.finance_stats_workbook,
+        }[kind]
         return _file(build(request.user, first, last), f"{kind}-{first}-to-{last}.xlsx")

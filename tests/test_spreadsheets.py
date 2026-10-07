@@ -270,6 +270,8 @@ def test_import_permissions(auth_client, make_user, role, kind, allowed):
         (Roles.SELLER, "goods", False),
         (Roles.MANAGER, "money", False),
         (Roles.FINANCE_MANAGER, "money", True),
+        (Roles.FINANCE_MANAGER, "finance-stats", True),
+        (Roles.MANAGER, "finance-stats", False),
     ],
 )
 def test_export_permissions(auth_client, make_user, role, kind, allowed):
@@ -304,3 +306,34 @@ def test_money_and_goods_exports(admin, make_user, b1, auth_client):
 
     r = admin.get(EXPORT.format("money") + "?date_from=2026-10-05&date_to=2026-10-01")
     assert r.status_code == 400
+
+
+def test_finance_stats_export(admin, b1):
+    ada = Developer.objects.create(employee_number="E1", full_name="Ada", building=b1)
+    finance.deposit(actor=None, developer=ada, amount="50.00", idempotency_key="x-1")
+    finance.deposit(actor=None, developer=ada, amount="25.00", idempotency_key="x-2")
+    r = admin.get(EXPORT.format("finance-stats"))
+    assert r.status_code == 200
+    assert "finance-stats-" in r["Content-Disposition"]
+    book = read(r)
+    assert list(book) == ["Summary", "Daily", "Sellers", "Developers"]
+    summary = {row[0]: row[1] for row in book["Summary"][1:]}
+    assert summary["Deposits"] == 75 and summary["Deposit count"] == 2
+    assert book["Developers"][1][:6] == (1, "E1", "Ada", "B1", 75, 2)
+    assert len(book["Daily"]) == 31  # header + 30 days
+
+
+def test_developers_export_follows_the_list_filters(admin, b1):
+    Developer.objects.create(employee_number="E1", full_name="Ada Lovelace", building=b1)
+    Developer.objects.create(
+        employee_number="E2", full_name="Bob Byte", status="TERMINATED", out_date="2026-09-30"
+    )
+
+    def rows(query):
+        book = read(admin.get(EXPORT.format("developers") + query))
+        return [r[0] for r in book["Developers"][1:]]
+
+    assert rows("") == ["E1", "E2"]
+    assert rows("?status=TERMINATED") == ["E2"]
+    assert rows("?search=ada") == ["E1"]
+    assert rows("?out_after=2026-09-01&out_before=2026-09-30") == ["E2"]

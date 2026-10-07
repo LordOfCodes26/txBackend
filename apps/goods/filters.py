@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import Good, InventoryMovement
+from .models import Good, GoodKind, InventoryMovement
 
 
 class GoodFilter(django_filters.FilterSet):
@@ -8,6 +8,8 @@ class GoodFilter(django_filters.FilterSet):
     in_stock = django_filters.BooleanFilter(method="filter_in_stock")
     price_min = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
     price_max = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+    # Courts are listed under Playground, not with the goods.
+    rental = django_filters.BooleanFilter(method="filter_rental")
 
     class Meta:
         model = Good
@@ -17,6 +19,10 @@ class GoodFilter(django_filters.FilterSet):
         # Untracked goods are always available.
         in_stock = queryset.filter(track_stock=False) | queryset.filter(quantity__gt=0)
         return in_stock if value else queryset.filter(track_stock=True, quantity=0)
+
+    def filter_rental(self, queryset, name, value):
+        rentals = {"kind": GoodKind.RENTAL}
+        return queryset.filter(**rentals) if value else queryset.exclude(**rentals)
 
 
 class InventoryMovementFilter(django_filters.FilterSet):

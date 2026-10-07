@@ -33,7 +33,7 @@ def test_roles_in_the_catalog():
         == ALL
     )
     boss = set(Role.objects.get(code=Roles.BOSS).permissions.values_list("codename", flat=True))
-    assert boss == VIEW
+    assert boss == VIEW | {"excel.export"}  # read-only, and may download what it sees
     assert "stats.view" in boss and not any(p.endswith((".create", ".manage")) for p in boss)
 
 

@@ -25,7 +25,7 @@ class GoodNotAvailable(PurchaseConflict):
 
 class SellerNotActive(PurchaseConflict):
     code = "SELLER_NOT_ACTIVE"
-    default_detail = _("The seller or service position is not active.")
+    default_detail = _("The seller or counter is not active.")
 
 
 class CardNotUsable(PurchaseConflict):

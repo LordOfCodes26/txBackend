@@ -17,6 +17,8 @@ from rest_framework.views import APIView
 
 from apps.developers.services import update_developer
 from apps.finance.services import give_pin, open_account, validate_pin_format
+from apps.spreadsheets.exports import cards_workbook, readers_workbook
+from apps.spreadsheets.xlsx import XLSX, xlsx_file
 from common.context import get_request_context
 from common.middleware import client_ip
 from common.permissions import HasPermissions
@@ -82,21 +84,29 @@ class RFIDCardViewSet(
     serializer_class = RFIDCardSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
-        "list": ["rfid.view"],
-        "retrieve": ["rfid.view"],
-        "create": ["rfid.assign"],
-        "partial_update": ["rfid.assign"],
-        "assign": ["rfid.assign"],
-        "unassign": ["rfid.assign"],
-        "replace": ["rfid.assign"],
-        "retire": ["rfid.assign"],
-        "block": ["rfid.block"],
-        "unblock": ["rfid.block"],
+        "list": ["card.view"],
+        "retrieve": ["card.view"],
+        "export": ["card.view", "excel.export"],
+        "create": ["card.register"],
+        "partial_update": ["card.register"],
+        "assign": ["card.assign"],
+        "unassign": ["card.assign"],
+        "replace": ["card.assign"],
+        "retire": ["card.assign"],
+        "block": ["card.block"],
+        "unblock": ["card.block"],
     }
     http_method_names = ["get", "post", "patch", "head", "options"]
     filterset_class = RFIDCardFilter
     search_fields = ["uid", "label", "assignments__developer__full_name"]
     ordering_fields = ["uid", "label", "status", "created_at"]
+
+    @extend_schema(responses={(200, XLSX): OpenApiTypes.BINARY})
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """The cards as .xlsx, with the list's filters and search (`status`, `assigned`,
+        `search`), narrowed like the list."""
+        return xlsx_file(cards_workbook(self.filter_queryset(self.get_queryset())), "cards")
 
     def get_serializer_class(self):
         return RFIDCardUpdateSerializer if self.action == "partial_update" else RFIDCardSerializer
@@ -132,10 +142,10 @@ class RFIDCardViewSet(
         serializer.is_valid(raise_exception=True)
         card = self.get_object()
         developer = serializer.validated_data["developer"]
-        ensure_in_scope(request.user, "rfid.assign", developer.building_id, field="developer")
+        ensure_in_scope(request.user, "card.assign", developer.building_id, field="developer")
         building = serializer.validated_data.get("building")
         if building is not None:
-            ensure_in_scope(request.user, "rfid.assign", building.pk)
+            ensure_in_scope(request.user, "card.register", building.pk)
         validate_pin_format(serializer.validated_data["pin"])
         with transaction.atomic():
             if building is not None and building.pk != developer.building_id:
@@ -210,7 +220,7 @@ class RFIDCardAssignmentViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewS
     queryset = RFIDCardAssignment.objects.select_related("card", "developer")
     serializer_class = RFIDCardAssignmentSerializer
     permission_classes = [HasPermissions]
-    required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
+    required_permissions = {"list": ["card.view"], "retrieve": ["card.view"]}
     building_lookup = "developer__building"
     filterset_class = RFIDCardAssignmentFilter
     ordering_fields = ["assigned_at", "unassigned_at"]
@@ -230,24 +240,32 @@ class RFIDDeviceViewSet(
     serializer_class = RFIDDeviceSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
-        "list": ["rfid.view"],
-        "retrieve": ["rfid.view"],
-        "create": ["rfid.device.manage"],
-        "partial_update": ["rfid.device.manage"],
-        "rotate_key": ["rfid.device.manage"],
-        "assign_seller": ["rfid.device.manage"],
+        "list": ["reader.view"],
+        "retrieve": ["reader.view"],
+        "export": ["reader.view", "excel.export"],
+        "create": ["reader.manage"],
+        "partial_update": ["reader.manage"],
+        "rotate_key": ["reader.manage"],
+        "assign_seller": ["reader.manage"],
     }
     http_method_names = ["get", "post", "patch", "head", "options"]
     filterset_class = RFIDDeviceFilter
     search_fields = ["code", "name", "location"]
     ordering_fields = ["code", "last_seen_at"]
 
+    @extend_schema(responses={(200, XLSX): OpenApiTypes.BINARY})
+    @action(detail=False, methods=["get"])
+    def export(self, request):
+        """The readers as .xlsx, with the list's filters and search (`purpose`, `online`,
+        `is_active`, `search`), narrowed like the list."""
+        return xlsx_file(readers_workbook(self.filter_queryset(self.get_queryset())), "readers")
+
     @extend_schema(responses={201: RFIDDeviceWithKeySerializer})
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         building = serializer.validated_data.get("building")
-        ensure_in_scope(request.user, "rfid.device.manage", building and building.pk)
+        ensure_in_scope(request.user, "reader.manage", building and building.pk)
         device, key = services.register_device(actor=request.user, **serializer.validated_data)
         data = RFIDDeviceWithKeySerializer(device, context={"api_key": key}).data
         return Response(data, status=status.HTTP_201_CREATED)
@@ -255,7 +273,7 @@ class RFIDDeviceViewSet(
     def perform_update(self, serializer):
         if "building" in serializer.validated_data:
             building = serializer.validated_data["building"]
-            ensure_in_scope(self.request.user, "rfid.device.manage", building and building.pk)
+            ensure_in_scope(self.request.user, "reader.manage", building and building.pk)
         serializer.instance = services.update_device(
             actor=self.request.user, device=serializer.instance, **serializer.validated_data
         )
@@ -311,7 +329,7 @@ class RFIDEventViewSet(
         DeviceAuthentication,
         DeviceIPAuthentication,
     ]
-    required_permissions = {"list": ["rfid.view"], "retrieve": ["rfid.view"]}
+    required_permissions = {"list": ["scan.view"], "retrieve": ["scan.view"]}
     device_actions = ("create", "batch")
     building_lookup = "device__building"
     filterset_class = RFIDEventFilter
@@ -376,14 +394,14 @@ NEW_CARD_WINDOW = timedelta(seconds=10)
 
 
 class CardReadPermission(BasePermission):
-    """Card assign staff (`rfid.assign`) and the deposit desk (`finance.deposit`)."""
+    """Card assign staff (`card.assign`) and the deposit desk (`finance.deposit`)."""
 
     def has_permission(self, request, view) -> bool:
         user = request.user
         return bool(
             user
             and user.is_authenticated
-            and (user.has_rbac_perm("rfid.assign") or user.has_rbac_perm("finance.deposit"))
+            and (user.has_rbac_perm("card.assign") or user.has_rbac_perm("finance.deposit"))
         )
 
 
@@ -438,7 +456,7 @@ class CardReadView(APIView):
             .select_related("developer")
             .first()
         )
-        scope = building_scope(request.user, "rfid.assign")
+        scope = building_scope(request.user, "card.assign")
         visible = holder is not None and (scope is None or holder.developer.building_id in scope)
         read["card"] = {
             "id": card.pk,
@@ -496,11 +514,11 @@ class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     serializer_class = BuildingSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
-        "list": ["rfid.view"],
-        "retrieve": ["rfid.view"],
-        "create": ["rfid.device.manage"],
-        "partial_update": ["rfid.device.manage"],
-        "destroy": ["rfid.device.manage"],
+        "list": ["reader.view"],
+        "retrieve": ["reader.view"],
+        "create": ["building.manage"],
+        "partial_update": ["building.manage"],
+        "destroy": ["building.manage"],
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     pagination_class = None
@@ -508,7 +526,7 @@ class BuildingViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     building_lookup = "pk"
 
     def _scoped(self) -> bool:
-        return building_scope(self.request.user, "rfid.device.manage") is not None
+        return building_scope(self.request.user, "building.manage") is not None
 
     def perform_create(self, serializer):
         if self._scoped():

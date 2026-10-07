@@ -1,11 +1,19 @@
 from django.db import transaction
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
-from apps.audit.services import record_audit
+from apps.audit.services import diff, record_audit
 
-from .exceptions import LastAdmin, PrivilegeEscalation, RoleAlreadyAssigned, RoleNotAssigned
+from .exceptions import (
+    LastAdmin,
+    PrivilegeEscalation,
+    RoleAlreadyAssigned,
+    RoleInUse,
+    RoleLocked,
+    RoleNotAssigned,
+    SystemRole,
+)
 from .models import Permission, Role, User, UserRole
-from .rbac import Roles
+from .rbac import PERMISSIONS, Roles
 
 
 def granted_permissions(user: User) -> frozenset[str]:
@@ -101,3 +109,60 @@ def revoke_refresh_tokens(user: User) -> None:
     """Blacklist every outstanding refresh token. Access tokens expire on their own."""
     for token in OutstandingToken.objects.filter(user=user).exclude(blacklistedtoken__isnull=False):
         BlacklistedToken.objects.get_or_create(token=token)
+
+
+# --- Roles -------------------------------------------------------------------------
+
+
+def _role_snapshot(role: Role) -> dict:
+    return {
+        "name": role.name,
+        "description": role.description,
+        "permissions": sorted(role.permissions.values_list("codename", flat=True)),
+    }
+
+
+@transaction.atomic
+def create_role(
+    *, actor: User, code: str, name: str, description: str = "", permissions=()
+) -> Role:
+    """A custom role. The actor must hold every permission it grants."""
+    wanted = frozenset(permissions)
+    _ensure_can_manage(actor, wanted)
+    role = Role.objects.create(code=code, name=name, description=description, is_system=False)
+    role.permissions.set(Permission.objects.filter(codename__in=wanted))
+    record_audit("role.created", actor=actor, entity=role, new_values=_role_snapshot(role))
+    return role
+
+
+@transaction.atomic
+def update_role(*, actor: User, role: Role, permissions=None, **changes) -> Role:
+    """Rename a role or change what it allows. The actor must hold every permission the
+    role has before and after (no one hands out or takes away rights they don't have).
+    The Admin role always keeps every permission."""
+    role = Role.objects.select_for_update().get(pk=role.pk)
+    before = _role_snapshot(role)
+    if permissions is not None:
+        wanted = frozenset(permissions)
+        if role.code == Roles.ADMIN and wanted != frozenset(PERMISSIONS):
+            raise RoleLocked()
+        _ensure_can_manage(actor, wanted | frozenset(before["permissions"]))
+        role.permissions.set(Permission.objects.filter(codename__in=wanted))
+    for field, value in changes.items():
+        setattr(role, field, value)
+    role.save()
+    old, new = diff(before, _role_snapshot(role))
+    if new:
+        record_audit("role.updated", actor=actor, entity=role, old_values=old, new_values=new)
+    return role
+
+
+@transaction.atomic
+def delete_role(*, actor: User, role: Role) -> None:
+    if role.is_system:
+        raise SystemRole()
+    if UserRole.objects.filter(role=role).exists():
+        raise RoleInUse()
+    _ensure_can_manage(actor, frozenset(role.permissions.values_list("codename", flat=True)))
+    record_audit("role.deleted", actor=actor, entity=role, old_values=_role_snapshot(role))
+    role.delete()
