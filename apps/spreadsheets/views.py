@@ -30,7 +30,7 @@ def _importer(kind: str, user):
     if importer is None:
         raise NotFound()
     # Developers: either right is enough here; each row checks create or update.
-    if not user.has_rbac_perm("excel.import") or not any(
+    if not user.has_rbac_perm(importer.excel_permission) or not any(
         user.has_rbac_perm(p) for p in importer.permissions
     ):
         raise PermissionDenied()
@@ -50,8 +50,9 @@ class ImportSerializer(serializers.Serializer):
 class ImportView(APIView):
     """POST an .xlsx (`file`, `dry_run`) for `developers`, `cards` or `balances`.
     All or nothing: every error is listed with its Excel row; nothing is saved if there is
-    one. `dry_run=true` only checks. Permissions: excel.import and developer.create/update,
-    card.assign or finance.deposit."""
+    one. `dry_run=true` only checks. Permissions: excel.import_developers with
+    developer.create/update, excel.import_cards with card.assign, excel.import_balances with
+    finance.deposit."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"post": []}  # per kind, in _importer

@@ -83,7 +83,11 @@ AREAS: dict[str, dict[str, str]] = {
     },
     "Excel": {
         "excel.export": "Download lists as Excel (only data you can see)",
-        "excel.import": "Import developers, cards and opening balances from Excel",
+        "excel.import_developers": (
+            "Import developers from Excel (also needs Add or Change developers)"
+        ),
+        "excel.import_cards": "Import cards and their holders from Excel (also needs Assign cards)",
+        "excel.import_balances": "Import opening balances from Excel (also needs Deposit money)",
     },
     "System": {
         "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",
@@ -138,14 +142,14 @@ ROLES: dict[str, RoleSpec] = {
         "Manages developers, cards, readers and attendance",
         _prefixed("developer", "card", "reader", "building", "scan", "attendance")
         | {"user.view", "role.view", "audit.view", "seller.view", "good.view"}
-        | {"excel.export", "excel.import"},
+        | {"excel.export", "excel.import_developers", "excel.import_cards"},
     ),
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
         _prefixed("finance")
         | {"developer.view", "purchase.view", "booking.view", "audit.view"}
-        | {"excel.export", "excel.import"},
+        | {"excel.export", "excel.import_balances"},
     ),
     # Every permission of this role is narrowed to the user's buildings
     # (Building.managers); see apps/rfid/scope.py.
@@ -169,7 +173,8 @@ ROLES: dict[str, RoleSpec] = {
             "purchase.view",
             "booking.view",
             "excel.export",
-            "excel.import",
+            "excel.import_developers",
+            "excel.import_cards",
         },
     ),
     # Like BOSS (read-only + statistics) but narrowed to the user's buildings

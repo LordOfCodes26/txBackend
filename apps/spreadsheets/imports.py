@@ -77,6 +77,7 @@ class Importer:
     title = ""
     columns: list[Column] = []
     permissions: list[str] = []
+    excel_permission = ""  # the import right for this kind, e.g. excel.import_cards
 
     def apply(self, ctx: Context, number: int, row: dict) -> str:
         """Save one row; return "created", "updated" or "unchanged"."""
@@ -111,6 +112,7 @@ class DeveloperImporter(Importer):
     title = _("Developers")
     columns = DEVELOPER_COLUMNS
     permissions = ["developer.create", "developer.update"]
+    excel_permission = "excel.import_developers"
     STATUSES = {s.value: s.value for s in DeveloperStatus} | {
         s.label.upper(): s.value for s in DeveloperStatus
     }
@@ -191,6 +193,7 @@ class CardImporter(Importer):
     title = _("Cards")
     columns = CARD_COLUMNS
     permissions = ["card.assign"]
+    excel_permission = "excel.import_cards"
 
     def apply(self, ctx, number, row):
         uid = normalize_uid(text(row.get("card_uid")))
@@ -237,6 +240,7 @@ class BalanceImporter(Importer):
     title = _("Opening balances")
     columns = BALANCE_COLUMNS
     permissions = ["finance.deposit"]
+    excel_permission = "excel.import_balances"
 
     def apply(self, ctx, number, row):
         employee = text(row.get("employee_number"))

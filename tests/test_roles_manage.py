@@ -188,3 +188,21 @@ def test_freezing_needs_finance_freeze(auth_client, make_user):
     adjuster.permissions.add(Permission.objects.get(codename="finance.freeze"))
     person.invalidate_rbac_cache()
     assert client.post(url, {"reason": "Lost card"}).status_code == 200
+
+
+def test_excel_import_split_by_kind(auth_client, make_user):
+    migration = importlib.import_module("apps.accounts.migrations.0007_split_excel_import")
+    clerk = Role.objects.create(code="CARD_CLERK", name="Card clerk")
+    clerk.permissions.set(
+        [
+            Permission.objects.get_or_create(codename="excel.import")[0],
+            Permission.objects.get(codename="card.assign"),
+        ]
+    )
+    migration.forward(django_apps, None)
+    assert {"excel.import_cards"} <= codes("CARD_CLERK")
+    assert not {"excel.import_developers", "excel.import_balances"} & codes("CARD_CLERK")
+
+    client = auth_client(make_user("CARD_CLERK"))
+    assert client.get("/api/v1/imports/cards/template/").status_code == 200
+    assert client.get("/api/v1/imports/balances/template/").status_code == 403
