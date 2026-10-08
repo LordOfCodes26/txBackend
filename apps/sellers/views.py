@@ -59,7 +59,7 @@ class SellerViewSet(
     @extend_schema(request=onboarding.StoreSerializer, responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["post"])
     def onboard(self, request):
-        """New store in one step: its login (new SELLER user, existing one, or none), the
+        """New store in one step: its login (new seller user, existing one, or none), the
         seller, its first counter and optionally its till reader. All or nothing."""
         missing = [
             p

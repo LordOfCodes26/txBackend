@@ -239,7 +239,14 @@ def test_shipped_roles_file_is_valid():
     from django.conf import settings
 
     roles = json.loads((Path(settings.BASE_DIR) / "deploy" / "roles.json").read_text())["roles"]
-    assert {r["code"] for r in roles} >= {"ADMIN", "BOSS", "SELLER", "DEVELOPER"}
+    assert {r["code"] for r in roles} >= {
+        "ADMIN",
+        "BOSS",
+        "GOODS_SELLER",
+        "PLAYGROUND_SELLER",
+        "DEVELOPER",
+    }
     for role in roles:
         assert set(role["permissions"]) <= set(PERMISSIONS), role["code"]
-    assert next(r for r in roles if r["code"] == "SELLER")["permissions"] == []
+    for code in ("GOODS_SELLER", "PLAYGROUND_SELLER"):
+        assert next(r for r in roles if r["code"] == code)["permissions"] == []

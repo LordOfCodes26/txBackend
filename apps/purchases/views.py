@@ -12,7 +12,12 @@ from rest_framework.response import Response
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
 from apps.rfid.scope import BuildingScopedMixin
-from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
+from apps.sellers.access import (
+    GOODS,
+    CatalogPermission,
+    SellerScopedQuerysetMixin,
+    seller_purchase_kinds,
+)
 from apps.spreadsheets.exports import purchases_workbook
 from apps.spreadsheets.xlsx import XLSX
 from apps.stats.views import PeriodSerializer
@@ -96,6 +101,8 @@ class PurchaseViewSet(
         "me": [],
     }
     seller_actions = SELLER_ACTIONS
+    # Opening a till purchase is goods selling; the rows a seller sees follow their roles.
+    seller_area = {"create": GOODS}
     scope_permission = "purchase.view"
     filterset_class = PurchaseFilter
     search_fields = ["developer__full_name", "developer__employee_number", "seller__name"]
@@ -111,6 +118,10 @@ class PurchaseViewSet(
     @staticmethod
     def owner_position_id(obj):
         return obj.service_position_id
+
+    def filter_seller_area(self, qs, user):
+        # Goods sellers: till sales; playground sellers: booking payments.
+        return qs.filter(kind__in=seller_purchase_kinds(user))
 
     def get_queryset(self):
         if self.action == "me":

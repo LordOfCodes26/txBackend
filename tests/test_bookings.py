@@ -7,7 +7,7 @@ import pytest
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.bookings import services as bookings
 from apps.bookings.exceptions import SlotUnavailable
@@ -49,7 +49,7 @@ def tomorrow_at(hour, minute=0):
 
 @pytest.fixture
 def world(db, make_user):
-    seller_user = make_user(Roles.SELLER, email="sports@x.com")
+    seller_user = make_user(*SELLER_ROLES, email="sports@x.com")
     seller = Seller.objects.create(name="Sports Center", user=seller_user)
     position = ServicePosition.objects.create(seller=seller, name="Outdoor", location="Garden")
     playground = Good.objects.create(
@@ -388,7 +388,7 @@ def test_slot_taken_while_the_developer_enters_the_pin(desk, world):
 
 @pytest.mark.django_db
 def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
-    other = Seller.objects.create(name="Other", user=make_user(Roles.SELLER))
+    other = Seller.objects.create(name="Other", user=make_user(*SELLER_ROLES))
     position = ServicePosition.objects.create(seller=other, name="Pool")
     pool = Good.objects.create(
         service_position=position,
@@ -477,7 +477,7 @@ def test_who_sees_bookings(auth_client, make_user, world, desk):
     seller_view = auth_client(world.seller_user).get(BOOKINGS).json()["results"]
     assert [b["developer"]["full_name"] for b in seller_view] == ["Ada"]
 
-    other = make_user(Roles.SELLER)
+    other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
     assert auth_client(other).get(BOOKINGS).json()["count"] == 0
     assert auth_client(make_user(Roles.ADMIN)).get(BOOKINGS).json()["count"] == 1
@@ -872,7 +872,7 @@ def test_started_bookings_cannot_change(desk, world, paid):
 
 @pytest.mark.django_db
 def test_only_the_courts_seller_changes_bookings(auth_client, make_user, world, paid):
-    other = make_user(Roles.SELLER)
+    other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
     day = tomorrow_at(0).date().isoformat()
     r = change(auth_client(other), paid.pk, date=day, start_time="14:00", end_time="16:00")

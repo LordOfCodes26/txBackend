@@ -4,7 +4,7 @@ import pytest
 from django.db import IntegrityError, transaction
 from openpyxl import load_workbook
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
 from apps.rfid import services as rfid
@@ -200,7 +200,7 @@ def test_card_filters(client, make_card, make_developer):
         (Roles.MANAGER, 200, 200, 200),
         (Roles.FINANCE_MANAGER, 403, 403, 403),
         (Roles.DEVELOPER, 403, 403, 403),
-        (Roles.SELLER, 403, 403, 403),
+        (Roles.GOODS_SELLER, 403, 403, 403),
     ],
 )
 def test_card_permissions(
@@ -334,5 +334,5 @@ def test_readers_export_follows_the_list_filters(client):
 
 
 def test_exports_need_rfid_view(auth_client, make_user):
-    seller = auth_client(make_user(Roles.SELLER))
+    seller = auth_client(make_user(*SELLER_ROLES))
     assert seller.get(f"{CARDS}export/").status_code == 403

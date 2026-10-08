@@ -1,7 +1,7 @@
 import pytest
 
 from apps.accounts.models import User
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 
 pytestmark = pytest.mark.django_db
@@ -58,13 +58,13 @@ def test_create_user_enforces_password_validators(auth_client, admin):
 
 def test_list_supports_search_filter_and_pagination(auth_client, admin, make_user):
     make_user(Roles.DEVELOPER, username="alice", full_name="Alice")
-    make_user(Roles.SELLER, username="bob", full_name="Bob")
+    make_user(*SELLER_ROLES, username="bob", full_name="Bob")
     client = auth_client(admin)
 
     assert [u["username"] for u in client.get("/api/v1/users/?search=ali").json()["results"]] == [
         "alice"
     ]
-    by_role = client.get("/api/v1/users/?role=SELLER").json()["results"]
+    by_role = client.get("/api/v1/users/?role=GOODS_SELLER").json()["results"]
     assert [u["username"] for u in by_role] == ["bob"]
 
     page = client.get("/api/v1/users/?page_size=1&ordering=username").json()

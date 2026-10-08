@@ -114,7 +114,10 @@ class Roles:
     MANAGER = "MANAGER"
     FINANCE_MANAGER = "FINANCE_MANAGER"
     DEVELOPER = "DEVELOPER"
-    SELLER = "SELLER"
+    # A store's own logins (the store's user, or a counter's manager), one role per part of
+    # the store; a store doing both gives its login both roles. They replaced SELLER.
+    PLAYGROUND_SELLER = "PLAYGROUND_SELLER"
+    GOODS_SELLER = "GOODS_SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
     BUILDING_OWNER = "BUILDING_OWNER"
 
@@ -130,8 +133,17 @@ def _prefixed(*prefixes: str) -> frozenset[str]:
     return frozenset(p for p in PERMISSIONS if p.split(".")[0] in prefixes)
 
 
-# DEVELOPER and SELLER get no global permissions: their access is to their *own*
-# records (own account, own goods), enforced by object-level scoping in each module.
+# The part of its own store each seller role works with (see apps/sellers/access.py):
+# "playground" = courts, court bookings, the playground desk and booking payments;
+# "goods" = goods and services, stock, the till and its sales.
+SELLER_AREAS: dict[str, str] = {
+    Roles.PLAYGROUND_SELLER: "playground",
+    Roles.GOODS_SELLER: "goods",
+}
+SELLER_ROLES = tuple(SELLER_AREAS)
+
+# DEVELOPER and the seller roles get no global permissions: their access is to their *own*
+# records (own account, own store), enforced by object-level scoping in each module.
 ROLES: dict[str, RoleSpec] = {
     Roles.ADMIN: RoleSpec("Admin", "Full access: users, roles, settings and all data", ALL),
     Roles.BOSS: RoleSpec(
@@ -186,7 +198,10 @@ ROLES: dict[str, RoleSpec] = {
         (VIEW - {"user.view", "role.view", "audit.view"}) | {"excel.export"},
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
-    Roles.SELLER: RoleSpec("Seller", "Self-service access to own goods and sales"),
+    Roles.PLAYGROUND_SELLER: RoleSpec(
+        "Playground seller", "Own store's courts, court bookings and playground desk"
+    ),
+    Roles.GOODS_SELLER: RoleSpec("Goods seller", "Own store's goods, stock, till and sales"),
 }
 
 for _code, _spec in ROLES.items():

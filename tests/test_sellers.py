@@ -1,6 +1,6 @@
 import pytest
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.goods.models import Good
 from apps.sellers.models import Seller, SellerStatus, ServicePosition
@@ -18,13 +18,13 @@ def seller_manager(auth_client, make_user):
 
 @pytest.fixture
 def seller_user(make_user):
-    user = make_user(Roles.SELLER, email="shop@example.com")
+    user = make_user(*SELLER_ROLES, email="shop@example.com")
     Seller.objects.create(name="Cafe", user=user)
     return user
 
 
 def test_create_and_update_seller_is_audited(seller_manager, make_user):
-    user = make_user(Roles.SELLER)
+    user = make_user(*SELLER_ROLES)
     response = seller_manager.post(SELLERS, {"name": "Cafe", "user": user.pk})
     assert response.status_code == 201, response.json()
     seller_id = response.json()["id"]
@@ -54,7 +54,8 @@ def test_sellers_cannot_be_deleted(seller_manager, seller_user):
         (Roles.MANAGER, 200, 403),
         (Roles.FINANCE_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),
-        (Roles.SELLER, 403, 403),
+        (Roles.GOODS_SELLER, 403, 403),
+        (Roles.PLAYGROUND_SELLER, 403, 403),
     ],
 )
 def test_seller_access_by_role(auth_client, make_user, role, view, create):
@@ -129,9 +130,9 @@ def test_only_seller_role_users_can_be_linked(seller_manager, make_user):
     plain = make_user()
     response = seller_manager.post(SELLERS, {"name": "Shop", "user": plain.pk})
     assert response.json()["error"]["details"] == {
-        "user": ["This user doesn't have the SELLER role."]
+        "user": ["This user doesn't have a seller role."]
     }
-    seller_login = make_user(Roles.SELLER, email="shop@x.com")
+    seller_login = make_user(*SELLER_ROLES, email="shop@x.com")
     response = seller_manager.post(SELLERS, {"name": "Shop", "user": seller_login.pk})
     assert (response.status_code, response.json()["user_username"]) == (201, "shop")
 
@@ -146,7 +147,7 @@ def test_store_access_needs_the_role_and_the_link(auth_client, make_user):
     from apps.accounts.models import UserRole
     from apps.goods.models import Good
 
-    owner = make_user(Roles.SELLER)
+    owner = make_user(*SELLER_ROLES)
     shop = Seller.objects.create(name="Shop", user=owner)
     other = Seller.objects.create(name="Other")
     for seller, name in [(shop, "Mine"), (other, "Theirs")]:

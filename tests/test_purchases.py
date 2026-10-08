@@ -9,7 +9,7 @@ from django.db import connection, transaction
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
 from apps.finance import services as finance
@@ -39,7 +39,7 @@ def manual_card_entry(settings):
 @pytest.fixture
 def world(db, make_user):
     """A seller with a till, two goods, and a developer with card, PIN and 50.00."""
-    seller_user = make_user(Roles.SELLER, email="cafe@x.com")
+    seller_user = make_user(*SELLER_ROLES, email="cafe@x.com")
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     position = ServicePosition.objects.create(seller=seller, name="Counter")
     tea = Good.objects.create(service_position=position, name="Tea", price="2.50")
@@ -348,7 +348,7 @@ def test_cancel_draft(till, world):
 
 @pytest.mark.django_db
 def test_seller_isolation(auth_client, make_user, till, world):
-    other_user = make_user(Roles.SELLER)
+    other_user = make_user(*SELLER_ROLES)
     other = Seller.objects.create(name="Other", user=other_user)
     other_pos = ServicePosition.objects.create(seller=other, name="P")
     other_good = Good.objects.create(
@@ -517,6 +517,6 @@ def test_export_purchases_and_items(auth_client, make_user, till, world):
     assert len(only_paid["Purchases"]) == 2  # header + the paid one
 
     # Another store gets an empty file, not this store's sales.
-    other = make_user(Roles.SELLER)
+    other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
     assert len(sheets(auth_client(other).get(f"{PURCHASES}export/"))["Purchases"]) == 1

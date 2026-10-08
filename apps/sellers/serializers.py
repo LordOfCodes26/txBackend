@@ -15,9 +15,10 @@ class SellerSummarySerializer(serializers.ModelSerializer):
 
 
 def _ensure_seller_login(user):
-    """Only active users with the SELLER role can run a store or a position."""
+    """Only active users with a seller role (playground or goods) can run a store or a
+    position."""
     if user is not None and (not user.is_active or not has_seller_role(user)):
-        raise serializers.ValidationError(_("This user doesn't have the SELLER role."))
+        raise serializers.ValidationError(_("This user doesn't have a seller role."))
     return user
 
 
@@ -26,7 +27,7 @@ class SellerSerializer(serializers.ModelSerializer):
         queryset=User.objects.all(),
         required=False,
         allow_null=True,
-        help_text="The store's login: a user with the SELLER role. They manage only this store.",
+        help_text="The store's login: a user with a seller role. They manage only this store.",
     )
     user_username = serializers.CharField(source="user.username", read_only=True, default=None)
 

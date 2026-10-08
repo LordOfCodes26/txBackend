@@ -1,6 +1,6 @@
 import pytest
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.developers.models import Developer
 from apps.rfid import services as rfid
 from apps.rfid.models import Building, RFIDCard, RFIDCardAssignment, RFIDEvent
@@ -77,7 +77,7 @@ TAP = "/api/v1/test-console/simulate-tap/"
 @pytest.fixture
 def till(settings, make_user):
     settings.TEST_CONSOLE_ENABLED = True
-    seller_user = make_user(Roles.SELLER, email="cafe@x.com")
+    seller_user = make_user(*SELLER_ROLES, email="cafe@x.com")
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     counter = ServicePosition.objects.create(seller=seller, name="Counter 1")
     tea = Good.objects.create(
@@ -167,7 +167,7 @@ def test_explicit_reader_is_kept(till):
 def test_simulated_tap_rules(till, make_user, settings):
     pid = new_purchase(till)
     stranger = APIClient()
-    stranger_user = make_user(Roles.SELLER)
+    stranger_user = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=stranger_user)
     stranger.force_authenticate(stranger_user)
     assert stranger.post(TAP, {"purchase": pid, "developer": till["dev"].pk}).status_code == 404

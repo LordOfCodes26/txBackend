@@ -130,7 +130,7 @@ def test_cannot_deposit_to_own_account(auth_client, make_user, developer):
         (Roles.FINANCE_MANAGER, 200, 201, 201),
         (Roles.MANAGER, 403, 403, 403),
         (Roles.DEVELOPER, 403, 403, 403),
-        (Roles.SELLER, 403, 403, 403),
+        (Roles.GOODS_SELLER, 403, 403, 403),
     ],
 )
 def test_finance_access_by_role(

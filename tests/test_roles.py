@@ -37,7 +37,7 @@ def test_duplicate_assignment_conflicts(auth_client, admin, make_user):
 
 def test_removing_unassigned_role_is_404(auth_client, admin, make_user):
     dev = make_user()
-    response = auth_client(admin).delete(f"/api/v1/users/{dev.pk}/roles/SELLER/")
+    response = auth_client(admin).delete(f"/api/v1/users/{dev.pk}/roles/GOODS_SELLER/")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "ROLE_NOT_ASSIGNED"
 

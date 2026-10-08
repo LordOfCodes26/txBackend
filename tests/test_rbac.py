@@ -1,7 +1,7 @@
 import pytest
 
 from apps.accounts.models import Permission, Role
-from apps.accounts.rbac import ALL, PERMISSIONS, ROLES, Roles, sync_rbac
+from apps.accounts.rbac import ALL, PERMISSIONS, ROLES, SELLER_ROLES, Roles, sync_rbac
 
 pytestmark = pytest.mark.django_db
 
@@ -37,7 +37,8 @@ def test_new_catalog_permission_is_granted_to_default_roles(monkeypatch):
     assert result.created_permissions == ["developer.export"]
     manager = Role.objects.get(code=Roles.MANAGER)
     assert manager.permissions.filter(codename="developer.export").exists()
-    assert not Role.objects.get(code=Roles.SELLER).permissions.exists()
+    for code in SELLER_ROLES:
+        assert not Role.objects.get(code=code).permissions.exists()
 
 
 def test_stale_permissions_are_reported_and_pruned_on_request():
@@ -68,7 +69,7 @@ def test_superuser_has_every_permission(make_user):
         (Roles.MANAGER, 200),
         (Roles.FINANCE_MANAGER, 403),
         (Roles.DEVELOPER, 403),
-        (Roles.SELLER, 403),
+        (Roles.GOODS_SELLER, 403),
     ],
 )
 def test_user_list_access_by_role(auth_client, make_user, role, expected):
@@ -87,12 +88,12 @@ def test_unmapped_action_is_denied_by_default(auth_client, admin):
 
 @pytest.mark.django_db
 def test_admin_warns_when_seller_role_gets_global_permissions(client, django_user_model):
-    """A global permission on SELLER means every seller sees every store's data."""
+    """A global permission on a seller role means every seller sees every store's data."""
     from apps.accounts.models import Permission, Role
 
     admin = django_user_model.objects.create_superuser(username="root", password="Str0ng-pass!")
     client.force_login(admin)
-    role = Role.objects.get(code="SELLER")
+    role = Role.objects.get(code="GOODS_SELLER")
     good_view = Permission.objects.get(codename="good.view")
     response = client.post(
         f"/admin/accounts/role/{role.pk}/change/",

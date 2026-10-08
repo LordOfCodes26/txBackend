@@ -2,7 +2,7 @@
 reader assigned to it (a reader registered earlier, not yet assigned). All or nothing.
 
 Each part goes through the same serializer and service as its own form, so the rules
-(unique names, password rules, SELLER role, unique reader ID, ...) are the same.
+(unique names, password rules, seller roles, unique reader ID, ...) are the same.
 """
 
 from django.db import transaction
@@ -11,7 +11,7 @@ from rest_framework import serializers
 
 from apps.accounts import services as accounts
 from apps.accounts.models import Role, User
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES
 from apps.accounts.serializers import UserCreateSerializer
 from apps.rfid import services as rfid
 from apps.rfid.models import Building, DevicePurpose, RFIDDevice
@@ -31,7 +31,7 @@ class StoreSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, allow_blank=True)
     phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
-    # Login: a new SELLER user, an existing one, or none yet
+    # Login: a new seller user, an existing one, or none yet
     login = serializers.ChoiceField(choices=LOGIN_MODES, default="new")
     username = serializers.CharField(max_length=150, required=False, allow_blank=True)
     password = serializers.CharField(required=False, allow_blank=True, write_only=True)
@@ -124,7 +124,9 @@ def create_store(*, actor, data: dict) -> dict:
             password=data["password"],
             full_name=data.get("contact_name") or data["name"],
         )
-        accounts.assign_role(actor=actor, user=user, role=Role.objects.get(code=Roles.SELLER))
+        # Both parts of a store; take away the one the store doesn't run (users page).
+        for code in SELLER_ROLES:
+            accounts.assign_role(actor=actor, user=user, role=Role.objects.get(code=code))
     seller = services.create_seller(
         actor=actor,
         name=data["name"].strip(),

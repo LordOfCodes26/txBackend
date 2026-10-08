@@ -267,7 +267,7 @@ def test_import_permissions(auth_client, make_user, role, kind, allowed):
     [
         (Roles.BOSS, "developers", True),
         (Roles.BOSS, "money", True),
-        (Roles.SELLER, "goods", False),
+        (Roles.GOODS_SELLER, "goods", False),
         (Roles.MANAGER, "money", False),
         (Roles.FINANCE_MANAGER, "money", True),
         (Roles.FINANCE_MANAGER, "finance-stats", True),

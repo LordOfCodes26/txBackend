@@ -1,6 +1,6 @@
 import pytest
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
 
@@ -62,7 +62,7 @@ def test_create_developer_is_audited(manager_client):
         (Roles.MANAGER, 200, 201),
         (Roles.FINANCE_MANAGER, 200, 403),
         (Roles.DEVELOPER, 403, 403),
-        (Roles.SELLER, 403, 403),
+        (Roles.GOODS_SELLER, 403, 403),
     ],
 )
 def test_access_by_role(auth_client, make_user, role, list_status, create_status):
@@ -183,7 +183,7 @@ def test_me_returns_own_profile(auth_client, make_user, make_developer):
 
 
 def test_me_without_profile_is_404(auth_client, make_user):
-    response = auth_client(make_user(Roles.SELLER)).get(f"{URL}me/")
+    response = auth_client(make_user(*SELLER_ROLES)).get(f"{URL}me/")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "DEVELOPER_PROFILE_NOT_FOUND"
 

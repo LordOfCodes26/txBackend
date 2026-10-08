@@ -8,7 +8,15 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.rfid.scope import BuildingScopedMixin
-from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin, acting_seller
+from apps.sellers.access import (
+    GOODS,
+    PLAYGROUND,
+    CatalogPermission,
+    SellerScopedQuerysetMixin,
+    acting_seller,
+    seller_areas,
+    seller_kinds,
+)
 
 from . import services
 from .filters import GoodFilter, InventoryMovementFilter
@@ -72,21 +80,35 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     def owner_position_id(obj):
         return obj.service_position_id
 
+    def filter_seller_area(self, qs, user):
+        # Playground sellers see their courts, goods sellers the rest of their goods.
+        return qs.filter(kind__in=seller_kinds(user))
+
     def _check_court(self, kind) -> None:
-        """Courts need `court.manage`, except for a store managing its own courts."""
+        """Courts need `court.manage`, or a playground seller's own store. Other goods need
+        the action's permission, or a goods seller's own store."""
         user = self.request.user
-        if kind == GoodKind.RENTAL and not user.has_rbac_perm("court.manage"):
-            if acting_seller(user) is None:
+        if kind == GoodKind.RENTAL:
+            if user.has_rbac_perm("court.manage"):
+                return
+            if acting_seller(user) is None or PLAYGROUND not in seller_areas(user):
                 raise PermissionDenied(_("Your account cannot add or change courts."))
+            return
+        if user.has_rbac_perms(self.required_permissions.get(self.action, [])):
+            return
+        if GOODS not in seller_areas(user):
+            raise PermissionDenied(_("Your account cannot add or change goods."))
 
     def perform_create(self, serializer):
-        self._check_court(serializer.validated_data.get("kind"))
+        self._check_court(serializer.validated_data.get("kind", GoodKind.PRODUCT))
         serializer.instance = services.create_good(
             actor=self.request.user, **serializer.validated_data
         )
 
     def perform_update(self, serializer):
         self._check_court(serializer.instance.kind)
+        if "kind" in serializer.validated_data:  # turning a good into a court, or back
+            self._check_court(serializer.validated_data["kind"])
         serializer.instance = services.update_good(
             actor=self.request.user, good=serializer.instance, **serializer.validated_data
         )
@@ -144,6 +166,7 @@ class InventoryMovementViewSet(
     permission_classes = [CatalogPermission]
     required_permissions = {"list": ["good.view"], "retrieve": ["good.view"]}
     seller_actions = ("list", "retrieve")
+    seller_area = GOODS  # stock: courts have none
     scope_permission = "good.view"
     seller_lookup = "good__service_position__seller"
     position_lookup = "good__service_position"

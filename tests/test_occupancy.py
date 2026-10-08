@@ -187,7 +187,7 @@ def test_occupancy_and_people_endpoints(site, auth_client, make_user):
         (Roles.MANAGER, 200),
         (Roles.FINANCE_MANAGER, 403),
         (Roles.DEVELOPER, 403),
-        (Roles.SELLER, 403),
+        (Roles.GOODS_SELLER, 403),
     ],
 )
 def test_occupancy_permissions(site, auth_client, make_user, role, expected):

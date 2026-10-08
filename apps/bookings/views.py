@@ -10,7 +10,7 @@ from apps.purchases import services as purchase_services
 from apps.purchases.models import Purchase, PurchaseKind
 from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer
 from apps.rfid.scope import BuildingScopedMixin
-from apps.sellers.access import CatalogPermission, SellerScopedQuerysetMixin
+from apps.sellers.access import PLAYGROUND, CatalogPermission, SellerScopedQuerysetMixin
 from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
@@ -98,6 +98,7 @@ class BookingViewSet(
         "change": ["booking.change"],
     }
     seller_actions = ("list", "retrieve", "change")
+    seller_area = PLAYGROUND
     lookup_value_regex = r"\d+"
     position_lookup = "good__service_position"
     building_lookup = "good__service_position__building"
@@ -173,6 +174,7 @@ class BookingCheckoutViewSet(
         "stop_waiting": ["booking.create"],
     }
     seller_actions = ("create", "retrieve", "confirm", "cancel", "wait", "stop_waiting")
+    seller_area = PLAYGROUND
     scope_permission = "booking.view"
     position_lookup = "service_position"
     building_lookup = "service_position__building"

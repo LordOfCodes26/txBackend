@@ -7,7 +7,7 @@ from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
 from rest_framework.test import APIClient
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.goods.models import Good
@@ -24,7 +24,7 @@ PIN = "4826"
 
 @pytest.fixture
 def shop(make_user):
-    seller_user = make_user(Roles.SELLER, email="cafe@x.com")
+    seller_user = make_user(*SELLER_ROLES, email="cafe@x.com")
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     counter = ServicePosition.objects.create(seller=seller, name="Counter 1")
     tea = Good.objects.create(
@@ -162,7 +162,7 @@ def test_other_counters_do_not_receive_events(shop):
 
 
 def test_connection_rules(shop, make_user):
-    other_seller_user = make_user(Roles.SELLER)
+    other_seller_user = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other_seller_user)
     _, other_till_key = rfid.register_device(actor=None, code="TILL-2", purpose="TILL")
     staff = make_user(Roles.FINANCE_MANAGER)  # has purchase.view

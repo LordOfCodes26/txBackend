@@ -9,7 +9,7 @@ from django.core.management import CommandError, call_command
 from django.db import transaction
 
 from apps.accounts.models import Role, User
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.attendance.models import AttendanceRecord
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer
@@ -44,7 +44,7 @@ def world(db, make_user, auth_client, settings, tmp_path):
     owner = make_user(Roles.BUILDING_OWNER)
     b1.owners.add(owner)
     rfid.register_device(actor=None, code="Door1", name="Door1-1", building=b1, allowed_ip=DOOR_IP)
-    seller_user = make_user(Roles.SELLER, username="cafe")
+    seller_user = make_user(*SELLER_ROLES, username="cafe")
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     position = ServicePosition.objects.create(seller=seller, name="Counter")
     rfid.register_device(
@@ -101,7 +101,7 @@ def test_summary_lists_what_goes_and_what_stays(world, admin):
     assert d["developers"] == 1 and d["cards"] == 1 and d["scans"] == 1  # the door scan
     assert d["tcp_log"] == 1 and d["attendance_records"] == 1 and d["purchases"] == 1
     assert d["transactions"] == 2 and d["audit_log"] > 0
-    assert k["readers"] == 2 and k["sellers"] == 1 and k["goods"] == 1 and k["roles"] == 8
+    assert k["readers"] == 2 and k["sellers"] == 1 and k["goods"] == 1 and k["roles"] == 9
 
 
 def test_reset_deletes_data_and_keeps_the_setup(world, admin, fake_backup):
@@ -124,7 +124,7 @@ def test_reset_deletes_data_and_keeps_the_setup(world, admin, fake_backup):
     # Kept: users (with roles), readers, buildings and their owners, the store and goods.
     assert set(User.objects.values_list("username", flat=True)) == users_before
     assert User.objects.get(username="ada").roles.filter(code=Roles.DEVELOPER).exists()
-    assert Role.objects.count() == 8
+    assert Role.objects.count() == 9
     assert set(RFIDDevice.objects.values_list("code", flat=True)) == {"Door1", "Reader1"}
     assert RFIDDevice.objects.get(code="Reader1").seller.name == "Cafe"
     assert Building.objects.get().owners.count() == 1

@@ -1,10 +1,17 @@
-"""Who is acting as a seller.
+"""Who is acting as a seller, and for which part of the store.
 
-A user acts as a seller when they have the SELLER role AND are linked to an ACTIVE
+A user acts as a seller when they have a seller role AND are linked to an ACTIVE
 `Seller`, either as its owner
 (`Seller.user`: all its positions, its money) or as the manager of one of its positions
 (`ServicePosition.manager`: only that position's goods, sales, stock and bookings). These
-links, not a role, grant access.
+links grant access to the store; the seller roles say which part of it (`seller_areas`):
+
+  PLAYGROUND_SELLER  "playground": courts (RENTAL goods), bookings, the playground desk
+                     and booking payments
+  GOODS_SELLER       "goods": goods and services, stock, the till and its sales
+
+Views declare `seller_area` ("goods" / "playground") when they belong to one part, or
+narrow mixed querysets with `seller_kinds` / `seller_purchase_kinds`.
 """
 
 from rest_framework.permissions import BasePermission
@@ -12,6 +19,10 @@ from rest_framework.permissions import BasePermission
 from .models import Seller, SellerStatus, ServicePosition
 
 _CACHE_ATTR = "_acting_seller"
+_AREAS_ATTR = "_seller_areas"
+
+GOODS = "goods"
+PLAYGROUND = "playground"
 
 
 def _acting(user) -> tuple[Seller | None, frozenset[int] | None]:
@@ -36,11 +47,50 @@ def _acting(user) -> tuple[Seller | None, frozenset[int] | None]:
     return getattr(user, _CACHE_ATTR)
 
 
-def has_seller_role(user) -> bool:
-    from apps.accounts.models import UserRole
-    from apps.accounts.rbac import Roles
+def seller_areas(user) -> frozenset[str]:
+    """The parts of a store the user's seller roles cover: {"goods", "playground"}."""
+    if not getattr(user, "is_authenticated", False) or not getattr(user, "pk", None):
+        return frozenset()
+    if not hasattr(user, _AREAS_ATTR):
+        from apps.accounts.models import UserRole
+        from apps.accounts.rbac import SELLER_AREAS
 
-    return UserRole.objects.filter(user=user, role__code=Roles.SELLER).exists()
+        codes = UserRole.objects.filter(user=user, role__code__in=SELLER_AREAS).values_list(
+            "role__code", flat=True
+        )
+        setattr(user, _AREAS_ATTR, frozenset(SELLER_AREAS[c] for c in codes))
+    return getattr(user, _AREAS_ATTR)
+
+
+def has_seller_role(user) -> bool:
+    return bool(seller_areas(user))
+
+
+def seller_kinds(user) -> set[str]:
+    """The goods kinds a seller works with: courts for the playground, the rest for goods."""
+    from apps.goods.models import GoodKind
+
+    areas = seller_areas(user)
+    kinds = set()
+    if PLAYGROUND in areas:
+        kinds.add(GoodKind.RENTAL)
+    if GOODS in areas:
+        kinds |= {GoodKind.PRODUCT, GoodKind.SERVICE}
+    return kinds
+
+
+def seller_purchase_kinds(user) -> set[str]:
+    """The purchases a seller works with: booking payments for the playground, till sales
+    for goods."""
+    from apps.purchases.models import PurchaseKind
+
+    areas = seller_areas(user)
+    kinds = set()
+    if PLAYGROUND in areas:
+        kinds.add(PurchaseKind.BOOKING)
+    if GOODS in areas:
+        kinds.add(PurchaseKind.SALE)
+    return kinds
 
 
 def acting_seller(user) -> Seller | None:
@@ -69,6 +119,7 @@ class CatalogPermission(BasePermission):
       owner_seller_id(obj)  the seller id that owns `obj`
       owner_position_id(obj)  the position of `obj`, for views open to position managers;
                             views without it are seller-wide (owner only)
+      seller_area           GOODS or PLAYGROUND (or {action: area}): the seller role needed
     """
 
     def _has_global(self, request, view) -> bool:
@@ -88,6 +139,11 @@ class CatalogPermission(BasePermission):
         seller, positions = _acting(user)
         if seller is None:
             return False
+        area = getattr(view, "seller_area", None)
+        if isinstance(area, dict):  # per action, e.g. {"create": GOODS}
+            area = area.get(view.action)
+        if area is not None and area not in seller_areas(user):
+            return False  # e.g. a goods seller at the playground desk
         if positions is not None:
             # Position managers: only views about positions, minus owner-only actions.
             return hasattr(view, "owner_position_id") and view.action not in getattr(
@@ -118,9 +174,14 @@ class SellerScopedQuerysetMixin:
         if seller is None:
             return qs.none()
         qs = qs.filter(**{self.seller_lookup: seller})
+        qs = self.filter_seller_area(qs, user)
         if positions is not None:
             lookup = getattr(self, "position_lookup", None)
             return qs.filter(**{f"{lookup}__in": positions}) if lookup else qs.none()
+        return qs
+
+    def filter_seller_area(self, qs, user):
+        """Views mixing both parts of a store narrow a seller's rows to their roles' part."""
         return qs
 
     def get_serializer_context(self):

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.utils import timezone
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.attendance import services
 from apps.attendance.models import AttendanceRecord, DailyAttendance
 from apps.attendance.rules import worked_time
@@ -234,7 +234,7 @@ def test_void_requires_reason(manager, reader, card):
         (Roles.MANAGER, 200, 201),
         (Roles.FINANCE_MANAGER, 403, 403),
         (Roles.DEVELOPER, 403, 403),
-        (Roles.SELLER, 403, 403),
+        (Roles.GOODS_SELLER, 403, 403),
     ],
 )
 def test_access_by_role(auth_client, make_user, developer, role, view, correct):
@@ -265,7 +265,7 @@ def test_developer_sees_only_own_attendance(auth_client, make_user, reader, card
 
 
 def test_me_without_profile_is_404(auth_client, make_user):
-    response = auth_client(make_user(Roles.SELLER)).get(f"{DAILY}me/")
+    response = auth_client(make_user(*SELLER_ROLES)).get(f"{DAILY}me/")
     assert response.status_code == 404
 
 

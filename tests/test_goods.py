@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, connection, transaction
 from PIL import Image
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.goods import services
 from apps.goods.exceptions import InsufficientStock
@@ -150,7 +150,7 @@ def test_good_filters(seller_manager, make_good):
 
 @pytest.fixture
 def seller_client(auth_client, make_user, position):
-    user = make_user(Roles.SELLER)
+    user = make_user(*SELLER_ROLES)
     Seller.objects.filter(pk=position.seller_id).update(user=user)
     return auth_client(user)
 

@@ -253,6 +253,9 @@ msgstr "%(kind)s에는 리유를 입력하여야 합니다."
 msgid "Your account cannot add or change courts."
 msgstr "이 계정은 운동장을 추가하거나 변경할수 없습니다."
 
+msgid "Your account cannot add or change goods."
+msgstr "이 계정은 상품을 추가하거나 변경할수 없습니다."
+
 msgid "Only draft purchases can be changed."
 msgstr "작성중인 구입만 변경할수 있습니다."
 
@@ -474,8 +477,8 @@ msgstr "매장의 가입 계정을 선택하십시오."
 msgid "This reader is already assigned to %(seller)s."
 msgstr "이 인식기는 이미 %(seller)s에 배정되였습니다."
 
-msgid "This user doesn't have the SELLER role."
-msgstr "이 리용자에게는 SELLER 역할이 없습니다."
+msgid "This user doesn't have a seller role."
+msgstr "이 리용자에게는 판매자 역할이 없습니다."
 
 msgid "A seller with this name already exists."
 msgstr "이 이름을 가진 판매자가 이미 있습니다."

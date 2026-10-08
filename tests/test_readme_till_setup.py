@@ -3,7 +3,7 @@ deploy/README-OFFLINE-KIT.md (section 11), packet by packet over TCP."""
 
 import pytest
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.goods.models import Good
@@ -25,7 +25,7 @@ def tap(uid, reader="Reader1", kind="Pay", ip=TILL_PC):
 def test_readme_till_and_card_assign_readers(auth_client, make_user):
     admin = auth_client(make_user(Roles.ADMIN))
 
-    seller_user = make_user(Roles.SELLER)
+    seller_user = make_user(*SELLER_ROLES)
     cafe = Seller.objects.create(name="Cafe", user=seller_user)
     shop = Seller.objects.create(name="Shop")
 

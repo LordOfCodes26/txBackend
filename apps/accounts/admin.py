@@ -2,7 +2,7 @@ from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import Permission, Role, User, UserRole
-from .rbac import Roles
+from .rbac import SELLER_ROLES, Roles
 
 
 class UserRoleInline(admin.TabularInline):
@@ -34,7 +34,7 @@ class UserAdmin(BaseUserAdmin):
 # Roles whose users reach only their *own* data through a link (Seller.user,
 # ServicePosition.manager, Developer.user). A global permission on them means "everything":
 # e.g. good.view lets every seller see every store's goods.
-SELF_SERVICE_ROLES = {Roles.SELLER, Roles.DEVELOPER}
+SELF_SERVICE_ROLES = {*SELLER_ROLES, Roles.DEVELOPER}
 
 
 @admin.register(Role)

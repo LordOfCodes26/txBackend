@@ -141,6 +141,12 @@
       ]
     },
     {
+      "code": "GOODS_SELLER",
+      "name": "Goods seller",
+      "description": "Own store's goods, stock, till and sales",
+      "permissions": []
+    },
+    {
       "code": "MANAGER",
       "name": "Manager",
       "description": "Manages developers, RFID and attendance",
@@ -172,9 +178,9 @@
       ]
     },
     {
-      "code": "SELLER",
-      "name": "Seller",
-      "description": "Self-service access to own goods and sales",
+      "code": "PLAYGROUND_SELLER",
+      "name": "Playground seller",
+      "description": "Own store's courts, court bookings and playground desk",
       "permissions": []
     }
   ]

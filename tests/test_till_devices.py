@@ -6,7 +6,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.attendance.models import AttendanceRecord
 from apps.developers.models import Developer
 from apps.finance import services as finance
@@ -45,7 +45,7 @@ def make_developer(n, balance="50.00"):
 
 @pytest.fixture
 def shop(db, make_user):
-    seller_user = make_user(Roles.SELLER, email="cafe@x.com")
+    seller_user = make_user(*SELLER_ROLES, email="cafe@x.com")
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     counter = ServicePosition.objects.create(seller=seller, name="Counter 1")
     tea = Good.objects.create(

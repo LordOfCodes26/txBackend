@@ -3,7 +3,7 @@
 import pytest
 
 from apps.accounts.models import User
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.rfid import services as rfid
 from apps.rfid.models import Building, RFIDDevice
@@ -51,7 +51,9 @@ def test_store_with_new_login_counter_and_till(admin, b1):
     body = r.json()
     seller = Seller.objects.get(pk=body["seller"])
     login = User.objects.get(username="peakcafe")
-    assert seller.user == login and login.roles.filter(code=Roles.SELLER).exists()
+    assert seller.user == login
+    # A new store's login gets both parts; the one it doesn't run is taken away later.
+    assert set(login.roles.values_list("code", flat=True)) == set(SELLER_ROLES)
     assert login.check_password(PASSWORD) and login.full_name == "Kim Chol"
     counter = ServicePosition.objects.get(pk=body["position"])
     # The counter is named after the store unless a name is given.
@@ -68,7 +70,7 @@ def test_store_with_new_login_counter_and_till(admin, b1):
 
 
 def test_existing_login_or_none_and_own_counter_name(admin, make_user):
-    owner = make_user(Roles.SELLER, username="bakery")
+    owner = make_user(*SELLER_ROLES, username="bakery")
     r = admin.post(
         URL,
         {"name": "Bakery", "login": "existing", "user": owner.pk, "counter_name": "Oven"},
@@ -84,7 +86,7 @@ def test_existing_login_or_none_and_own_counter_name(admin, make_user):
 
 def test_every_problem_at_its_field_and_nothing_saved(admin, make_user):
     other = Seller.objects.create(name="Peak Cafe")
-    make_user(Roles.SELLER, username="taken")
+    make_user(*SELLER_ROLES, username="taken")
     busy = till("Reader1", seller=other)
     r = admin.post(
         URL,

@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.attendance.models import AttendanceRecord, DailyAttendance, DeveloperPresence
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer
@@ -66,7 +66,7 @@ def world(db, make_user, auth_client, settings):
     door_out, _ = rfid.register_device(
         actor=None, code="Door1", name="Door1-3", building=b1, allowed_ip=DOOR_OUT, direction="OUT"
     )
-    seller_user = make_user(Roles.SELLER, username="cafe")
+    seller_user = make_user(*SELLER_ROLES, username="cafe")
     cafe = Seller.objects.create(name="Cafe", user=seller_user)
     counter = ServicePosition.objects.create(seller=cafe, name="Counter", building=b1)
     till, _ = rfid.register_device(

@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 from rest_framework.test import APIClient
 
-from apps.accounts.rbac import Roles
+from apps.accounts.rbac import SELLER_ROLES
 from apps.developers.models import Developer
 from apps.finance import services as finance
 from apps.finance.models import DeveloperAccount
@@ -28,7 +28,7 @@ def device_client(key):
 
 @pytest.fixture
 def till(make_user):
-    seller_user = make_user(Roles.SELLER)
+    seller_user = make_user(*SELLER_ROLES)
     seller = Seller.objects.create(name="Cafe", user=seller_user)
     counter = ServicePosition.objects.create(seller=seller, name="Counter 1")
     tea = Good.objects.create(
