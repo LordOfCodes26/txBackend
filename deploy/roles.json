@@ -180,7 +180,7 @@
     {
       "code": "PLAYGROUND_SELLER",
       "name": "Playground seller",
-      "description": "Own store's courts, court bookings and playground desk",
+      "description": "Every court, court booking and the playground desk (shared, no store needed)",
       "permissions": []
     }
   ]

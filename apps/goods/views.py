@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
@@ -14,12 +14,11 @@ from rest_framework.response import Response
 from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import (
     GOODS,
-    PLAYGROUND,
     CatalogPermission,
     SellerScopedQuerysetMixin,
-    acting_seller,
     seller_areas,
     seller_kinds,
+    works_playground,
 )
 
 from . import services
@@ -88,9 +87,21 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     def owner_position_id(obj):
         return obj.service_position_id
 
+    # Courts are the shared playground's: every playground seller works with all of them.
+    playground_filter = Q(kind=GoodKind.RENTAL)
+
     def filter_seller_area(self, qs, user):
-        # Playground sellers see their courts, goods sellers the rest of their goods.
+        # Goods sellers see their store's goods (playground sellers get every court above).
         return qs.filter(kind__in=seller_kinds(user))
+
+    def unpinned(self, user) -> bool:
+        """Playground sellers add and change courts at any counter (no store of their own)."""
+        if not works_playground(user):
+            return False
+        if self.action == "create":
+            return self.request.data.get("kind") == GoodKind.RENTAL
+        pk = self.kwargs.get("pk")
+        return pk is not None and Good.objects.filter(pk=pk, kind=GoodKind.RENTAL).exists()
 
     def _check_court(self, kind) -> None:
         """Courts need `court.manage`, or a playground seller's own store. Other goods need
@@ -99,7 +110,7 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         if kind == GoodKind.RENTAL:
             if user.has_rbac_perm("court.manage"):
                 return
-            if acting_seller(user) is None or PLAYGROUND not in seller_areas(user):
+            if not works_playground(user):
                 raise PermissionDenied(_("Your account cannot add or change courts."))
             return
         if user.has_rbac_perms(self.required_permissions.get(self.action, [])):

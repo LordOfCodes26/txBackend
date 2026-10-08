@@ -2,10 +2,11 @@
 payments) and GOODS_SELLER (goods, stock, the till and its sales), each for its own store."""
 
 import importlib
-from datetime import time
+from datetime import time, timedelta
 
 import pytest
 from django.apps import apps as django_apps
+from django.utils import timezone
 
 from apps.accounts.models import Role, UserRole
 from apps.accounts.rbac import SELLER_ROLES, Roles
@@ -178,11 +179,34 @@ def schedule_courts(client):
     return {court["good"] for court in response.json()["courts"]}
 
 
-def test_a_sellers_desk_shows_only_its_own_courts(auth_client, store, other_court):
-    client = auth_client(store.login(*PLAYGROUND_ONLY))
-    assert schedule_courts(client) == {store.court.pk}
+def test_the_playground_is_shared(auth_client, store, other_court, make_user):
+    """Every playground seller, linked to a store or not, works with every court."""
+    every = {store.court.pk, other_court.pk}
+    linked = auth_client(store.login(*PLAYGROUND_ONLY))
+    unlinked = auth_client(make_user(*PLAYGROUND_ONLY))
+    for client in (linked, unlinked):
+        assert schedule_courts(client) == every
+        assert ids(client.get("/api/v1/rentals/")) == every
+        assert ids(client.get(GOODS)) == every
+        assert client.patch(f"{GOODS}{other_court.pk}/", {"price": "6.00"}).status_code == 200
+        assert ids(client.get(PURCHASES)) >= {store.booking.pk}
+    assert ids(linked.get(PURCHASES)) == {store.booking.pk}  # not the store's till sale
+    # Bookings and the desk work without a store.
+    tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+    assert unlinked.get(BOOKINGS).status_code == 200
+    r = unlinked.post(
+        CHECKOUT,
+        {"good": other_court.pk, "date": tomorrow, "start_time": "10:00", "end_time": "11:00"},
+    )
+    assert r.status_code == 201, r.content
+    assert unlinked.get(f"{CHECKOUT}{r.json()['id']}/").status_code == 200
+
+
+def test_a_goods_only_store_login_sees_only_its_own_courts(auth_client, store, other_court):
+    client = auth_client(store.login(*GOODS_ONLY))
     assert ids(client.get("/api/v1/rentals/")) == {store.court.pk}
-    assert client.get(f"/api/v1/rentals/{other_court.pk}/").status_code == 404
+    assert ids(client.get(GOODS)) == {store.product.pk}
+    assert client.get(BOOKINGS).status_code == 403
 
 
 def test_developers_and_staff_see_every_court(auth_client, store, other_court, make_user):

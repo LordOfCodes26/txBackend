@@ -103,6 +103,8 @@ class PurchaseViewSet(
     seller_actions = SELLER_ACTIONS
     # Opening a till purchase is goods selling; the rows a seller sees follow their roles.
     seller_area = {"create": GOODS}
+    # Booking payments are the shared playground's: every playground seller sees them all.
+    playground_filter = Q(kind=PurchaseKind.BOOKING)
     scope_permission = "purchase.view"
     filterset_class = PurchaseFilter
     search_fields = ["developer__full_name", "developer__employee_number", "seller__name"]

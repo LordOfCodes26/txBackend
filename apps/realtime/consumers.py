@@ -17,8 +17,9 @@ def _authorize(position_id: int, ticket: str, device_key: str):
     - its TILL device (Device key),
     - the counter's own active seller, or users with purchase.view (ticket)."""
     from apps.accounts.models import User
+    from apps.goods.models import GoodKind
     from apps.rfid.authentication import device_for_key
-    from apps.sellers.access import acting_positions, acting_seller
+    from apps.sellers.access import acting_positions, acting_seller, works_playground
     from apps.sellers.models import ServicePosition
 
     position = ServicePosition.objects.filter(pk=position_id).first()
@@ -43,6 +44,8 @@ def _authorize(position_id: int, ticket: str, device_key: str):
         scope = building_scope(user, "purchase.view")
         if scope is None or position.building_id in scope:
             return True, None, f"user:{user.pk}"
+    if works_playground(user) and position.goods.filter(kind=GoodKind.RENTAL).exists():
+        return True, None, f"user:{user.pk}"  # a playground desk: the playground is shared
     seller, positions = acting_seller(user), acting_positions(user)
     if (
         seller is not None

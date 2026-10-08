@@ -386,7 +386,8 @@ def test_slot_taken_while_the_developer_enters_the_pin(desk, world):
 
 
 @pytest.mark.django_db
-def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
+def test_the_desk_books_every_court(desk, world, make_user):
+    """The playground is shared: a playground seller books any store's court."""
     other = Seller.objects.create(name="Other", user=make_user(*SELLER_ROLES))
     position = ServicePosition.objects.create(seller=other, name="Pool")
     pool = Good.objects.create(
@@ -399,8 +400,11 @@ def test_only_rentals_of_the_own_seller_can_be_booked(desk, world, make_user):
     RentalSettings.objects.create(
         good=pool, slot_minutes=60, opening_time=time(8), closing_time=time(20)
     )
-    _, r = add_booking(desk, world, tomorrow_at(10), good=pool)
-    assert r.json()["error"]["details"] == {"good": ["You can only book your own courts."]}
+    purchase, r = add_booking(desk, world, tomorrow_at(10), good=pool)
+    assert r.status_code == 201, r.json()
+    assert confirm(desk, purchase).status_code == 201
+    # The payment belongs to the court's store.
+    assert Purchase.objects.get(pk=purchase).seller == other
 
 
 @pytest.mark.django_db
@@ -479,9 +483,14 @@ def test_who_sees_bookings(auth_client, make_user, world, desk):
     seller_view = auth_client(world.seller_user).get(BOOKINGS).json()["results"]
     assert [b["developer"]["full_name"] for b in seller_view] == ["Ada"]
 
+    # The playground is shared: another store's playground seller sees it too, a goods
+    # seller does not.
     other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
-    assert auth_client(other).get(BOOKINGS).json()["count"] == 0
+    assert auth_client(other).get(BOOKINGS).json()["count"] == 1
+    goods = make_user(Roles.GOODS_SELLER)
+    Seller.objects.create(name="Shop", user=goods)
+    assert auth_client(goods).get(BOOKINGS).status_code == 403
     assert auth_client(make_user(Roles.ADMIN)).get(BOOKINGS).json()["count"] == 1
 
 
@@ -842,9 +851,13 @@ def test_started_bookings_cannot_change(desk, world, paid):
 
 
 @pytest.mark.django_db
-def test_only_the_courts_seller_changes_bookings(auth_client, make_user, world, paid):
-    other = make_user(*SELLER_ROLES)
-    Seller.objects.create(name="Other", user=other)
+def test_only_playground_sellers_change_bookings(auth_client, make_user, world, paid):
     day = tomorrow_at(0).date().isoformat()
+    goods = make_user(Roles.GOODS_SELLER)
+    Seller.objects.create(name="Shop", user=goods)
+    r = change(auth_client(goods), paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.status_code == 403
+    # Any playground seller may: the playground is shared.
+    other = make_user(Roles.PLAYGROUND_SELLER)
     r = change(auth_client(other), paid.pk, date=day, start_time="14:00", end_time="16:00")
-    assert r.status_code == 404
+    assert r.status_code == 200, r.json()

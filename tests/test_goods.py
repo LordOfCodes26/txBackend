@@ -382,10 +382,12 @@ def test_first_court_makes_the_playground_store_then_courts_join_it(seller_manag
 
 
 @pytest.mark.django_db
-def test_store_court_goes_to_its_own_position(seller_client, position):
+def test_a_sellers_new_court_joins_the_playground(seller_client, position):
+    """The playground is shared, not the seller's store: courts go to the Playground."""
     r = seller_client.post(GOODS, COURT, format="json")
     assert r.status_code == 201, r.json()
-    assert r.json()["service_position"] == position.pk
+    court = Good.objects.select_related("service_position__seller").get(pk=r.json()["id"])
+    assert court.service_position.seller.name == "Playground"
 
 
 @pytest.mark.django_db

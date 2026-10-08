@@ -114,8 +114,9 @@ class Roles:
     MANAGER = "MANAGER"
     FINANCE_MANAGER = "FINANCE_MANAGER"
     DEVELOPER = "DEVELOPER"
-    # A store's own logins (the store's user, or a counter's manager), one role per part of
-    # the store; a store doing both gives its login both roles. They replaced SELLER.
+    # The seller roles replaced SELLER. GOODS_SELLER: a store's own login (the store's user,
+    # or a counter's manager) for its goods. PLAYGROUND_SELLER: the shared playground, every
+    # court and booking, with or without a store.
     PLAYGROUND_SELLER = "PLAYGROUND_SELLER"
     GOODS_SELLER = "GOODS_SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
@@ -199,7 +200,8 @@ ROLES: dict[str, RoleSpec] = {
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.PLAYGROUND_SELLER: RoleSpec(
-        "Playground seller", "Own store's courts, court bookings and playground desk"
+        "Playground seller",
+        "Every court, court booking and the playground desk (shared, no store needed)",
     ),
     Roles.GOODS_SELLER: RoleSpec("Goods seller", "Own store's goods, stock, till and sales"),
 }

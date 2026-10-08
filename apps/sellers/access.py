@@ -12,8 +12,13 @@ links grant access to the store; the seller roles say which part of it (`seller_
 
 Views declare `seller_area` ("goods" / "playground") when they belong to one part, or
 narrow mixed querysets with `seller_kinds` / `seller_purchase_kinds`.
+
+The playground is shared, not a store's own: every PLAYGROUND_SELLER works with every
+court, booking and booking payment, linked to a store or not (`works_playground`). Views
+mark those rows with `playground_filter` (a Q; `Q()` = every row of a playground view).
 """
 
+from django.db.models import Q
 from rest_framework.permissions import BasePermission
 
 from .models import Seller, SellerStatus, ServicePosition
@@ -64,6 +69,17 @@ def seller_areas(user) -> frozenset[str]:
 
 def has_seller_role(user) -> bool:
     return bool(seller_areas(user))
+
+
+def works_playground(user) -> bool:
+    """A playground seller: every court and booking, whatever store (if any) they run."""
+    return PLAYGROUND in seller_areas(user)
+
+
+def _shared(view, user) -> Q | None:
+    """The playground rows of `view` the user works with as a playground seller."""
+    rows = getattr(view, "playground_filter", None)
+    return rows if rows is not None and works_playground(user) else None
 
 
 def seller_kinds(user) -> set[str]:
@@ -136,12 +152,14 @@ class CatalogPermission(BasePermission):
             return True
         if view.action not in getattr(view, "seller_actions", ()):
             return False
-        seller, positions = _acting(user)
-        if seller is None:
-            return False
         area = getattr(view, "seller_area", None)
         if isinstance(area, dict):  # per action, e.g. {"create": GOODS}
             area = area.get(view.action)
+        if area in (None, PLAYGROUND) and _shared(view, user) is not None:
+            return True  # the shared playground; objects are checked one by one
+        seller, positions = _acting(user)
+        if seller is None:
+            return False
         if area is not None and area not in seller_areas(user):
             return False  # e.g. a goods seller at the playground desk
         if positions is not None:
@@ -153,6 +171,9 @@ class CatalogPermission(BasePermission):
 
     def has_object_permission(self, request, view, obj) -> bool:
         if self._has_global(request, view):
+            return True
+        rows = _shared(view, request.user)
+        if rows is not None and type(obj).objects.filter(rows, pk=obj.pk).exists():
             return True
         seller, positions = _acting(request.user)
         if seller is None or view.owner_seller_id(obj) != seller.pk:
@@ -170,6 +191,14 @@ class SellerScopedQuerysetMixin:
         user = self.request.user
         if user.has_rbac_perm(self.scope_permission):
             return qs
+        shared = _shared(self, user)
+        if shared is None:
+            return self._own_rows(qs, user)
+        if not shared:  # Q(): every row (`Q(...) | Q()` would drop it)
+            return qs
+        return qs.filter(Q(pk__in=self._own_rows(qs, user).values("pk")) | shared)
+
+    def _own_rows(self, qs, user):
         seller, positions = _acting(user)
         if seller is None:
             return qs.none()
@@ -187,9 +216,17 @@ class SellerScopedQuerysetMixin:
     def get_serializer_context(self):
         context = super().get_serializer_context()
         user = self.request.user
-        # Sellers without global rights are pinned to their own seller.
-        unrestricted = user.is_authenticated and user.has_rbac_perm(self.scope_permission)
+        # Sellers without global rights are pinned to their own seller; playground sellers
+        # are not, on views that are all playground (bookings, the desk).
+        unrestricted = user.is_authenticated and (
+            user.has_rbac_perm(self.scope_permission) or self.unpinned(user)
+        )
         context["own_seller"] = None if unrestricted else acting_seller(user)
         # Position managers are also pinned to their positions.
         context["own_positions"] = None if unrestricted else acting_positions(user)
         return context
+
+    def unpinned(self, user) -> bool:
+        """True: the request may use any store's rows (the shared playground)."""
+        rows = getattr(self, "playground_filter", None)
+        return rows is not None and not rows and works_playground(user)

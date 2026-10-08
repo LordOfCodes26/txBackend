@@ -16,6 +16,7 @@ from apps.sellers.access import (
     SellerScopedQuerysetMixin,
     acting_positions,
     acting_seller,
+    works_playground,
 )
 from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
@@ -57,11 +58,11 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["name", "price"]
 
     def get_queryset(self):
-        """Everyone sees every court, except a store's own login: its desk shows its own
-        courts (a counter manager's: their counters'), the only ones it can book."""
+        """Everyone sees every court (playground sellers too: the playground is shared),
+        except a store's goods-only login: its own courts, if any."""
         qs = super().get_queryset()
         user = self.request.user
-        if user.has_rbac_perm("booking.view"):
+        if user.has_rbac_perm("booking.view") or works_playground(user):
             return qs
         seller = acting_seller(user)
         if seller is None:
@@ -119,6 +120,7 @@ class BookingViewSet(
     }
     seller_actions = ("list", "retrieve", "change")
     seller_area = PLAYGROUND
+    playground_filter = Q()  # every booking: the playground is shared
     lookup_value_regex = r"\d+"
     position_lookup = "good__service_position"
     building_lookup = "good__service_position__building"
@@ -195,6 +197,7 @@ class BookingCheckoutViewSet(
     }
     seller_actions = ("create", "retrieve", "confirm", "cancel", "wait", "stop_waiting")
     seller_area = PLAYGROUND
+    playground_filter = Q()  # every booking payment: the playground is shared
     scope_permission = "booking.view"
     position_lookup = "service_position"
     building_lookup = "service_position__building"
