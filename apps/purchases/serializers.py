@@ -188,12 +188,15 @@ class PurchaseSerializer(serializers.ModelSerializer):
 def _readers():
     from apps.rfid.models import DevicePurpose, RFIDDevice
 
-    return RFIDDevice.objects.filter(purpose=DevicePurpose.TILL, is_active=True)
+    # Card assign (master) readers too: court bookings may use them (checked in services).
+    return RFIDDevice.objects.filter(
+        purpose__in=[DevicePurpose.TILL, DevicePurpose.ENROLL], is_active=True
+    )
 
 
 @extend_schema_field(OpenApiTypes.STR)
 class ReaderField(serializers.SlugRelatedField):
-    """A till reader by its code, e.g. "Reader2"."""
+    """A till reader (or, for court bookings, a card assign reader) by its code."""
 
     def __init__(self, **kwargs):
         super().__init__(slug_field="code", **kwargs)

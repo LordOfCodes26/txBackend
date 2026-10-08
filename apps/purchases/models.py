@@ -49,7 +49,8 @@ class Purchase(TimeStampedModel):
         null=True,
         blank=True,
         related_name="purchases",
-        limit_choices_to={"purpose": "TILL"},
+        # Card assign (master) readers only for court bookings (see services.usable_readers).
+        limit_choices_to={"purpose__in": ["TILL", "ENROLL"]},
     )
     # Address of the seller's PC that created the purchase (for the record).
     client_ip = models.GenericIPAddressField(null=True, blank=True)

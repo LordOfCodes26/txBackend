@@ -82,9 +82,25 @@ def seller_readers(seller_id: int):
     ).order_by("code")
 
 
-def _check_reader(seller_id: int, reader) -> None:
-    if reader is not None and reader.seller_id != seller_id:
-        raise ValidationError({"reader": [_("This till reader belongs to another seller.")]})
+def usable_readers(seller_id: int, kind: str = PurchaseKind.SALE):
+    """The readers a purchase may take its card tap from: the seller's till readers, and
+    for a court booking also every card assign (master) reader."""
+    from django.db.models import Q
+
+    from apps.rfid.models import DevicePurpose, RFIDDevice
+
+    allowed = Q(purpose=DevicePurpose.TILL, seller_id=seller_id)
+    if kind == PurchaseKind.BOOKING:
+        allowed |= Q(purpose=DevicePurpose.ENROLL)
+    return RFIDDevice.objects.filter(allowed, is_active=True).order_by("purpose", "code")
+
+
+def _check_reader(seller_id: int, reader, kind: str = PurchaseKind.SALE) -> None:
+    if reader is None or usable_readers(seller_id, kind).filter(pk=reader.pk).exists():
+        return
+    if reader.purpose != "TILL":
+        raise ValidationError({"reader": [_("Card assign readers only take court bookings.")]})
+    raise ValidationError({"reader": [_("This till reader belongs to another seller.")]})
 
 
 @transaction.atomic
@@ -100,7 +116,7 @@ def create_purchase(
     is used; a seller with several chooses one (`set_reader`) before scanning."""
     _ensure_seller_active(service_position)
     seller_id = service_position.seller_id
-    _check_reader(seller_id, reader)
+    _check_reader(seller_id, reader, kind)
     if reader is None:
         own = list(seller_readers(seller_id)[:2])
         if len(own) == 1:
@@ -120,7 +136,7 @@ def set_reader(*, purchase: Purchase, reader) -> Purchase:
     """Use another of the seller's till readers for this draft. A card tapped on the
     previous reader no longer counts, and the purchase stops waiting for a card."""
     purchase = _lock_draft(purchase)
-    _check_reader(purchase.seller_id, reader)
+    _check_reader(purchase.seller_id, reader, purchase.kind)
     if purchase.reader_id != getattr(reader, "pk", None):
         purchase.reader = reader
         purchase.presented_event = None

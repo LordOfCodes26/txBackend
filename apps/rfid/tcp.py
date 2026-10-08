@@ -234,14 +234,16 @@ def _handle_text_frame(frame: bytes, peer_ip: str, trace: _Trace) -> str:
         return CARD_NO
     trace.note = event.result
 
-    if device.purpose == DevicePurpose.ENROLL:
-        return CARD_OK if known else CARD_NO  # a new card is registered by this tap
-    if device.purpose == DevicePurpose.TILL:
+    if device.purpose in (DevicePurpose.ENROLL, DevicePurpose.TILL):
         from apps.purchases.models import Purchase
 
-        # OK only when a purchase waiting for a card took the tap.
-        taken = Purchase.objects.filter(presented_event=event).exists()
-        return CARD_OK if taken else CARD_NO
+        # OK when a purchase waiting for a card took the tap (a court booking may wait on a
+        # card assign reader).
+        if Purchase.objects.filter(presented_event=event).exists():
+            return CARD_OK
+        if device.purpose == DevicePurpose.ENROLL:
+            return CARD_OK if known else CARD_NO  # a new card is registered by this tap
+        return CARD_NO
     if event.result in (ScanResult.ACCEPTED, ScanResult.DUPLICATE):
         return CARD_OK
     if device.purpose == DevicePurpose.ATTENDANCE and event.result != ScanResult.UNKNOWN_CARD:

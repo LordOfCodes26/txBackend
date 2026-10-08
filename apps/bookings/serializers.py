@@ -6,7 +6,7 @@ from rest_framework import serializers
 from apps.developers.serializers import DeveloperSummarySerializer
 from apps.goods.models import Good, GoodKind
 from apps.goods.serializers import GoodImageSerializer, RentalSettingsSerializer
-from apps.purchases.serializers import ReaderField
+from apps.purchases.serializers import ReaderField, TillReaderSerializer
 from apps.sellers.serializers import SellerSummarySerializer
 
 from .models import Booking
@@ -175,8 +175,9 @@ class CheckoutCreateSerializer(BookingTimeSerializer):
     reader = ReaderField(
         required=False,
         allow_null=True,
-        help_text="Code of the till reader at the desk; detected from the PC's address if "
-        "left out (as for till purchases).",
+        help_text="Code of the reader the developer taps: a till reader of the court's store "
+        "or a card assign (master) reader (see `readers`). Left out: the store's only till "
+        "reader, if it has exactly one.",
     )
 
     def validate_good(self, good):
@@ -192,3 +193,16 @@ class BookingChangeSerializer(BookingTimeSerializer):
 
     def validate_good(self, good):
         return _own_court(self.context, good)
+
+
+class DeskReadersQuerySerializer(serializers.Serializer):
+    good = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.filter(kind=GoodKind.RENTAL), help_text="The court."
+    )
+
+
+class DeskReaderSerializer(TillReaderSerializer):
+    kind = serializers.CharField(
+        source="purpose",
+        help_text="TILL: the court's store's till reader; ENROLL: a card assign (master) reader.",
+    )

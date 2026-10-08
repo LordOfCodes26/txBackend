@@ -407,7 +407,8 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         help_text="Short text for the reader's screen."
     )
     purchase = serializers.SerializerMethodField(
-        help_text="TILL devices: the draft purchase this tap was attached to, or null."
+        help_text="TILL (and card assign) readers: the draft purchase this tap was attached "
+        "to, or null."
     )
 
     class Meta:
@@ -430,6 +431,8 @@ class ScanResponseSerializer(serializers.ModelSerializer):
 
     def get_display_message(self, obj) -> str:
         if obj.device.purpose == DevicePurpose.ENROLL:
+            if obj.developer is not None and self.get_purchase(obj) is not None:
+                return _("%(name)s - enter PIN") % {"name": obj.developer.full_name}
             return _("Card read: %(uid)s") % {"uid": obj.uid}
         if obj.result in ("ACCEPTED", "DUPLICATE") and obj.developer is not None:
             if obj.device.purpose == DevicePurpose.TILL:
@@ -442,7 +445,7 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         return str(DISPLAY_MESSAGES.get(obj.result, obj.result))
 
     def get_purchase(self, obj) -> int | None:
-        if obj.device.purpose != DevicePurpose.TILL:
+        if obj.device.purpose not in (DevicePurpose.TILL, DevicePurpose.ENROLL):
             return None
         if "_purchase" not in self.context:
             from apps.purchases.models import Purchase

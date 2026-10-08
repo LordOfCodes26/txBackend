@@ -313,13 +313,16 @@ def record_scan(
     if source_ip and device.last_ip != source_ip:
         # Shown on the reader list (where the device was last heard from).
         RFIDDevice.objects.filter(pk=device.pk).update(last_ip=source_ip, last_seen_at=now)
-    if device.purpose == DevicePurpose.TILL and event.result == ScanResult.ACCEPTED:
+    # Till readers pay; a card assign (master) reader pays too when a court booking is
+    # waiting on it (otherwise its tap only fills the card assign form).
+    pays = device.purpose in (DevicePurpose.TILL, DevicePurpose.ENROLL)
+    if pays and event.result == ScanResult.ACCEPTED:
         # Separate transaction, after the card lock is released: checkout locks the
         # purchase before the card, so locking them in the other order here could deadlock.
         from apps.purchases.services import present_card
 
         present_card(event)
-    if device.purpose == DevicePurpose.TILL:
+    if pays:
         from apps.realtime.notify import notify_card_tapped
 
         notify_card_tapped(event)

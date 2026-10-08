@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
@@ -754,6 +755,43 @@ def test_booking_with_a_tapped_card(desk, world, settings):
     r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
     assert r.status_code == 201, r.json()
     assert Booking.objects.get().developer == world.developer
+
+
+@pytest.mark.django_db
+def test_booking_with_the_master_reader(desk, world, settings):
+    """The desk may take the tap on a card assign (master) reader, chosen while booking.
+    Till sales never can, and without a waiting booking the tap only fills the assign form."""
+    settings.PURCHASE_ALLOW_MANUAL_CARD_UID = False
+    till, _key = rfid.register_device(
+        actor=None, code="Reader1", purpose="TILL", seller=world.position.seller
+    )
+    master, _key = rfid.register_device(actor=None, code="Master1", purpose="ENROLL")
+    listed = desk.get(f"{CHECKOUT}readers/?good={world.playground.pk}").json()
+    assert [(row["code"], row["kind"]) for row in listed] == [
+        ("Master1", "ENROLL"),
+        ("Reader1", "TILL"),
+    ]
+
+    pid, r = add_booking(desk, world, tomorrow_at(10), reader="Reader1")
+    r = desk.post(f"{CHECKOUT}{pid}/reader/", {"reader": "Master1"})
+    assert r.json()["reader"] == "Master1"
+    rfid.record_scan(device=master, uid=UID)  # not waiting yet: not taken
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"] is None
+    desk.post(f"{CHECKOUT}{pid}/wait/")
+    rfid.record_scan(device=till, uid=UID)  # the other reader: not taken
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"] is None
+    rfid.record_scan(device=master, uid=UID)
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"]["developer"]["full_name"] == "Ada"
+    r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
+    assert r.status_code == 201, r.json()
+    assert Booking.objects.get().developer == world.developer
+
+    # Chosen when opening the checkout, too.
+    _pid, r = add_booking(desk, world, tomorrow_at(15), reader="Master1")
+    assert r.status_code == 201 and r.json()["reader"] == "Master1"
+    # A till sale cannot use it.
+    with pytest.raises(ValidationError):
+        purchases.create_purchase(actor=None, service_position=world.position, reader=master)
 
 
 # --- Changing a paid booking -------------------------------------------------------------

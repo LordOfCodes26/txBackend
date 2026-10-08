@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from apps.goods.models import Good, GoodKind
 from apps.purchases import services as purchase_services
 from apps.purchases.models import Purchase, PurchaseKind
-from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer
+from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer, SetReaderSerializer
 from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import (
     PLAYGROUND,
@@ -30,6 +30,8 @@ from .serializers import (
     BookingChangeSerializer,
     BookingSerializer,
     CheckoutCreateSerializer,
+    DeskReaderSerializer,
+    DeskReadersQuerySerializer,
     RentalSerializer,
     ScheduleSerializer,
     SlotSerializer,
@@ -194,8 +196,19 @@ class BookingCheckoutViewSet(
         "cancel": ["booking.cancel"],
         "wait": ["booking.create"],
         "stop_waiting": ["booking.create"],
+        "readers": ["booking.create"],
+        "set_reader": ["booking.create"],
     }
-    seller_actions = ("create", "retrieve", "confirm", "cancel", "wait", "stop_waiting")
+    seller_actions = (
+        "create",
+        "retrieve",
+        "confirm",
+        "cancel",
+        "wait",
+        "stop_waiting",
+        "readers",
+        "set_reader",
+    )
     seller_area = PLAYGROUND
     playground_filter = Q()  # every booking payment: the playground is shared
     scope_permission = "booking.view"
@@ -269,6 +282,29 @@ class BookingCheckoutViewSet(
         """ "Scan card to book": the next tap on the desk's reader (within 2 minutes) goes to
         this booking."""
         return self._respond(purchase_services.wait_for_card(purchase=self.get_object()))
+
+    @extend_schema(
+        parameters=[DeskReadersQuerySerializer], responses=DeskReaderSerializer(many=True)
+    )
+    @action(detail=False, methods=["get"])
+    def readers(self, request):
+        """The readers a court's booking can take the card tap from, to choose at the desk:
+        the till readers of the court's store, then every card assign (master) reader."""
+        query = DeskReadersQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        seller_id = query.validated_data["good"].service_position.seller_id
+        readers = purchase_services.usable_readers(seller_id, PurchaseKind.BOOKING)
+        return Response(DeskReaderSerializer(readers, many=True).data)
+
+    @extend_schema(request=SetReaderSerializer, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="reader")
+    def set_reader(self, request, pk=None):
+        """Take the card tap from another reader (a till or card assign reader)."""
+        purchase = self.get_object()
+        serializer = SetReaderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase_services.set_reader(purchase=purchase, reader=serializer.validated_data["reader"])
+        return self._respond(purchase)
 
     @extend_schema(request=None, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="stop-waiting")
