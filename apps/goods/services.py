@@ -71,8 +71,6 @@ RENTAL_FIELDS = [
     "opening_time",
     "closing_time",
     "weekdays",
-    "max_slots_per_booking",
-    "max_slots_per_day",
     "max_days_ahead",
 ]
 

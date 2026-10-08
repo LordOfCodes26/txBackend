@@ -1,7 +1,6 @@
 from datetime import date, datetime, timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -16,7 +15,6 @@ from .exceptions import (
     AlreadyBookedThen,
     BookingPriceDifferent,
     BookingStarted,
-    DailyLimitReached,
     InvalidSlot,
     RentalNotAvailable,
     SlotUnavailable,
@@ -104,11 +102,8 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
     end = start + step * slots
     opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
 
-    if not 1 <= slots <= rules.max_slots_per_booking:
-        raise InvalidSlot(
-            _("Book between 1 and %(max)s slots.") % {"max": rules.max_slots_per_booking},
-            details={"max_slots_per_booking": rules.max_slots_per_booking},
-        )
+    if slots < 1:
+        raise InvalidSlot(_("Book at least one slot."))
     if start <= timezone.now():
         raise InvalidSlot(_("This slot has already started."))
     if day > timezone.localdate() + timedelta(days=rules.max_days_ahead):
@@ -129,35 +124,6 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
             },
         )
     return end
-
-
-def _ensure_daily_limit(
-    rules: RentalSettings, good: Good, developer, start, slots, exclude: int | None = None
-) -> None:
-    """One developer may book at most `max_slots_per_day` slots of a rental per local day,
-    across all their bookings. Safe under concurrency: the caller holds the developer's
-    account lock, so one developer's bookings are processed one at a time."""
-    day = timezone.localtime(start).date()
-    day_start = _local(day, datetime.min.time())
-    already = (
-        Booking.objects.filter(
-            good=good,
-            developer=developer,
-            start__gte=day_start,
-            start__lt=day_start + timedelta(days=1),
-        )
-        .exclude(pk=exclude)
-        .aggregate(n=Sum("slots"))["n"]
-        or 0
-    )
-    if already + slots > rules.max_slots_per_day:
-        raise DailyLimitReached(
-            details={
-                "max_slots_per_day": rules.max_slots_per_day,
-                "already_booked": already,
-                "remaining": max(rules.max_slots_per_day - already, 0),
-            }
-        )
 
 
 def time_range(*, good: Good, day: date, start_time, end_time) -> tuple[datetime, int]:
@@ -228,7 +194,6 @@ def book_lines(
         end = _validate_slot(rules, item.start, item.quantity)
         if Booking.objects.filter(good=good, start__lt=end, end__gt=item.start).exists():
             raise SlotUnavailable(details={"good": good.pk, "start": item.start.isoformat()})
-        _ensure_daily_limit(rules, good, developer, item.start, item.quantity)
         _ensure_developer_free(developer, item.start, end)
         try:
             with transaction.atomic():
@@ -329,7 +294,6 @@ def change_booking(
         .exists()
     ):
         raise SlotUnavailable()
-    _ensure_daily_limit(rules, target, booking.developer, start, slots, exclude=booking.pk)
     _ensure_developer_free(booking.developer, start, end, exclude=booking.pk)
 
     old = {

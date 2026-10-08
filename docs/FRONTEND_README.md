@@ -357,7 +357,6 @@ Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASS
 `PIN_NOT_SET`, `CARD_NOT_PRESENTED`, `MANUAL_CARD_ENTRY_DISABLED`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
 `details: {locked_until}`),
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
-`DAILY_LIMIT_REACHED` (`details: {max_slots_per_day, already_booked, remaining}`),
 `ALREADY_BOOKED_THEN` (`details: {booking, good, start, end}`),
 `IN_USE` (deleting something still referenced, e.g. a building that has doors), `CONFLICT`.
 
@@ -596,11 +595,10 @@ Seller `status`: `ACTIVE`, `SUSPENDED`, `CLOSED`.
     `rental` object; courts are booked through `/bookings/checkout/`, never added to a till purchase.
     ```json
     "rental": {"slot_minutes": 60, "opening_time": "08:00", "closing_time": "20:00",
-               "weekdays": [0,1,2,3,4,5,6], "max_slots_per_booking": 3,
-               "max_slots_per_day": 3, "max_days_ahead": 14}
+               "weekdays": [0,1,2,3,4,5,6], "max_days_ahead": 14}
     ```
-    `weekdays`: 0 = Monday … 6 = Sunday. `max_slots_per_day` limits one developer's total
-    slots on this rental per day, across all their bookings. A rental's `price` must be
+    `weekdays`: 0 = Monday … 6 = Sunday. There is no limit on slots per booking or per
+    developer per day: any free run within opening hours. A rental's `price` must be
     above 0. Times are company-local. Rental goods are created
     and edited with JSON (not multipart) because of the nested object.
 - Filter the catalogue by `kind` (e.g. the till shows `kind=PRODUCT` and `kind=SERVICE`).
@@ -795,7 +793,7 @@ the card holder gets the booking and pays for it. Until it starts, a paid bookin
 - **For now the new time must cost the same** as what was paid (same number of slots ×
   same price), so no money moves: otherwise `BOOKING_PRICE_DIFFERENT` with
   `details: {paid, new_price}`. (Charging/refunding a difference may come later.)
-- The same rules as a new booking apply (free time, slot grid, opening hours, daily limit,
+- The same rules as a new booking apply (free time, slot grid, opening hours,
   one court at a time), ignoring the booking's own old time, so moving 10–12 to 11–13 works.
 - The desk does it for the developer; no card tap or PIN is needed. Every change is in the
   audit log (`booking.changed`, old and new time).
@@ -821,8 +819,7 @@ periods; neighbouring slots with the same state are merged:
 | `NOT_YET_OPEN` | Beyond `max_days_ahead` | Disabled, "bookable from …" |
 
 `open: false` means the court is closed that weekday (`periods` is empty). Times are in the
-company timezone. A FREE period may be longer than one booking allows; keep the selection
-within `rental.max_slots_per_booking` slots. Drafts at other desks don't block a period, so
+company timezone. A booking may take any run of free slots within a FREE period. Drafts at other desks don't block a period, so
 refresh the schedule after `SLOT_UNAVAILABLE`, or when a `purchase_confirmed` event arrives.
 
 **Errors** (nothing is charged on any error):
@@ -832,7 +829,6 @@ refresh the schedule after `SLOT_UNAVAILABLE`, or when a `purchase_confirmed` ev
 | `INVALID_SLOT` (400) | Times not on the grid (`details.slot_minutes`), outside opening hours, a closed day, in the past (also: the slot started while waiting), too far ahead, or too many slots | Reload the schedule; offer only grid times |
 | `SLOT_UNAVAILABLE` (409) | Someone booked an overlapping time on this court first | "Just taken", reload the schedule |
 | `ALREADY_BOOKED_THEN` (409) | The card holder already holds another court at that time; `details`: `booking`, `good`, `start`, `end` | "Ada already has *Football field* 10:00–12:00" |
-| `DAILY_LIMIT_REACHED` (409) | Too many slots on this court that day for the card holder; `details`: `max_slots_per_day`, `already_booked`, `remaining` | "1 slot left today for Ada" |
 | `RENTAL_NOT_AVAILABLE` (409) | The court was deactivated, has no rules, its seller is closed, or a change to another seller's court | Remove it from the list |
 | `BOOKING_STARTED` / `BOOKING_PRICE_DIFFERENT` (409) | Changing a booking (see above) | Show `message` |
 | `GOOD_NOT_AVAILABLE` (409) | A court sent to the till's `/items/`, or goods added to a booking checkout | Use the right screen |

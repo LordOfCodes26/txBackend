@@ -64,7 +64,6 @@ def world(db, make_user):
         slot_minutes=60,
         opening_time=time(8),
         closing_time=time(20),
-        max_slots_per_booking=3,
         max_days_ahead=14,
     )
     developer = Developer.objects.create(employee_number="E1", full_name="Ada")
@@ -161,7 +160,7 @@ def test_seller_creates_rental_with_settings(auth_client, world):
     body = response.json()
     assert (body["kind"], body["track_stock"], body["quantity"]) == ("RENTAL", False, 0)
     assert body["rental"]["weekdays"] == [5, 6]
-    assert body["rental"]["max_slots_per_booking"] == 4
+    assert "max_slots_per_booking" not in body["rental"]
 
     # Editing rules is audited with the rest of the good.
     client.patch(f"{GOODS}{body['id']}/", {"rental": {"closing_time": "19:00"}}, format="json")
@@ -422,9 +421,12 @@ def test_invalid_slots(desk, world, start_fn):
 
 
 @pytest.mark.django_db
-def test_too_many_slots(desk, world):
-    r = book(desk, world, tomorrow_at(9), slots=4)
-    assert r.json()["error"]["details"] == {"max_slots_per_booking": 3}
+def test_no_limit_on_slots_per_booking_or_per_day(desk, world):
+    """Any run of free slots within opening hours, as often as the wallet allows."""
+    assert book(desk, world, tomorrow_at(8), slots=4).status_code == 201
+    assert book(desk, world, tomorrow_at(13), slots=1).status_code == 201
+    assert balance(world) == Decimal("0.00")
+    assert book(desk, world, tomorrow_at(9), slots=0).status_code == 400
 
 
 @pytest.mark.django_db
@@ -536,35 +538,6 @@ def test_two_developers_race_for_the_same_slot(world, make_user):
 
 
 @pytest.mark.django_db
-def test_daily_limit_cannot_be_bypassed_with_several_bookings(desk, world):
-    RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=4)
-    assert book(desk, world, tomorrow_at(8), slots=3).status_code == 201
-    r = book(desk, world, tomorrow_at(11), slots=2)
-    assert r.status_code == 409
-    assert r.json()["error"] == {
-        "code": "DAILY_LIMIT_REACHED",
-        "message": "You have reached today's booking limit for this rental.",
-        "details": {"max_slots_per_day": 4, "already_booked": 3, "remaining": 1},
-    }
-    assert book(desk, world, tomorrow_at(11), slots=1).status_code == 201
-    assert book(desk, world, tomorrow_at(15), slots=1).status_code == 409
-    # The limit is per day: the day after is fine.
-    assert book(desk, world, tomorrow_at(8) + timedelta(days=1)).status_code == 201
-
-
-@pytest.mark.django_db
-def test_daily_limit_is_per_developer(desk, auth_client, make_user, world):
-    RentalSettings.objects.filter(good=world.playground).update(max_slots_per_day=1)
-    assert book(desk, world, tomorrow_at(8)).status_code == 201
-    other = Developer.objects.create(employee_number="E2", full_name="Bob")
-    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=other)
-    acc = finance.open_account(other)
-    finance.deposit(actor=None, developer=other, amount="50.00", idempotency_key="seed-0002")
-    finance.set_pin(actor=None, account=acc, pin="5082", current_pin=None)
-    assert book(desk, world, tomorrow_at(9), pin="5082", uid="04BB").status_code == 201
-
-
-@pytest.mark.django_db
 def test_rental_without_rules_is_hidden_and_not_bookable(desk, world):
     bare = Good.objects.create(
         service_position=world.position,
@@ -613,7 +586,6 @@ def test_one_developer_cannot_hold_two_courts_at_once(desk, world):
         slot_minutes=60,
         opening_time=time(8),
         closing_time=time(20),
-        max_slots_per_booking=3,
     )
     first = book(desk, world, tomorrow_at(10), slots=2)  # Playground 10-12
     assert first.status_code == 201
@@ -666,7 +638,6 @@ def test_same_developer_racing_for_two_courts_gets_one(world):
         slot_minutes=60,
         opening_time=time(8),
         closing_time=time(20),
-        max_slots_per_booking=3,
     )
     start = tomorrow_at(10)
     barrier = threading.Barrier(2)

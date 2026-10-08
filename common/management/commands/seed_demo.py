@@ -212,8 +212,6 @@ class Command(BaseCommand):
             "slot_minutes": 60,
             "opening_time": time(7),
             "closing_time": time(21),
-            "max_slots_per_booking": 2,
-            "max_slots_per_day": 2,
             "max_days_ahead": 14,
         }
         for name, price in [
