@@ -129,7 +129,7 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         parameters=[GoodStatisticsQuerySerializer],
         responses=GoodStatisticsSerializer(many=True),
     )
-    @action(detail=False, methods=["get"])
+    @action(detail=False, methods=["get"], pagination_class=None)
     def statistics(self, request):
         """Per good (not courts): units sold, paid purchases and money taken in the period
         (`confirmed_after` / `confirmed_before`), and the stock now. The goods are those of
