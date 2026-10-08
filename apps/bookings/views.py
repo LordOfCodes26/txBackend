@@ -10,7 +10,13 @@ from apps.purchases import services as purchase_services
 from apps.purchases.models import Purchase, PurchaseKind
 from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer
 from apps.rfid.scope import BuildingScopedMixin
-from apps.sellers.access import PLAYGROUND, CatalogPermission, SellerScopedQuerysetMixin
+from apps.sellers.access import (
+    PLAYGROUND,
+    CatalogPermission,
+    SellerScopedQuerysetMixin,
+    acting_positions,
+    acting_seller,
+)
 from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
@@ -49,6 +55,20 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = []
     search_fields = ["name", "description", "service_position__seller__name"]
     ordering_fields = ["name", "price"]
+
+    def get_queryset(self):
+        """Everyone sees every court, except a store's own login: its desk shows its own
+        courts (a counter manager's: their counters'), the only ones it can book."""
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.has_rbac_perm("booking.view"):
+            return qs
+        seller = acting_seller(user)
+        if seller is None:
+            return qs
+        qs = qs.filter(service_position__seller=seller)
+        positions = acting_positions(user)
+        return qs if positions is None else qs.filter(service_position__in=positions)
 
     @extend_schema(parameters=[AvailabilityQuerySerializer], responses=SlotSerializer(many=True))
     @action(detail=True, methods=["get"])

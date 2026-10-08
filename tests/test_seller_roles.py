@@ -152,3 +152,39 @@ def test_migration_gives_every_seller_both_roles(make_user):
     assert not Role.objects.filter(code="SELLER").exists()
     assert set(seller.roles.values_list("code", flat=True)) == set(SELLER_ROLES)
     assert set(other.roles.values_list("code", flat=True)) == {Roles.DEVELOPER}
+
+
+@pytest.fixture
+def other_court(db):
+    """Another store's court."""
+    seller = Seller.objects.create(name="Pool")
+    position = ServicePosition.objects.create(seller=seller, name="Pool desk")
+    court = Good.objects.create(
+        service_position=position,
+        name="Lane 1",
+        price="5.00",
+        kind=GoodKind.RENTAL,
+        track_stock=False,
+    )
+    RentalSettings.objects.create(
+        good=court, slot_minutes=60, opening_time=time(8), closing_time=time(20)
+    )
+    return court
+
+
+def schedule_courts(client):
+    response = client.get("/api/v1/rentals/schedule/?date=2030-01-07")
+    assert response.status_code == 200, response.content
+    return {court["good"] for court in response.json()["courts"]}
+
+
+def test_a_sellers_desk_shows_only_its_own_courts(auth_client, store, other_court):
+    client = auth_client(store.login(*PLAYGROUND_ONLY))
+    assert schedule_courts(client) == {store.court.pk}
+    assert ids(client.get("/api/v1/rentals/")) == {store.court.pk}
+    assert client.get(f"/api/v1/rentals/{other_court.pk}/").status_code == 404
+
+
+def test_developers_and_staff_see_every_court(auth_client, store, other_court, make_user):
+    for user in (make_user(Roles.DEVELOPER), make_user(Roles.FINANCE_MANAGER)):
+        assert schedule_courts(auth_client(user)) == {store.court.pk, other_court.pk}
