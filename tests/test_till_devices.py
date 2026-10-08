@@ -143,6 +143,7 @@ def test_tap_is_presented_to_open_purchase_and_confirmed(shop):
 
     seen = shop["seller_client"].get(f"{PURCHASES}{pid}/").json()["presented_card"]
     assert seen["developer"]["full_name"] == "Dev 1"
+    assert seen["balance"] == "50.00"  # the seller sees whether it covers the total
 
     r = confirm(shop, pid)
     assert r.status_code == 201, r.json()

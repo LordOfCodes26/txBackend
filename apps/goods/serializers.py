@@ -254,3 +254,30 @@ class InventoryMovementSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class GoodStatisticsQuerySerializer(serializers.Serializer):
+    confirmed_after = serializers.DateTimeField(
+        required=False, help_text="Sales paid at or after this moment (ISO 8601)."
+    )
+    confirmed_before = serializers.DateTimeField(
+        required=False, help_text="Sales paid before this moment (ISO 8601)."
+    )
+
+
+class GoodStatisticsSerializer(serializers.Serializer):
+    """One good's paid till sales in a period, and its stock now."""
+
+    good = serializers.IntegerField()
+    name = serializers.CharField()
+    kind = serializers.CharField()
+    seller_name = serializers.CharField()
+    service_position_name = serializers.CharField()
+    price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    sold = serializers.IntegerField(help_text="Units sold.")
+    sales = serializers.IntegerField(help_text="Paid purchases it was in.")
+    money = serializers.DecimalField(max_digits=14, decimal_places=2, help_text="Money taken.")
+    stock = serializers.IntegerField(
+        allow_null=True, help_text="Units in stock now; null when stock is not tracked."
+    )
+    currency = serializers.CharField()

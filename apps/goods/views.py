@@ -1,3 +1,7 @@
+from decimal import Decimal
+
+from django.conf import settings
+from django.db.models import Count, Sum
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
@@ -24,6 +28,8 @@ from .models import Good, GoodKind, InventoryMovement
 from .serializers import (
     GoodImageSerializer,
     GoodSerializer,
+    GoodStatisticsQuerySerializer,
+    GoodStatisticsSerializer,
     InventoryMovementSerializer,
     StockChangeSerializer,
 )
@@ -37,6 +43,7 @@ ALL_GOOD_ACTIONS = (
     "stock",
     "upload_image",
     "delete_image",
+    "statistics",
 )
 
 
@@ -60,6 +67,7 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         "stock": ["good.stock"],
         "upload_image": ["good.update"],
         "delete_image": ["good.update"],
+        "statistics": ["good.view", "purchase.view"],
     }
     seller_actions = ALL_GOOD_ACTIONS
     scope_permission = "good.view"
@@ -116,6 +124,68 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     def perform_destroy(self, instance):
         self._check_court(instance.kind)
         services.delete_good(actor=self.request.user, good=instance)
+
+    @extend_schema(
+        parameters=[GoodStatisticsQuerySerializer],
+        responses=GoodStatisticsSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"])
+    def statistics(self, request):
+        """Per good (not courts): units sold, paid purchases and money taken in the period
+        (`confirmed_after` / `confirmed_before`), and the stock now. The goods are those of
+        the list (a seller: its own store's goods), with the list's filters."""
+        from apps.purchases.models import PurchaseItem, PurchaseKind, PurchaseStatus
+
+        query = GoodStatisticsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        goods = (
+            self.filter_queryset(self.get_queryset())
+            .exclude(kind=GoodKind.RENTAL)
+            .select_related("service_position__seller")
+            .order_by()
+        )
+        items = PurchaseItem.objects.filter(
+            good__in=goods,
+            purchase__status=PurchaseStatus.CONFIRMED,
+            purchase__kind=PurchaseKind.SALE,
+        )
+        if "confirmed_after" in query.validated_data:
+            items = items.filter(
+                purchase__confirmed_at__gte=query.validated_data["confirmed_after"]
+            )
+        if "confirmed_before" in query.validated_data:
+            items = items.filter(
+                purchase__confirmed_at__lt=query.validated_data["confirmed_before"]
+            )
+        totals = {
+            row["good"]: row
+            for row in items.values("good").annotate(
+                sold=Sum("quantity"),
+                sales=Count("purchase", distinct=True),
+                money=Sum("line_total"),
+            )
+        }
+        zero = Decimal("0.00")
+        rows = []
+        for good in goods:
+            sold = totals.get(good.pk, {})
+            rows.append(
+                {
+                    "good": good.pk,
+                    "name": good.name,
+                    "kind": good.kind,
+                    "seller_name": good.service_position.seller.name,
+                    "service_position_name": good.service_position.name,
+                    "price": good.price,
+                    "sold": sold.get("sold") or 0,
+                    "sales": sold.get("sales") or 0,
+                    "money": sold.get("money") or zero,
+                    "stock": good.quantity if good.track_stock else None,
+                    "currency": settings.CURRENCY,
+                }
+            )
+        rows.sort(key=lambda row: (-row["money"], -row["sold"], row["name"]))
+        return Response(GoodStatisticsSerializer(rows, many=True).data)
 
     def _good_response(self, good, code=status.HTTP_200_OK):
         good = self.get_queryset().get(pk=good.pk)

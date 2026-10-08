@@ -84,8 +84,21 @@ class PresentedCardSerializer(serializers.Serializer):
     """Who tapped on the counter's reader, for the seller's screen."""
 
     developer = DeveloperSummarySerializer(source="presented_event.developer")
+    balance = serializers.SerializerMethodField(
+        help_text="Their wallet balance now, so the seller can see whether it covers the total."
+    )
     presented_at = serializers.DateTimeField()
     expires_at = serializers.SerializerMethodField()
+
+    def get_balance(self, purchase) -> str | None:
+        from apps.finance.models import DeveloperAccount
+
+        balance = (
+            DeveloperAccount.objects.filter(developer_id=purchase.presented_event.developer_id)
+            .values_list("balance", flat=True)
+            .first()
+        )
+        return None if balance is None else f"{balance:.2f}"
 
     def get_expires_at(self, purchase) -> str:
         window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
