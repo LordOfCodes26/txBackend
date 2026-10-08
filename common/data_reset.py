@@ -26,7 +26,7 @@ from apps.accounts.models import Role, User
 from apps.attendance.models import AttendanceRecord, DailyAttendance, DeveloperPresence
 from apps.audit.models import AuditLog
 from apps.audit.services import record_audit
-from apps.bookings.models import Booking
+from apps.bookings.models import Booking, PlaygroundCheck
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
 from apps.goods.models import Good, InventoryMovement, MovementKind
@@ -60,6 +60,7 @@ DELETED = {
     "purchases": Purchase,
     "purchase_items": PurchaseItem,
     "bookings": Booking,
+    "playground_checks": PlaygroundCheck,
     "stock_movements": InventoryMovement,
     "audit_log": AuditLog,
 }

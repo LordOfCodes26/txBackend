@@ -69,6 +69,7 @@ AREAS: dict[str, dict[str, str]] = {
         "booking.change": "Move a booking to another time or court",
         "booking.cancel": "Cancel a court checkout that is not paid yet",
         "court.manage": "Add courts and change their prices and rules",
+        "booking.check": "Check developers in at the playground (card tap on a check reader)",
     },
     "Stores and goods": {
         "seller.view": "See stores and their counters",
@@ -121,6 +122,9 @@ class Roles:
     GOODS_SELLER = "GOODS_SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
     BUILDING_OWNER = "BUILDING_OWNER"
+    # At the playground: a developer taps their card on the checker's reader, and the
+    # check page shows whether they booked (and checks them in).
+    PLAYGROUND_CHECKER = "PLAYGROUND_CHECKER"
 
 
 @dataclass(frozen=True)
@@ -204,6 +208,11 @@ ROLES: dict[str, RoleSpec] = {
         "Every court, court booking and the playground desk (shared, no store needed)",
     ),
     Roles.GOODS_SELLER: RoleSpec("Goods seller", "Own store's goods, stock, till and sales"),
+    Roles.PLAYGROUND_CHECKER: RoleSpec(
+        "Playground checker",
+        "Checks with a card tap that developers at the playground booked it",
+        {"booking.check"},
+    ),
 }
 
 for _code, _spec in ROLES.items():

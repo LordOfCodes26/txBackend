@@ -899,3 +899,113 @@ def test_only_playground_sellers_change_bookings(auth_client, make_user, world, 
     other = make_user(Roles.PLAYGROUND_SELLER)
     r = change(auth_client(other), paid.pk, date=day, start_time="14:00", end_time="16:00")
     assert r.status_code == 200, r.json()
+
+
+# --- Checking in at the playground ------------------------------------------------------
+
+CHECKS = "/api/v1/bookings/checks/"
+
+
+@pytest.fixture
+def gate(world, make_user):
+    """A playground checker with a check reader assigned, and Ada's booking at `start`."""
+
+    class G:
+        pass
+
+    g = G()
+    g.checker = make_user(Roles.PLAYGROUND_CHECKER)
+    g.reader, _key = rfid.register_device(
+        actor=None, code="Gate1", purpose="CHECK", checker=g.checker
+    )
+
+    def booking(start):
+        purchase = Purchase.objects.create(
+            seller=world.position.seller, service_position=world.position, kind="BOOKING"
+        )
+        return Booking.objects.create(
+            good=world.playground,
+            developer=world.developer,
+            purchase=purchase,
+            start=start,
+            end=start + timedelta(hours=1),
+            slots=1,
+        )
+
+    g.booking = booking
+    return g
+
+
+@pytest.mark.django_db
+def test_a_tap_checks_the_developer_in(gate, world, auth_client, make_user):
+    later = gate.booking(timezone.now() + timedelta(minutes=80))
+    soon = gate.booking(timezone.now() + timedelta(minutes=15))
+    event, _ = rfid.record_scan(device=gate.reader, uid=UID)
+    soon.refresh_from_db()
+    assert soon.checked_in_at is not None and soon.checked_in_by == gate.checker
+    later.refresh_from_db()
+    assert later.checked_in_at is None
+    assert AuditLog.objects.filter(action="booking.checked_in").count() == 1
+
+    client = auth_client(gate.checker)
+    rows = client.get(CHECKS).json()["results"]
+    assert [(row["result"], row["booking"]["id"]) for row in rows] == [("CHECKED_IN", soon.pk)]
+    assert rows[0]["developer"]["full_name"] == "Ada"
+    assert rows[0]["message"].startswith("Ada - checked in: Playground")
+
+    rfid.record_scan(device=gate.reader, uid=UID)  # again: already checked in
+    rfid.record_scan(device=gate.reader, uid="04FFFFFF")  # unknown card
+    newer = client.get(f"{CHECKS}?after={rows[0]['id']}").json()["results"]
+    assert [(row["result"], row["scan_result"]) for row in newer] == [
+        ("CARD_REFUSED", "UNKNOWN_CARD"),
+        ("ALREADY_CHECKED_IN", ""),
+    ]
+    assert [row["code"] for row in client.get(f"{CHECKS}readers/").json()] == ["Gate1"]
+
+    # Another checker sees only their own readers' taps; others may not look.
+    other = auth_client(make_user(Roles.PLAYGROUND_CHECKER))
+    assert other.get(CHECKS).json()["count"] == 0
+    assert auth_client(make_user(Roles.PLAYGROUND_SELLER)).get(CHECKS).status_code == 403
+    assert auth_client(make_user(Roles.ADMIN)).get(CHECKS).json()["count"] == 3
+
+
+@pytest.mark.django_db
+def test_no_booking_now(gate, world):
+    gate.booking(timezone.now() + timedelta(minutes=25))  # more than 20 minutes away
+    event, _ = rfid.record_scan(device=gate.reader, uid=UID)
+    assert event.playground_check.result == "NO_BOOKING"
+    assert Booking.objects.get().checked_in_at is None
+
+
+@pytest.mark.django_db
+def test_a_checked_in_booking_cannot_move(gate, world, desk):
+    booking = gate.booking(tomorrow_at(10))
+    Booking.objects.filter(pk=booking.pk).update(checked_in_at=timezone.now())
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, booking.pk, date=day, start_time="14:00", end_time="15:00")
+    assert r.json()["error"]["code"] == "BOOKING_CHECKED_IN"
+
+
+@pytest.mark.django_db
+def test_check_readers_are_assigned_to_checkers(auth_client, make_user, gate):
+    admin = auth_client(make_user(Roles.ADMIN))
+    seller = make_user(Roles.PLAYGROUND_SELLER)
+    r = admin.patch(f"/api/v1/rfid/devices/{gate.reader.pk}/", {"checker": seller.pk})
+    assert "checker" in r.json()["error"]["details"]
+    other = make_user(Roles.PLAYGROUND_CHECKER)
+    r = admin.patch(f"/api/v1/rfid/devices/{gate.reader.pk}/", {"checker": other.pk})
+    assert r.status_code == 200 and r.json()["checker"] == other.pk, r.json()
+    till = {"code": "Reader9", "purpose": "TILL", "checker": other.pk}
+    assert "checker" in admin.post("/api/v1/rfid/devices/", till).json()["error"]["details"]
+
+
+@pytest.mark.django_db
+def test_the_check_reader_answers_ok_or_denied(gate, world):
+    from apps.rfid.tcp import handle_frame
+
+    frame = f"ID:Gate1,TYPE:Master,UID={UID}".encode()
+    assert handle_frame(frame, "10.0.0.9") == "CARD_DENIED\r\n"  # no booking now
+    gate.booking(timezone.now() + timedelta(minutes=5))
+    assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"
+    assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"  # already checked in
+    assert handle_frame(b"ID:Gate1,TYPE:Master,UID=04FFFFFF", "10.0.0.9") == "CARD_NO\r\n"

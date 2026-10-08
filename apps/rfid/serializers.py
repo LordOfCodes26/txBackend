@@ -122,6 +122,9 @@ class RFIDCardAssignmentSerializer(serializers.ModelSerializer):
 class RFIDDeviceSerializer(serializers.ModelSerializer):
     online = serializers.BooleanField(source="is_online", read_only=True)
     seller_name = serializers.CharField(source="seller.name", read_only=True, default=None)
+    checker_name = serializers.SerializerMethodField(
+        help_text="CHECK readers: the playground checker it is assigned to."
+    )
     building_name = serializers.CharField(source="building.name", read_only=True, default=None)
 
     class Meta:
@@ -137,6 +140,8 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             "allowed_ip",
             "seller",
             "seller_name",
+            "checker",
+            "checker_name",
             "building_name",
             "is_active",
             "online",
@@ -173,9 +178,22 @@ class RFIDDeviceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"seller": [_("Only till readers belong to a seller.")]}
             )
+        checker = attrs.get("checker", getattr(self.instance, "checker", None))
+        if purpose != DevicePurpose.CHECK and checker is not None:
+            raise serializers.ValidationError(
+                {"checker": [_("Only playground check readers have a checker.")]}
+            )
+        if checker is not None and not checker.has_rbac_perm("booking.check"):
+            raise serializers.ValidationError(
+                {"checker": [_("This user cannot check developers in at the playground.")]}
+            )
         code = attrs.get("code", getattr(self.instance, "code", ""))
         self._check_code(code.strip(), purpose, allowed_ip)
         return attrs
+
+    def get_checker_name(self, obj) -> str | None:
+        checker = obj.checker
+        return (checker.full_name or checker.username) if checker else None
 
     def _check_code(self, code, purpose, allowed_ip):
         """Tills and card assign readers are found by their ID alone, so it is unique.
@@ -366,6 +384,9 @@ class ScanSerializer(serializers.Serializer):
         purpose = self.context["device"].purpose
         if purpose == DevicePurpose.TILL and kind not in ("", PAY):
             raise serializers.ValidationError({"type": [_("Till readers send `pay`.")]})
+        if purpose == DevicePurpose.CHECK:
+            attrs["direction"] = ""  # whatever the reader sends: it only reads the UID
+            return attrs
         if purpose == DevicePurpose.ENROLL:
             if kind not in ("", MASTER):
                 raise serializers.ValidationError(
@@ -389,6 +410,24 @@ class ScanSerializer(serializers.Serializer):
                 _("Event time is in the future; check the reader clock.")
             )
         return value
+
+
+def check_message(event) -> str:
+    """The reader's screen after a playground check-in tap."""
+    check = getattr(event, "playground_check", None)
+    if check is None:
+        return str(DISPLAY_MESSAGES.get(event.result, event.result))
+    if check.result == "CARD_REFUSED":
+        return str(DISPLAY_MESSAGES.get(check.scan_result, check.scan_result))
+    name = event.developer.full_name if event.developer else ""
+    if check.result == "NO_BOOKING":
+        return _("%(name)s - no booking now") % {"name": name}
+    booking = check.booking
+    when = f"{timezone.localtime(booking.start):%H:%M}-{timezone.localtime(booking.end):%H:%M}"
+    values = {"name": name, "court": booking.good.name, "time": when}
+    if check.result == "ALREADY_CHECKED_IN":
+        return _("%(name)s - already checked in: %(court)s %(time)s") % values
+    return _("%(name)s - checked in: %(court)s %(time)s") % values
 
 
 DISPLAY_MESSAGES = {
@@ -430,6 +469,8 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         return obj.result in ("ACCEPTED", "DUPLICATE")
 
     def get_display_message(self, obj) -> str:
+        if obj.device.purpose == DevicePurpose.CHECK:
+            return check_message(obj)
         if obj.device.purpose == DevicePurpose.ENROLL:
             if obj.developer is not None and self.get_purchase(obj) is not None:
                 return _("%(name)s - enter PIN") % {"name": obj.developer.full_name}

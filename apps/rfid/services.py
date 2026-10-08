@@ -39,6 +39,7 @@ DEVICE_FIELDS = [
     "building",
     "allowed_ip",
     "seller",
+    "checker",
     "is_active",
 ]
 REJECTED_DEVELOPER_STATUSES = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
@@ -326,6 +327,10 @@ def record_scan(
         from apps.realtime.notify import notify_card_tapped
 
         notify_card_tapped(event)
+    if device.purpose == DevicePurpose.CHECK:
+        from apps.bookings.services import check_in
+
+        check_in(event)
     return event, True
 
 

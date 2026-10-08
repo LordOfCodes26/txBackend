@@ -263,6 +263,8 @@ PURCHASE_PIN_MAX_ATTEMPTS = env.int("PURCHASE_PIN_MAX_ATTEMPTS", default=5)
 PURCHASE_PIN_LOCKOUT_MINUTES = env.int("PURCHASE_PIN_LOCKOUT_MINUTES", default=15)
 # A card tapped on a till reader is valid for confirming the purchase for this long.
 PURCHASE_CARD_PRESENTATION_SECONDS = env.int("PURCHASE_CARD_PRESENTATION_SECONDS", default=120)
+# A playground check-in tap counts a booking from this many minutes before it starts.
+PLAYGROUND_CHECK_IN_EARLY_MINUTES = env.int("PLAYGROUND_CHECK_IN_EARLY_MINUTES", default=20)
 # Allow the browser to send a typed card UID at checkout. Off: the card must come from the
 # counter's TILL device, so a seller cannot charge an arbitrary card number.
 PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", default=False)

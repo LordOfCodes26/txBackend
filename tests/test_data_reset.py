@@ -101,7 +101,7 @@ def test_summary_lists_what_goes_and_what_stays(world, admin):
     assert d["developers"] == 1 and d["cards"] == 1 and d["scans"] == 1  # the door scan
     assert d["tcp_log"] == 1 and d["attendance_records"] == 1 and d["purchases"] == 1
     assert d["transactions"] == 2 and d["audit_log"] > 0
-    assert k["readers"] == 2 and k["sellers"] == 1 and k["goods"] == 1 and k["roles"] == 9
+    assert k["readers"] == 2 and k["sellers"] == 1 and k["goods"] == 1 and k["roles"] == 10
 
 
 def test_reset_deletes_data_and_keeps_the_setup(world, admin, fake_backup):
@@ -124,7 +124,7 @@ def test_reset_deletes_data_and_keeps_the_setup(world, admin, fake_backup):
     # Kept: users (with roles), readers, buildings and their owners, the store and goods.
     assert set(User.objects.values_list("username", flat=True)) == users_before
     assert User.objects.get(username="ada").roles.filter(code=Roles.DEVELOPER).exists()
-    assert Role.objects.count() == 9
+    assert Role.objects.count() == 10
     assert set(RFIDDevice.objects.values_list("code", flat=True)) == {"Door1", "Reader1"}
     assert RFIDDevice.objects.get(code="Reader1").seller.name == "Cafe"
     assert Building.objects.get().owners.count() == 1

@@ -102,6 +102,8 @@ class DevicePurpose(models.TextChoices):
     TILL = "TILL", "Till card reader (program on a seller's computer)"
     # Sends $ID:Master1,TYPE:Master,UID=...$: staff tap a card to fill the assign form.
     ENROLL = "ENROLL", "Card assign reader"
+    # At the playground: a tap checks the developer in to their booking (apps.bookings).
+    CHECK = "CHECK", "Playground check reader"
 
 
 class Building(TimeStampedModel):
@@ -175,6 +177,14 @@ class RFIDDevice(TimeStampedModel):
         blank=True,
         related_name="till_readers",
     )
+    # CHECK readers: the playground checker whose check page shows its taps.
+    checker = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="check_readers",
+    )
     allowed_ip = models.GenericIPAddressField(
         null=True,
         blank=True,
@@ -203,6 +213,10 @@ class RFIDDevice(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(purpose=DevicePurpose.TILL) | Q(seller__isnull=True),
                 name="rfid_only_tills_have_a_seller",
+            ),
+            models.CheckConstraint(
+                condition=Q(purpose=DevicePurpose.CHECK) | Q(checker__isnull=True),
+                name="rfid_only_check_readers_have_a_checker",
             ),
             # Tills and card assign readers are identified by their ID alone.
             models.UniqueConstraint(

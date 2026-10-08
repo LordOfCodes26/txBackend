@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, RangeOperators
 from django.db import models
@@ -37,6 +38,16 @@ class Booking(TimeStampedModel):
     slots = models.PositiveSmallIntegerField()
     # How often the booking was moved to another time or court (see services.change_booking).
     change_count = models.PositiveSmallIntegerField(default=0)
+    # Checked in at the playground: the developer tapped their card on a check reader.
+    checked_in_at = models.DateTimeField(null=True, blank=True)
+    checked_in_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="The checker whose reader took the tap.",
+    )
 
     class Meta:
         ordering = ["-start", "-id"]
@@ -64,3 +75,43 @@ class Booking(TimeStampedModel):
 
     def __str__(self):
         return f"{self.good} {self.start:%Y-%m-%d %H:%M} ({self.developer})"
+
+
+class CheckResult(models.TextChoices):
+    CHECKED_IN = "CHECKED_IN", "Checked in"
+    ALREADY_CHECKED_IN = "ALREADY_CHECKED_IN", "Already checked in"
+    NO_BOOKING = "NO_BOOKING", "No booking now"
+    CARD_REFUSED = "CARD_REFUSED", "Card not accepted"
+
+
+class PlaygroundCheck(models.Model):
+    """One card tap on a playground check reader and what it found."""
+
+    event = models.OneToOneField(
+        "rfid.RFIDEvent", on_delete=models.CASCADE, related_name="playground_check"
+    )
+    reader = models.ForeignKey("rfid.RFIDDevice", on_delete=models.CASCADE, related_name="+")
+    checker = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    # A log of taps: it goes with the developer or booking when they are deleted for good.
+    developer = models.ForeignKey(
+        Developer, on_delete=models.CASCADE, null=True, blank=True, related_name="+"
+    )
+    booking = models.ForeignKey(
+        Booking, on_delete=models.CASCADE, null=True, blank=True, related_name="checks"
+    )
+    result = models.CharField(max_length=20, choices=CheckResult.choices)
+    # CARD_REFUSED: the scan's own result (UNKNOWN_CARD, BLOCKED_CARD, ...).
+    scan_result = models.CharField(max_length=30, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-id"]
+
+    def __str__(self):
+        return f"{self.reader} {self.result} ({self.developer})"

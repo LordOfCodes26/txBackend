@@ -8,7 +8,13 @@ from rest_framework.response import Response
 from apps.goods.models import Good, GoodKind
 from apps.purchases import services as purchase_services
 from apps.purchases.models import Purchase, PurchaseKind
-from apps.purchases.serializers import ConfirmSerializer, PurchaseSerializer, SetReaderSerializer
+from apps.purchases.serializers import (
+    ConfirmSerializer,
+    PurchaseSerializer,
+    SetReaderSerializer,
+    TillReaderSerializer,
+)
+from apps.rfid.models import DevicePurpose, RFIDDevice
 from apps.rfid.scope import BuildingScopedMixin
 from apps.sellers.access import (
     PLAYGROUND,
@@ -21,10 +27,11 @@ from apps.sellers.access import (
 from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
+from common.permissions import HasPermissions
 
 from . import services
 from .filters import BookingFilter
-from .models import Booking
+from .models import Booking, PlaygroundCheck
 from .serializers import (
     AvailabilityQuerySerializer,
     BookingChangeSerializer,
@@ -32,6 +39,8 @@ from .serializers import (
     CheckoutCreateSerializer,
     DeskReaderSerializer,
     DeskReadersQuerySerializer,
+    PlaygroundCheckSerializer,
+    PlaygroundChecksQuerySerializer,
     RentalSerializer,
     ScheduleSerializer,
     SlotSerializer,
@@ -111,7 +120,10 @@ class BookingViewSet(
     """
 
     queryset = Booking.objects.select_related(
-        "good__service_position__seller", "developer", "purchase__account_transaction"
+        "good__service_position__seller",
+        "developer",
+        "purchase__account_transaction",
+        "checked_in_by",
     )
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
@@ -311,3 +323,43 @@ class BookingCheckoutViewSet(
     def stop_waiting(self, request, pk=None):
         """The desk closed the scan dialog: taps no longer go to this booking."""
         return self._respond(purchase_services.stop_waiting(purchase=self.get_object()))
+
+
+class PlaygroundCheckViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Check-in taps at the playground, newest first. A developer taps their card on a
+    playground check reader; the booking running now (or starting within
+    PLAYGROUND_CHECK_IN_EARLY_MINUTES) is checked in. Checkers see the taps of the readers
+    assigned to them (`readers`); users with `reader.view` see every check reader's.
+    Poll with `?after=<last id>`."""
+
+    queryset = PlaygroundCheck.objects.select_related(
+        "event__developer", "developer", "booking__good", "reader"
+    )
+    serializer_class = PlaygroundCheckSerializer
+    permission_classes = [HasPermissions]
+    required_permissions = {"list": ["booking.check"], "readers": ["booking.check"]}
+
+    def _readers(self):
+        readers = RFIDDevice.objects.filter(purpose=DevicePurpose.CHECK, is_active=True)
+        if self.request.user.has_rbac_perm("reader.view"):
+            return readers
+        return readers.filter(checker=self.request.user)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if not self.request.user.has_rbac_perm("reader.view"):
+            qs = qs.filter(reader__checker=self.request.user)
+        query = PlaygroundChecksQuerySerializer(data=self.request.query_params)
+        query.is_valid(raise_exception=True)
+        after = query.validated_data.get("after")
+        return qs if after is None else qs.filter(pk__gt=after)
+
+    @extend_schema(parameters=[PlaygroundChecksQuerySerializer])
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(responses=TillReaderSerializer(many=True))
+    @action(detail=False, methods=["get"])
+    def readers(self, request):
+        """The check readers whose taps this user sees."""
+        return Response(TillReaderSerializer(self._readers(), many=True).data)

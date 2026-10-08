@@ -13,13 +13,14 @@ from apps.sellers.models import SellerStatus
 
 from .exceptions import (
     AlreadyBookedThen,
+    BookingCheckedIn,
     BookingPriceDifferent,
     BookingStarted,
     InvalidSlot,
     RentalNotAvailable,
     SlotUnavailable,
 )
-from .models import Booking
+from .models import Booking, CheckResult, PlaygroundCheck
 
 
 def _local(day: date, t) -> datetime:
@@ -267,6 +268,8 @@ def change_booking(
     booking = Booking.objects.select_for_update().select_related("purchase").get(pk=booking.pk)
     if booking.start <= timezone.now():
         raise BookingStarted()
+    if booking.checked_in_at is not None:
+        raise BookingCheckedIn()
     target = good or booking.good
     DeveloperAccount.objects.select_for_update().filter(developer=booking.developer_id).first()
     courts = {
@@ -322,3 +325,55 @@ def change_booking(
         },
     )
     return booking
+
+
+# --- Checking in at the playground -------------------------------------------------------
+
+
+def booking_to_check(developer, now=None) -> Booking | None:
+    """The developer's booking a check-in tap counts for: running now, or starting within
+    PLAYGROUND_CHECK_IN_EARLY_MINUTES. The earliest first."""
+    from django.conf import settings
+
+    now = now or timezone.now()
+    early = timedelta(minutes=settings.PLAYGROUND_CHECK_IN_EARLY_MINUTES)
+    return (
+        Booking.objects.select_for_update()
+        .filter(developer=developer, start__lte=now + early, end__gt=now)
+        .order_by("start", "id")
+        .first()
+    )
+
+
+@transaction.atomic
+def check_in(event) -> PlaygroundCheck:
+    """A card tap on a playground check reader: check the card holder in to their booking
+    (see `booking_to_check`) and keep what the tap found for the checker's page."""
+    from apps.rfid.models import ScanResult
+
+    reader = event.device
+    check = PlaygroundCheck(
+        event=event, reader=reader, checker_id=reader.checker_id, developer=event.developer
+    )
+    if event.result not in (ScanResult.ACCEPTED, ScanResult.DUPLICATE) or event.developer is None:
+        check.result, check.scan_result = CheckResult.CARD_REFUSED, event.result
+    else:
+        booking = booking_to_check(event.developer)
+        check.booking = booking
+        if booking is None:
+            check.result = CheckResult.NO_BOOKING
+        elif booking.checked_in_at is not None:
+            check.result = CheckResult.ALREADY_CHECKED_IN
+        else:
+            check.result = CheckResult.CHECKED_IN
+            booking.checked_in_at = timezone.now()
+            booking.checked_in_by_id = reader.checker_id
+            booking.save(update_fields=["checked_in_at", "checked_in_by", "updated_at"])
+            record_audit(
+                "booking.checked_in",
+                actor=reader.checker,
+                entity=booking,
+                new_values={"reader": reader.code},
+            )
+    check.save()
+    return check

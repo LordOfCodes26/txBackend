@@ -40,3 +40,9 @@ class BookingPriceDifferent(DomainError):
     default_detail = _(
         "The new time must cost the same as the booking (same number of slots and price)."
     )
+
+
+class BookingCheckedIn(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "BOOKING_CHECKED_IN"
+    default_detail = _("The developer has already checked in to this booking.")

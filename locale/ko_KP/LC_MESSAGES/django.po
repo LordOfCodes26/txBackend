@@ -1059,3 +1059,24 @@ msgstr "작성중인 구입만 지불할수 있습니다."
 
 msgid "This developer has no active card; send a `uid` instead."
 msgstr "이 개발자에게는 활성카드가 없습니다. 대신 `uid`를 보내십시오."
+
+msgid "The developer has already checked in to this booking."
+msgstr "개발자는 이미 이 예약에 입장확인되였습니다."
+
+#, python-format
+msgid "%(name)s - no booking now"
+msgstr "%(name)s - 지금 예약이 없습니다"
+
+#, python-format
+msgid "%(name)s - already checked in: %(court)s %(time)s"
+msgstr "%(name)s - 이미 입장확인됨: %(court)s %(time)s"
+
+#, python-format
+msgid "%(name)s - checked in: %(court)s %(time)s"
+msgstr "%(name)s - 입장확인: %(court)s %(time)s"
+
+msgid "Only playground check readers have a checker."
+msgstr "운동장확인판독기만 확인자를 가질수 있습니다."
+
+msgid "This user cannot check developers in at the playground."
+msgstr "이 사용자는 운동장 입장확인을 할수 없습니다."
