@@ -191,13 +191,15 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
 1. **Certificate:** put the company's certificate in place, then reload nginx:
    `sudo cp cert.pem /etc/backend/tls/cert.pem; sudo cp key.pem /etc/backend/tls/key.pem; sudo systemctl reload nginx`
 2. **Roles:** a first install sets the company's roles and their permissions from
-   `deploy/roles.json` (Admin always has everything; Seller works on its own store only).
+   `deploy/roles.json` (Admin always has everything; a Goods seller works on its own store only, a Playground
+   seller on every court).
    Change them later in the web app under **Users → Roles**. Upgrades never overwrite them.
    To copy roles from another server: `<command>` = `export_roles --output roles.json` there,
    then `load_roles roles.json` here.
 3. **Logins for each role** (usernames `admin`, `boss`, …):
    `<command>` = `create_role_users`. Each password is **shown once**.
-4. **Link the accounts:** a SELLER login to its store, BUILDING_OWNER / BUILDING_MANAGER
+4. **Link the accounts:** a Goods seller / Playground seller login to its store (and a
+   Playground checker to a store that checks bookings, e.g. the gym), BUILDING_OWNER / BUILDING_MANAGER
    logins to their buildings, DEVELOPER logins to developer profiles (in the web app).
 5. **Doors and tills:** see **10. Connecting the door devices** and **11. Connecting the till
    readers**.
@@ -679,6 +681,56 @@ Services: `frontend`, `backend-web`, `backend-ws`, `backend-tcp`, `backend-worke
 `postgresql`, `redis-server`. Logs: `sudo journalctl -u frontend -n 100` (or the service named).
 Restart all: `sudo systemctl restart frontend backend-web backend-ws backend-tcp backend-worker`.
 
+## 13a. Date, time and time zone
+
+The backend has no clock of its own: it uses the **server's clock**. Its **time zone** is a
+separate setting (`TIME_ZONE` in `/etc/backend/backend.env`) that decides what "today" is for
+attendance, bookings and the courts' opening hours. Keep both right.
+
+See what they are now:
+
+```bash
+timedatectl                                   # server clock, time zone, NTP on/off
+sudo grep TIME_ZONE /etc/backend/backend.env  # the backend's time zone
+```
+
+**Set the date and time by hand** (no time server):
+
+```bash
+sudo timedatectl set-ntp false
+sudo timedatectl set-time "2026-10-09 14:30:00"   # local time, in the server's time zone
+sudo hwclock --systohc                            # keep it after a reboot
+```
+
+**Or use the company's time server** (best: the clock never drifts):
+
+```bash
+echo -e "[Time]\nNTP=192.168.1.5" | sudo tee /etc/systemd/timesyncd.conf.d/backend.conf
+sudo timedatectl set-ntp true && sudo systemctl restart systemd-timesyncd
+timedatectl timesync-status
+```
+
+**Change the time zone:** set the server and the backend to the same zone, then restart:
+
+```bash
+sudo timedatectl set-timezone Asia/Pyongyang
+sudo sed -i 's/^TIME_ZONE=.*/TIME_ZONE=Asia\/Pyongyang/' /etc/backend/backend.env
+sudo systemctl restart backend-web backend-ws backend-tcp backend-worker
+sudo mgmt status
+```
+
+(`timedatectl list-timezones` lists the names.) The development copy has its own
+`TIME_ZONE` in `~/backend-dev/.env`; change it there too if you test with it.
+
+Be careful:
+
+- **Set the clock right once, and don't move it backwards** once people use the system.
+  Scans, payments, bookings and backups are stamped with it; going back makes new records
+  look older than existing ones and confuses "already checked in" and the 20-minute
+  booking check.
+- After a big jump, signed-in users may be logged out (their login tokens are time-based):
+  they sign in again.
+
 ## 14. Where things are
 
 | What | Where |
@@ -706,6 +758,7 @@ For a server that only runs the system: `sudo bash install-all.sh --dev-user non
 | The site doesn't open from other PCs | Firewall (port 443) and the server IP: `hostname -I` |
 | `npm run dev` says the port is in use | Another dev server runs: stop it, or `npm run dev -- -p 3001` |
 | Door scans don't arrive | See section 10, "If a door doesn't work" |
+| Times, dates or "today" look wrong | Check the clock and the time zone: section 13a |
 | A till or card assign reader gets no answer or `CARD_NO` | See section 11, "If a reader doesn't work" |
 
 ## 17. Removing it
