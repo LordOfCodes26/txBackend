@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, RangeOperators
 from django.db import models
@@ -40,13 +39,13 @@ class Booking(TimeStampedModel):
     change_count = models.PositiveSmallIntegerField(default=0)
     # Checked in at the playground: the developer tapped their card on a check reader.
     checked_in_at = models.DateTimeField(null=True, blank=True)
-    checked_in_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+    checked_in_at_store = models.ForeignKey(
+        "sellers.Seller",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="+",
-        help_text="The checker whose reader took the tap.",
+        help_text="The store (e.g. the gym counter) whose till reader took the tap.",
     )
 
     class Meta:
@@ -85,18 +84,14 @@ class CheckResult(models.TextChoices):
 
 
 class PlaygroundCheck(models.Model):
-    """One card tap on a playground check reader and what it found."""
+    """One card tap on the till reader of a store that checks bookings, and what it found."""
 
     event = models.OneToOneField(
         "rfid.RFIDEvent", on_delete=models.CASCADE, related_name="playground_check"
     )
     reader = models.ForeignKey("rfid.RFIDDevice", on_delete=models.CASCADE, related_name="+")
-    checker = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="+",
+    seller = models.ForeignKey(
+        "sellers.Seller", on_delete=models.PROTECT, related_name="playground_checks"
     )
     # A log of taps: it goes with the developer or booking when they are deleted for good.
     developer = models.ForeignKey(

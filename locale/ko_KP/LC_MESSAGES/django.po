@@ -1074,9 +1074,3 @@ msgstr "%(name)s - 이미 입장확인됨: %(court)s %(time)s"
 #, python-format
 msgid "%(name)s - checked in: %(court)s %(time)s"
 msgstr "%(name)s - 입장확인: %(court)s %(time)s"
-
-msgid "Only playground check readers have a checker."
-msgstr "운동장확인판독기만 확인자를 가질수 있습니다."
-
-msgid "This user cannot check developers in at the playground."
-msgstr "이 사용자는 운동장 입장확인을 할수 없습니다."

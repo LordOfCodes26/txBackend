@@ -11,7 +11,7 @@ from rest_framework import serializers
 
 from apps.accounts import services as accounts
 from apps.accounts.models import Role, User
-from apps.accounts.rbac import SELLER_ROLES
+from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.accounts.serializers import UserCreateSerializer
 from apps.rfid import services as rfid
 from apps.rfid.models import Building, DevicePurpose, RFIDDevice
@@ -31,6 +31,11 @@ class StoreSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, allow_blank=True)
     phone = serializers.CharField(max_length=50, required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+    checks_bookings = serializers.BooleanField(
+        default=False,
+        help_text="E.g. the gym counter: its till reader checks developers in to their "
+        "playground bookings. A new login also gets the playground checker role.",
+    )
     # Login: a new seller user, an existing one, or none yet
     login = serializers.ChoiceField(choices=LOGIN_MODES, default="new")
     username = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -125,7 +130,12 @@ def create_store(*, actor, data: dict) -> dict:
             full_name=data.get("contact_name") or data["name"],
         )
         # Both parts of a store; take away the one the store doesn't run (users page).
-        for code in SELLER_ROLES:
+        codes = (
+            [*SELLER_ROLES, Roles.PLAYGROUND_CHECKER]
+            if data.get("checks_bookings")
+            else SELLER_ROLES
+        )
+        for code in codes:
             accounts.assign_role(actor=actor, user=user, role=Role.objects.get(code=code))
     seller = services.create_seller(
         actor=actor,
@@ -134,6 +144,7 @@ def create_store(*, actor, data: dict) -> dict:
         email=data.get("email", ""),
         phone=data.get("phone", ""),
         notes=data.get("notes", ""),
+        checks_bookings=data.get("checks_bookings", False),
         user=user,
     )
     position = services.create_position(

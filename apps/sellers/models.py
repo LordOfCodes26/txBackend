@@ -34,6 +34,12 @@ class Seller(TimeStampedModel):
         max_length=10, choices=SellerStatus.choices, default=SellerStatus.ACTIVE
     )
     notes = models.TextField(blank=True)
+    # E.g. the gym counter: a tap on this store's till reader checks the developer in to
+    # their playground booking, unless a sale here is waiting for the card.
+    checks_bookings = models.BooleanField(
+        default=False,
+        help_text="Its till readers check developers in to their playground bookings.",
+    )
 
     class Meta:
         ordering = ["name", "id"]

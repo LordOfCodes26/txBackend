@@ -347,13 +347,14 @@ def booking_to_check(developer, now=None) -> Booking | None:
 
 @transaction.atomic
 def check_in(event) -> PlaygroundCheck:
-    """A card tap on a playground check reader: check the card holder in to their booking
-    (see `booking_to_check`) and keep what the tap found for the checker's page."""
+    """A card tap on the till reader of a store that checks bookings (e.g. the gym counter)
+    with no sale waiting for it: check the card holder in to their booking (see
+    `booking_to_check`) and keep what the tap found for the store's Booking check page."""
     from apps.rfid.models import ScanResult
 
     reader = event.device
     check = PlaygroundCheck(
-        event=event, reader=reader, checker_id=reader.checker_id, developer=event.developer
+        event=event, reader=reader, seller_id=reader.seller_id, developer=event.developer
     )
     if event.result not in (ScanResult.ACCEPTED, ScanResult.DUPLICATE) or event.developer is None:
         check.result, check.scan_result = CheckResult.CARD_REFUSED, event.result
@@ -367,13 +368,26 @@ def check_in(event) -> PlaygroundCheck:
         else:
             check.result = CheckResult.CHECKED_IN
             booking.checked_in_at = timezone.now()
-            booking.checked_in_by_id = reader.checker_id
-            booking.save(update_fields=["checked_in_at", "checked_in_by", "updated_at"])
+            booking.checked_in_at_store_id = reader.seller_id
+            booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
             record_audit(
                 "booking.checked_in",
-                actor=reader.checker,
+                actor=None,
                 entity=booking,
-                new_values={"reader": reader.code},
+                new_values={"reader": reader.code, "store": reader.seller_id},
             )
     check.save()
     return check
+
+
+def checks_here(device) -> bool:
+    """Does a tap on this till reader check bookings? Its store checks bookings, and no
+    sale or booking payment there is waiting for a card on it."""
+    from apps.purchases.services import draft_for_reader
+    from apps.rfid.models import DevicePurpose
+
+    if device.purpose != DevicePurpose.TILL or device.seller_id is None:
+        return False
+    if not device.seller.checks_bookings:
+        return False
+    return draft_for_reader(device.pk) is None

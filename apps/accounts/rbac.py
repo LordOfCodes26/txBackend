@@ -69,7 +69,7 @@ AREAS: dict[str, dict[str, str]] = {
         "booking.change": "Move a booking to another time or court",
         "booking.cancel": "Cancel a court checkout that is not paid yet",
         "court.manage": "Add courts and change their prices and rules",
-        "booking.check": "Check developers in at the playground (card tap on a check reader)",
+        "booking.check": "Check developers in to their bookings (card tap at a checking store)",
     },
     "Stores and goods": {
         "seller.view": "See stores and their counters",
@@ -122,8 +122,8 @@ class Roles:
     GOODS_SELLER = "GOODS_SELLER"
     BUILDING_MANAGER = "BUILDING_MANAGER"
     BUILDING_OWNER = "BUILDING_OWNER"
-    # At the playground: a developer taps their card on the checker's reader, and the
-    # check page shows whether they booked (and checks them in).
+    # The login (or counter manager) of a store that checks bookings, e.g. the gym counter:
+    # a tap on its till reader shows whether the developer booked, and checks them in.
     PLAYGROUND_CHECKER = "PLAYGROUND_CHECKER"
 
 

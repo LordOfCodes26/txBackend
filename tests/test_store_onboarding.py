@@ -124,3 +124,18 @@ def test_only_who_may_create_sellers(auth_client, make_user, role):
     client = auth_client(make_user(role))
     r = client.post(URL, {"name": "Shop", "login": "none"}, format="json")
     assert r.status_code == 403 and not Seller.objects.exists()
+
+
+def test_a_gym_that_checks_bookings(admin):
+    """E.g. the gym counter: its till reader checks playground bookings, and its new login
+    is also a playground checker."""
+    r = admin.post(
+        URL,
+        {"name": "Gym", "username": "gym", "password": PASSWORD, "checks_bookings": True},
+        format="json",
+    )
+    assert r.status_code == 201, r.json()
+    assert Seller.objects.get(pk=r.json()["seller"]).checks_bookings is True
+    login = User.objects.get(username="gym")
+    roles = set(login.roles.values_list("code", flat=True))
+    assert roles == {*SELLER_ROLES, Roles.PLAYGROUND_CHECKER}

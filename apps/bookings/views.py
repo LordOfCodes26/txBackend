@@ -24,7 +24,7 @@ from apps.sellers.access import (
     acting_seller,
     works_playground,
 )
-from apps.sellers.models import SellerStatus
+from apps.sellers.models import Seller, SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
 from common.permissions import HasPermissions
@@ -123,7 +123,7 @@ class BookingViewSet(
         "good__service_position__seller",
         "developer",
         "purchase__account_transaction",
-        "checked_in_by",
+        "checked_in_at_store",
     )
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
@@ -325,30 +325,36 @@ class BookingCheckoutViewSet(
         return self._respond(purchase_services.stop_waiting(purchase=self.get_object()))
 
 
+def checking_store(user):
+    """The active store that checks bookings whose login (or counter manager) the user is."""
+    return (
+        Seller.objects.filter(checks_bookings=True, status=SellerStatus.ACTIVE)
+        .filter(Q(user=user) | Q(positions__manager=user))
+        .distinct()
+        .first()
+    )
+
+
 class PlaygroundCheckViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    """Check-in taps at the playground, newest first. A developer taps their card on a
-    playground check reader; the booking running now (or starting within
-    PLAYGROUND_CHECK_IN_EARLY_MINUTES) is checked in. Checkers see the taps of the readers
-    assigned to them (`readers`); users with `reader.view` see every check reader's.
-    Poll with `?after=<last id>`."""
+    """Booking checks, newest first. A store that checks bookings (e.g. the gym counter):
+    a tap on its till reader, with no sale waiting for it, checks the developer in to the
+    booking running now (or starting within PLAYGROUND_CHECK_IN_EARLY_MINUTES). Its
+    checkers (the store's login or counter manager, with `booking.check`) see its taps;
+    users with `reader.view` see every store's. Poll with `?after=<last id>`."""
 
     queryset = PlaygroundCheck.objects.select_related(
-        "event__developer", "developer", "booking__good", "reader"
+        "event__developer", "developer", "booking__good", "reader", "seller"
     )
     serializer_class = PlaygroundCheckSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["booking.check"], "readers": ["booking.check"]}
 
-    def _readers(self):
-        readers = RFIDDevice.objects.filter(purpose=DevicePurpose.CHECK, is_active=True)
-        if self.request.user.has_rbac_perm("reader.view"):
-            return readers
-        return readers.filter(checker=self.request.user)
-
     def get_queryset(self):
         qs = super().get_queryset()
-        if not self.request.user.has_rbac_perm("reader.view"):
-            qs = qs.filter(reader__checker=self.request.user)
+        user = self.request.user
+        if not user.has_rbac_perm("reader.view"):
+            store = checking_store(user)
+            qs = qs.filter(seller=store) if store else qs.none()
         query = PlaygroundChecksQuerySerializer(data=self.request.query_params)
         query.is_valid(raise_exception=True)
         after = query.validated_data.get("after")
@@ -361,5 +367,11 @@ class PlaygroundCheckViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     @extend_schema(responses=TillReaderSerializer(many=True))
     @action(detail=False, methods=["get"])
     def readers(self, request):
-        """The check readers whose taps this user sees."""
-        return Response(TillReaderSerializer(self._readers(), many=True).data)
+        """The till readers whose taps check bookings for this user: their store's."""
+        readers = RFIDDevice.objects.filter(
+            purpose=DevicePurpose.TILL, is_active=True, seller__checks_bookings=True
+        )
+        if not request.user.has_rbac_perm("reader.view"):
+            store = checking_store(request.user)
+            readers = readers.filter(seller=store) if store else readers.none()
+        return Response(TillReaderSerializer(readers.order_by("code"), many=True).data)

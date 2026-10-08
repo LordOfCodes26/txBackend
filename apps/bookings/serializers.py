@@ -105,8 +105,11 @@ class BookingSerializer(serializers.ModelSerializer):
     date = serializers.SerializerMethodField(help_text="Company-local day.")
     start_time = serializers.SerializerMethodField(help_text="Local start, HH:MM.")
     end_time = serializers.SerializerMethodField(help_text="Local end, HH:MM.")
-    checked_in_by_name = serializers.SerializerMethodField(
-        help_text="The checker whose reader checked the developer in."
+    checked_in_at_store_name = serializers.CharField(
+        source="checked_in_at_store.name",
+        read_only=True,
+        default=None,
+        help_text="The store whose till reader checked the developer in (e.g. the gym).",
     )
 
     class Meta:
@@ -126,7 +129,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "slots",
             "change_count",
             "checked_in_at",
-            "checked_in_by_name",
+            "checked_in_at_store_name",
             "total",
             "currency",
             "balance_after",
@@ -146,10 +149,6 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def get_end_time(self, obj) -> str:
         return f"{timezone.localtime(obj.end):%H:%M}"
-
-    def get_checked_in_by_name(self, obj) -> str | None:
-        user = obj.checked_in_by
-        return (user.full_name or user.username) if user else None
 
 
 def _own_court(context, good):
@@ -242,6 +241,7 @@ class PlaygroundCheckSerializer(serializers.ModelSerializer):
     booking = CheckedBookingSerializer(read_only=True)
     reader = serializers.CharField(source="reader.code", read_only=True)
     reader_name = serializers.CharField(source="reader.name", read_only=True)
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
     uid = serializers.CharField(source="event.uid", read_only=True)
     message = serializers.SerializerMethodField(help_text="What the reader's screen showed.")
 
@@ -256,6 +256,7 @@ class PlaygroundCheckSerializer(serializers.ModelSerializer):
             "booking",
             "reader",
             "reader_name",
+            "seller_name",
             "uid",
             "created_at",
         ]

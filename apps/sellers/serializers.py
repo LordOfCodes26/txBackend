@@ -2,6 +2,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.accounts.models import User
+from apps.accounts.rbac import Roles
 from apps.rfid.models import Building
 
 from .access import has_seller_role
@@ -16,8 +17,12 @@ class SellerSummarySerializer(serializers.ModelSerializer):
 
 def _ensure_seller_login(user):
     """Only active users with a seller role (playground or goods) can run a store or a
-    position."""
-    if user is not None and (not user.is_active or not has_seller_role(user)):
+    position, or a playground checker (the login of a store that checks bookings, e.g.
+    the gym counter)."""
+    if user is None:
+        return user
+    checker = user.roles.filter(code=Roles.PLAYGROUND_CHECKER).exists()
+    if not user.is_active or not (has_seller_role(user) or checker):
         raise serializers.ValidationError(_("This user doesn't have a seller role."))
     return user
 
@@ -43,6 +48,7 @@ class SellerSerializer(serializers.ModelSerializer):
             "phone",
             "status",
             "notes",
+            "checks_bookings",
             "created_at",
             "updated_at",
         ]
