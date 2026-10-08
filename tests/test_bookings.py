@@ -1029,3 +1029,15 @@ def test_the_gym_reader_answers_ok_or_denied(gate, world):
     assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"
     assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"  # already checked in
     assert handle_frame(b"ID:Gate1,TYPE:Pay,UID=04FFFFFF", "10.0.0.9") == "CARD_NO\r\n"
+
+
+@pytest.mark.django_db
+def test_a_checker_sees_the_desk_read_only(gate, world, auth_client):
+    booking = gate.booking(tomorrow_at(10))
+    client = auth_client(gate.checker)
+    assert [row["id"] for row in client.get(BOOKINGS).json()["results"]] == [booking.pk]
+    day = tomorrow_at(0).date().isoformat()
+    move = change(client, booking.pk, date=day, start_time="14:00", end_time="15:00")
+    assert move.status_code == 403
+    _, r = add_booking(client, world, tomorrow_at(15))
+    assert r.status_code == 403

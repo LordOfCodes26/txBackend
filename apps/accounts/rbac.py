@@ -210,8 +210,8 @@ ROLES: dict[str, RoleSpec] = {
     Roles.GOODS_SELLER: RoleSpec("Goods seller", "Own store's goods, stock, till and sales"),
     Roles.PLAYGROUND_CHECKER: RoleSpec(
         "Playground checker",
-        "Checks with a card tap that developers at the playground booked it",
-        {"booking.check"},
+        "Checks with a card tap that developers at the playground booked it; sees the desk",
+        {"booking.check", "booking.view"},
     ),
 }
 

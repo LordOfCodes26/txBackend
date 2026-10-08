@@ -187,9 +187,10 @@
     {
       "code": "PLAYGROUND_CHECKER",
       "name": "Playground checker",
-      "description": "Checks with a card tap that developers at the playground booked it",
+      "description": "Checks with a card tap that developers at the playground booked it; sees the desk",
       "permissions": [
-        "booking.check"
+        "booking.check",
+        "booking.view"
       ]
     }
   ]
