@@ -40,7 +40,7 @@ def _own_developer(request) -> Developer:
 
 
 class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = DeveloperAccount.objects.select_related("developer")
+    queryset = DeveloperAccount.objects.select_related("developer__building")
     building_lookup = "developer__building"
     serializer_class = DeveloperAccountSerializer
     permission_classes = [HasPermissions]
@@ -58,7 +58,14 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
     }
     filterset_class = DeveloperAccountFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
-    ordering_fields = ["balance", "developer__full_name", "updated_at"]
+    ordering_fields = [
+        "balance",
+        "developer__full_name",
+        "developer__employee_number",
+        "developer__building__name",
+        "status",
+        "updated_at",
+    ]
 
     @extend_schema(responses=DeveloperAccountSerializer)
     @action(detail=False, methods=["get"])

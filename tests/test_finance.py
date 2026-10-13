@@ -282,6 +282,18 @@ def test_account_filters(finance, developer):
     assert names("department=research") == ["Bob"]
     assert names("ordering=-balance") == ["Bob", "Ada"]
 
+    # By home building: the building is part of each wallet.
+    from apps.rfid.models import Building
+
+    b1 = Building.objects.create(code="B1", name="Building 1")
+    Developer.objects.filter(pk=other.pk).update(building=b1)
+    assert names(f"building={b1.pk}") == ["Bob"]
+    rows = finance.get(f"{ACCOUNTS}?ordering=developer__employee_number").json()["results"]
+    assert [(r["developer"]["employee_number"], r["building_name"]) for r in rows] == [
+        ("E1", None),
+        ("E2", "Building 1"),
+    ]
+
 
 @pytest.mark.django_db
 def test_new_developers_get_an_account(auth_client, make_user):

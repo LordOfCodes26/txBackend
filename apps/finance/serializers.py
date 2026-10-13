@@ -13,12 +13,20 @@ from .models import AccountTransaction, DeveloperAccount
 class DeveloperAccountSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(read_only=True)
     currency = serializers.SerializerMethodField()
+    building = serializers.IntegerField(
+        source="developer.building_id", read_only=True, default=None, help_text="Home building."
+    )
+    building_name = serializers.CharField(
+        source="developer.building.name", read_only=True, default=None
+    )
 
     class Meta:
         model = DeveloperAccount
         fields = [
             "id",
             "developer",
+            "building",
+            "building_name",
             "balance",
             "currency",
             "status",
