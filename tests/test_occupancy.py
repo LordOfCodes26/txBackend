@@ -167,6 +167,14 @@ def test_occupancy_and_people_endpoints(site, auth_client, make_user):
         ("Cy", "B2"),
     ]
     assert people[0]["device_code"] == "Door1" and people[0]["since"]
+    # The card's printed number, and the home building (Bob lives in B1, visits B2).
+    RFIDCard.objects.filter(pk=site["devs"]["Ada"][1].pk).update(label="0001")
+    Developer.objects.filter(full_name="Bob").update(building=site["b1"])
+    people = {p["developer"]["full_name"]: p for p in client.get(PEOPLE).json()["results"]}
+    assert people["Ada"]["card_label"] == "0001" and people["Ada"]["home_building"] is None
+    assert (
+        people["Bob"]["home_building"]["code"] == "B1" and people["Bob"]["building"]["code"] == "B2"
+    )
 
     def names(query):
         return [

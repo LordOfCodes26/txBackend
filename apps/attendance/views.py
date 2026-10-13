@@ -1,3 +1,4 @@
+from django.db.models import OuterRef
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -125,7 +126,15 @@ class OccupancyPeopleView(generics.ListAPIView):
     filter_backends = []
 
     def get_queryset(self):
+        from apps.developers.views import with_card_label
+
         qs = occupancy.inside().order_by("developer__full_name", "developer_id")
+        # The card each person holds now (its printed number) and their home building.
+        qs = qs.select_related("developer__building").annotate(
+            card_label=with_card_label(Developer.objects.all())
+            .filter(pk=OuterRef("developer"))
+            .values("card_label")[:1]
+        )
         scope = building_scope(self.request.user, "attendance.view")
         if scope is not None:
             qs = qs.filter(building_id__in=scope)

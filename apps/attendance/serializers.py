@@ -110,15 +110,33 @@ class PersonInsideSerializer(serializers.ModelSerializer):
     building = serializers.SerializerMethodField()
     device_code = serializers.CharField(source="record.device.code", read_only=True, default=None)
     device_name = serializers.SerializerMethodField(help_text="The door unit's name or code.")
+    card_label = serializers.CharField(
+        read_only=True, default=None, help_text="Label of the card the person holds now."
+    )
+    home_building = serializers.SerializerMethodField(
+        help_text="The person's own building (it differs from `building` for a visitor)."
+    )
 
     class Meta:
         model = DeveloperPresence
-        fields = ["developer", "building", "since", "device_code", "device_name"]
+        fields = [
+            "developer",
+            "building",
+            "home_building",
+            "since",
+            "device_code",
+            "device_name",
+            "card_label",
+        ]
         read_only_fields = fields
 
     def get_device_name(self, presence) -> str | None:
         device = presence.record.device if presence.record else None
         return (device.name or device.code) if device else None
+
+    def get_home_building(self, presence) -> dict | None:
+        b = presence.developer.building if presence.developer else None
+        return None if b is None else {"id": b.pk, "code": b.code, "name": b.name}
 
     def get_building(self, presence) -> dict | None:
         b = presence.building
