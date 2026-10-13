@@ -276,6 +276,7 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
             "account__developer__employee_number",
             "account__developer__full_name",
             "account__developer__building__code",
+            "account__developer__building__name",
             "account__balance",
         )
         .annotate(
@@ -291,6 +292,7 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
             "employee_number": row["account__developer__employee_number"],
             "full_name": row["account__developer__full_name"],
             "building": row["account__developer__building__code"],
+            "building_name": row["account__developer__building__name"],
             "deposits": _money(row["deposits"]),
             "deposit_count": row["deposit_count"],
             "spending": _money(-(row["spending"] or ZERO)),

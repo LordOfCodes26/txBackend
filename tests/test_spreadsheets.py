@@ -323,7 +323,7 @@ def test_finance_stats_export(admin, b1):
     # One building chosen: no breakdown sheet.
     one = read(admin.get(EXPORT.format("finance-stats") + f"?building={b1.pk}"))
     assert "By building" not in list(one)
-    assert book["Developers"][1][:6] == (1, "E1", "Ada", "B1", 75, 2)
+    assert book["Developers"][1][:6] == (1, "E1", "Ada", b1.name, 75, 2)
     assert len(book["Daily"]) == 31  # header + 30 days
 
 

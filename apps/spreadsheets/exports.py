@@ -288,7 +288,7 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
             rank,
             d["employee_number"],
             d["full_name"],
-            d["building"],
+            d["building_name"] or d["building"],
             d["deposits"],
             d["deposit_count"],
             d["spending"],

@@ -56,7 +56,7 @@ def test_developers_by_deposits(auth_client, make_user, site):  # noqa: F811
     assert (bob["deposits"], bob["deposit_count"], bob["spending"]) == ("300.00", 1, "0.00")
     assert (ada["deposits"], ada["deposit_count"]) == ("120.00", 3)
     assert (ada["spending"], ada["spending_count"], ada["balance"]) == ("55.00", 3, "65.00")
-    assert (ada["full_name"], ada["building"]) == ("Ada", "B1")
+    assert (ada["full_name"], ada["building"], ada["building_name"]) == ("Ada", "B1", "Building 1")
 
 
 def test_building_owner_sees_own_developers_only(auth_client, site):  # noqa: F811
