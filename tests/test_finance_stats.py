@@ -117,6 +117,7 @@ def test_seller_sales_by_building(auth_client, make_user, site):  # noqa: F811
     cafe = by_name(body)["Cafe"]
     parts = {part["code"]: part for part in cafe["by_building"]}
     assert parts["B1"]["total"] == "50.00" and set(parts) == {"B1"}
+    assert parts["B1"]["name"] == "Building 1"
     assert sum(Decimal(p["total"]) for p in parts.values()) == Decimal(
         cafe["sales_total"]
     ) + Decimal(cafe["bookings_total"])

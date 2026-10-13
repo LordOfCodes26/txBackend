@@ -224,6 +224,7 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
     ):
         split.setdefault(row["seller"], []).append(row)
     names = dict(Building.objects.values_list("pk", "code"))
+    titles = dict(Building.objects.values_list("pk", "name"))
     rows = []
     for seller in sellers.order_by("name"):
         s = sold.get(seller.pk, {})
@@ -246,6 +247,7 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
                 {
                     "building": part["developer__building"],
                     "code": names.get(part["developer__building"], ""),
+                    "name": titles.get(part["developer__building"], ""),
                     "total": _money(part["total"]),
                     "count": part["count"],
                 }
