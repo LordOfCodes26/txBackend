@@ -57,7 +57,12 @@ echo "==> Service user and directories"
 id backend >/dev/null 2>&1 || useradd --system --home-dir "${BASE}" --shell /usr/sbin/nologin backend
 install -d -o root -g root -m 755 "${BASE}" "${BASE}/releases"
 install -d -o root -g backend -m 750 "${ETC}" "${ETC}/tls"
-install -d -o backend -g backend -m 750 /var/lib/backend /var/lib/backend/media
+# nginx (www-data) serves /media/ itself: it may pass through /var/lib/backend (711: no
+# listing) and read media (755; uploads have random names). Everything else stays private:
+# the reset backups (database dumps) are the backend's only (700).
+install -d -o backend -g backend -m 711 /var/lib/backend
+install -d -o backend -g backend -m 755 /var/lib/backend/media
+if [[ -d /var/lib/backend/reset-backups ]]; then chmod 700 /var/lib/backend/reset-backups; fi
 
 echo "==> Environment file"
 FIRST_INSTALL=0

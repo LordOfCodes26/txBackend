@@ -115,7 +115,8 @@ def backup_database(prefix: str = "before-reset") -> Path:
     db = connection.settings_dict
     folder = backup_dir()
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        folder.chmod(0o700)  # database dumps: the backend's only
     except OSError as exc:
         raise BackupFailed(details={"folder": str(folder), "reason": str(exc)}) from exc
     target = folder / f"{prefix}-{timezone.now():%Y%m%d-%H%M%S}.dump"
