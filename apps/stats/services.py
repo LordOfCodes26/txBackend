@@ -209,9 +209,26 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
         )
     }
+    # Each seller's sales and bookings split by the building of the counter they were at
+    # (`building` null: a counter without a building).
+    split = {}
+    for row in (
+        sales.order_by()
+        .values("seller", "service_position__building")
+        .annotate(total=Sum("total"), count=Count("pk"))
+    ):
+        split.setdefault(row["seller"], []).append(row)
+    names = dict(Building.objects.values_list("pk", "code"))
     rows = []
     for seller in sellers.order_by("name"):
         s = sold.get(seller.pk, {})
+        parts = sorted(
+            split.get(seller.pk, []),
+            key=lambda r: (
+                r["service_position__building"] is None,
+                names.get(r["service_position__building"], ""),
+            ),
+        )
         row = {
             "id": seller.pk,
             "name": seller.name,
@@ -220,6 +237,15 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             "sales_count": s.get("sales_count", 0),
             "bookings_total": _money(s.get("bookings_total")),
             "bookings_count": s.get("bookings_count", 0),
+            "by_building": [
+                {
+                    "building": part["service_position__building"],
+                    "code": names.get(part["service_position__building"], ""),
+                    "total": _money(part["total"]),
+                    "count": part["count"],
+                }
+                for part in parts
+            ],
         }
         rows.append(row)
     rows.sort(key=lambda r: Decimal(r["sales_total"]) + Decimal(r["bookings_total"]), reverse=True)

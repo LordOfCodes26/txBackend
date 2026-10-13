@@ -96,3 +96,19 @@ def test_by_building(auth_client, make_user, site):  # noqa: F811
     )
     assert one.json()["by_building"] == []
     assert auth_client(site.owner).get(FINANCE_STATS).json()["by_building"] == []
+
+
+def test_seller_sales_by_building(auth_client, make_user, site):  # noqa: F811
+    """Each seller's sales split by the building of the counter (Cafe sells in both)."""
+    from decimal import Decimal
+
+    body = auth_client(make_user(Roles.FINANCE_MANAGER)).get(FINANCE_STATS).json()
+    cafe = by_name(body)["Cafe"]
+    parts = {part["code"]: part for part in cafe["by_building"]}
+    assert parts["B1"]["total"] == "10.00"
+    assert sum(Decimal(p["total"]) for p in parts.values()) == Decimal(
+        cafe["sales_total"]
+    ) + Decimal(cafe["bookings_total"])
+    # A building owner only sees their building's part.
+    owner = by_name(auth_client(site.owner).get(FINANCE_STATS).json())["Cafe"]
+    assert [p["code"] for p in owner["by_building"]] == ["B1"]
