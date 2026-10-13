@@ -1,4 +1,4 @@
-from django.db.models import OuterRef
+from django.db.models import Count, OuterRef, Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -12,9 +12,10 @@ from common.permissions import HasPermissions
 
 from . import occupancy, services
 from .filters import AttendanceRecordFilter, DailyAttendanceFilter
-from .models import AttendanceRecord, DailyAttendance
+from .models import AttendanceRecord, DailyAttendance, EventType, RecordSource
 from .serializers import (
     AttendanceRecordSerializer,
+    AttendanceRecordSummarySerializer,
     DailyAttendanceSerializer,
     ManualRecordSerializer,
     OccupancySerializer,
@@ -50,20 +51,67 @@ class AttendanceRecordViewSet(
 ):
     """Records are never deleted; wrong ones are voided with a reason."""
 
-    queryset = AttendanceRecord.objects.select_related("developer", "device")
+    queryset = AttendanceRecord.objects.select_related("developer__building", "device__building")
     serializer_class = AttendanceRecordSerializer
     permission_classes = [HasPermissions]
     required_permissions = {
         "list": ["attendance.view"],
         "retrieve": ["attendance.view"],
+        "summary": ["attendance.view"],
         "create": ["attendance.correct"],
         "void": ["attendance.correct"],
         "me": [],
     }
     building_lookup = "developer__building"
     filterset_class = AttendanceRecordFilter
-    search_fields = ["developer__full_name", "developer__employee_number"]
-    ordering_fields = ["event_time", "work_date"]
+    # `card_label`: the card the developer holds now (annotated below).
+    search_fields = [
+        "developer__full_name",
+        "developer__employee_number",
+        "card_label",
+        "device__code",
+        "device__name",
+    ]
+    ordering_fields = [
+        "event_time",
+        "work_date",
+        "event_type",
+        "source",
+        "is_void",
+        "developer__employee_number",
+        "developer__full_name",
+        "developer__department",
+        "developer__building__name",
+        "device__code",
+        "device__building__name",
+        "card_label",
+    ]
+
+    def get_queryset(self):
+        from apps.developers.views import with_card_label
+
+        qs = super().get_queryset()
+        return qs.annotate(
+            card_label=with_card_label(Developer.objects.all())
+            .filter(pk=OuterRef("developer"))
+            .values("card_label")[:1]
+        )
+
+    @extend_schema(responses=AttendanceRecordSummarySerializer)
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Counts for the records the list's filters and search select: records, in, out,
+        manual, void and different developers."""
+        qs = self.filter_queryset(self.get_queryset()).order_by()
+        counts = qs.aggregate(
+            records=Count("pk"),
+            ins=Count("pk", filter=Q(event_type=EventType.IN, is_void=False)),
+            outs=Count("pk", filter=Q(event_type=EventType.OUT, is_void=False)),
+            manual=Count("pk", filter=Q(source=RecordSource.MANUAL)),
+            void=Count("pk", filter=Q(is_void=True)),
+            developers=Count("developer", distinct=True),
+        )
+        return Response(AttendanceRecordSummarySerializer(counts).data)
 
     @extend_schema(
         request=ManualRecordSerializer,

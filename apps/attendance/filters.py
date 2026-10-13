@@ -6,6 +6,12 @@ from .models import AttendanceRecord, DailyAttendance
 class AttendanceRecordFilter(django_filters.FilterSet):
     date_from = django_filters.DateFilter(field_name="work_date", lookup_expr="gte")
     date_to = django_filters.DateFilter(field_name="work_date", lookup_expr="lte")
+    building = django_filters.NumberFilter(
+        field_name="device__building", help_text="The building of the door the scan was at."
+    )
+    door = django_filters.CharFilter(
+        field_name="device__code", lookup_expr="iexact", help_text="A door's ID, e.g. Door1."
+    )
 
     class Meta:
         model = AttendanceRecord

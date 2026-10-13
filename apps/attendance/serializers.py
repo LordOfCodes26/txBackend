@@ -14,12 +14,30 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(read_only=True)
     device_code = serializers.CharField(source="device.code", read_only=True, default=None)
     device_name = serializers.SerializerMethodField(help_text="The door unit's name or code.")
+    door_building = serializers.CharField(
+        source="device.building.name",
+        read_only=True,
+        default=None,
+        help_text="The building of the door the scan was at.",
+    )
+    home_building = serializers.CharField(
+        source="developer.building.name",
+        read_only=True,
+        default=None,
+        help_text="The developer's own building.",
+    )
+    card_label = serializers.CharField(
+        read_only=True, default=None, help_text="The card the developer holds now (lists only)."
+    )
 
     class Meta:
         model = AttendanceRecord
         fields = [
             "id",
             "developer",
+            "card_label",
+            "home_building",
+            "door_building",
             "work_date",
             "event_time",
             "event_type",
@@ -141,3 +159,12 @@ class PersonInsideSerializer(serializers.ModelSerializer):
     def get_building(self, presence) -> dict | None:
         b = presence.building
         return None if b is None else {"id": b.pk, "code": b.code, "name": b.name}
+
+
+class AttendanceRecordSummarySerializer(serializers.Serializer):
+    records = serializers.IntegerField()
+    ins = serializers.IntegerField(help_text="In scans (not void).")
+    outs = serializers.IntegerField(help_text="Out scans (not void).")
+    manual = serializers.IntegerField(help_text="Added by hand.")
+    void = serializers.IntegerField()
+    developers = serializers.IntegerField(help_text="Different developers.")

@@ -303,3 +303,35 @@ def test_live_feed_announces_each_door_scan(site, make_user):
         await comm.disconnect()
 
     async_to_sync(scenario)()
+
+
+@pytest.mark.django_db
+def test_records_list_filters_sorts_and_sums_up(site, auth_client, make_user):
+    scan = site["scan"]
+    scan("Ada", "Door1", "in")
+    scan("Bob", "Door2", "in")
+    scan("Bob", "Door2", "out")
+    RFIDCard.objects.filter(pk=site["devs"]["Bob"][1].pk).update(label="0042")
+    Developer.objects.filter(full_name="Bob").update(building=site["b1"])
+    client = auth_client(make_user(Roles.MANAGER))
+    url = "/api/v1/attendance/records/"
+
+    rows = client.get(url).json()["results"]
+    bob = next(r for r in rows if r["developer"]["full_name"] == "Bob")
+    assert (bob["card_label"], bob["home_building"], bob["door_building"]) == (
+        "0042",
+        "Building 1",
+        "Building 2",
+    )
+
+    def names(query):
+        return [r["developer"]["full_name"] for r in client.get(f"{url}?{query}").json()["results"]]
+
+    assert names(f"building={site['b2'].pk}") == ["Bob", "Bob"]  # where the door is
+    assert names("door=door1") == ["Ada"]
+    assert names("search=0042") == ["Bob", "Bob"]
+    assert names("ordering=developer__full_name")[0] == "Ada"
+
+    summary = client.get(f"{url}summary/").json()
+    assert summary == {"records": 3, "ins": 2, "outs": 1, "manual": 0, "void": 0, "developers": 2}
+    assert client.get(f"{url}summary/?building={site['b2'].pk}").json()["developers"] == 1
