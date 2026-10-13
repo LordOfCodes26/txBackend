@@ -316,9 +316,13 @@ def test_finance_stats_export(admin, b1):
     assert r.status_code == 200
     assert "finance-stats-" in r["Content-Disposition"]
     book = read(r)
-    assert list(book) == ["Summary", "Daily", "Sellers", "Developers"]
+    assert list(book) == ["Summary", "By building", "Daily", "Sellers", "Developers"]
     summary = {row[0]: row[1] for row in book["Summary"][1:]}
     assert summary["Deposits"] == 75 and summary["Deposit count"] == 2
+    assert book["By building"][1][:4] == ("B1", b1.name, 75, 2)
+    # One building chosen: no breakdown sheet.
+    one = read(admin.get(EXPORT.format("finance-stats") + f"?building={b1.pk}"))
+    assert "By building" not in list(one)
     assert book["Developers"][1][:6] == (1, "E1", "Ada", "B1", 75, 2)
     assert len(book["Daily"]) == 31  # header + 30 days
 

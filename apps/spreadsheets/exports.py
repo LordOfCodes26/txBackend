@@ -297,11 +297,41 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
         ]
         for rank, d in enumerate(stats["developers"], start=1)
     ]
+    by_building = [
+        [
+            b["code"] or str(_("No building")),
+            b["name"],
+            b["deposits"],
+            b["deposit_count"],
+            b["spending"],
+            b["spending_count"],
+            b["net"],
+            b["balance"],
+            b["store_sales"],
+        ]
+        for b in stats["by_building"]
+    ]
     count = lambda key, title: Column(key, title, width=12, kind="int")  # noqa: E731
     cash = lambda key, title: Column(key, title, width=14, kind="money")  # noqa: E731
+    building_sheet = Sheet(
+        _("By building"),
+        [
+            Column("code", _("Building"), width=12),
+            Column("name", _("Name"), width=24),
+            cash("deposits", _("Deposits")),
+            count("deposit_count", _("Deposit count")),
+            cash("spending", _("Spending")),
+            count("spending_count", _("Payment count")),
+            cash("net", _("Net")),
+            cash("balance", _("Money held now")),
+            cash("store_sales", _("Sales at its counters")),
+        ],
+        by_building,
+    )
     return workbook(
         [
             Sheet(_("Summary"), [label, value], summary),
+            *([building_sheet] if by_building else []),
             Sheet(
                 _("Daily"),
                 [

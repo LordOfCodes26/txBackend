@@ -1077,3 +1077,15 @@ msgstr "%(name)s - 입장확인: %(court)s %(time)s"
 
 msgid "Use a JPEG, PNG or WebP image."
 msgstr "JPEG, PNG 또는 WebP 화상을 쓰십시오."
+
+msgid "By building"
+msgstr "건물별"
+
+msgid "No building"
+msgstr "건물 없음"
+
+msgid "Net"
+msgstr "차액"
+
+msgid "Sales at its counters"
+msgstr "건물안 판매초소의 판매"

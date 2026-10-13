@@ -75,3 +75,24 @@ def test_one_building(auth_client, make_user, site):  # noqa: F811
     admin = auth_client(make_user(Roles.ADMIN))
     r = admin.get(f"/api/v1/exports/finance-stats/?building={site.b1.pk}")
     assert r.status_code == 200 and r["Content-Type"].startswith("application/vnd.openxml")
+
+
+def test_by_building(auth_client, make_user, site):  # noqa: F811
+    """All buildings: a row per building; it adds up to the totals."""
+    from decimal import Decimal
+
+    body = auth_client(make_user(Roles.FINANCE_MANAGER)).get(FINANCE_STATS).json()
+    rows = {row["code"]: row for row in body["by_building"]}
+    assert set(rows) >= {"B1", "B2"}
+    total = sum(Decimal(row["deposits"]) for row in rows.values())
+    assert total == Decimal(body["money"]["deposits"]["total"])
+    held = sum(Decimal(row["balance"]) for row in rows.values())
+    assert held == Decimal(body["money"]["developer_accounts"]["total_balance"])
+    b1 = rows["B1"]
+    assert Decimal(b1["net"]) == Decimal(b1["deposits"]) - Decimal(b1["spending"])
+    # One building chosen (or a one-building owner): no breakdown.
+    one = auth_client(make_user(Roles.FINANCE_MANAGER)).get(
+        f"{FINANCE_STATS}?building={site.b1.pk}"
+    )
+    assert one.json()["by_building"] == []
+    assert auth_client(site.owner).get(FINANCE_STATS).json()["by_building"] == []

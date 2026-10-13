@@ -272,6 +272,72 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
     return out
 
 
+def building_money(first: date, last: date, buildings=None) -> list[dict]:
+    """Per building (the developers' home building): deposits, spending and balances now,
+    and the sales and bookings at the building's counters. Developers without a building
+    are a row of their own (`id` null) when the figures are company-wide."""
+    start, end = _local_bounds(first, last)
+    period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
+    accounts = DeveloperAccount.objects.all()
+    sales = Purchase.objects.filter(
+        status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
+    )
+    places = Building.objects.order_by("code")
+    if buildings is not None:
+        places = places.filter(pk__in=buildings)
+        period = period.filter(account__developer__building__in=buildings)
+        accounts = accounts.filter(developer__building__in=buildings)
+        sales = sales.filter(service_position__building__in=buildings)
+    moves = {
+        row["account__developer__building"]: row
+        for row in period.order_by()
+        .values("account__developer__building")
+        .annotate(
+            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
+            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
+        )
+    }
+    held = {
+        row["developer__building"]: row
+        for row in accounts.order_by()
+        .values("developer__building")
+        .annotate(balance=Sum("balance"), wallets=Count("pk"))
+    }
+    sold = {
+        row["service_position__building"]: row
+        for row in sales.order_by()
+        .values("service_position__building")
+        .annotate(total=Sum("total"), count=Count("pk"))
+    }
+    rows = [(b.pk, b.code, b.name) for b in places]
+    if buildings is None and (None in moves or None in held):
+        rows.append((None, "", ""))  # developers without a home building
+    out = []
+    for pk, code, name in rows:
+        m, h, s_ = moves.get(pk, {}), held.get(pk, {}), sold.get(pk, {})
+        deposits = m.get("deposits") or ZERO
+        spending = -(m.get("spending") or ZERO)
+        out.append(
+            {
+                "id": pk,
+                "code": code,
+                "name": name,
+                "deposits": _money(deposits),
+                "deposit_count": m.get("deposit_count", 0),
+                "spending": _money(spending),
+                "spending_count": m.get("spending_count", 0),
+                "net": _money(deposits - spending),
+                "balance": _money(h.get("balance")),
+                "wallets": h.get("wallets", 0),
+                "store_sales": _money(s_.get("total")),
+                "store_sales_count": s_.get("count", 0),
+            }
+        )
+    return out
+
+
 def finance_stats(first: date, last: date, buildings=None) -> dict:
     """The money half of `company_stats`, the per-seller comparison and the per-developer
     deposits and spending."""
@@ -280,4 +346,8 @@ def finance_stats(first: date, last: date, buildings=None) -> dict:
         "money": money(first, last, buildings),
         "sellers": seller_comparison(first, last, buildings),
         "developers": developer_money(first, last, buildings),
+        # Per building, unless the figures are already one building's.
+        "by_building": []
+        if buildings is not None and len(buildings) <= 1
+        else building_money(first, last, buildings),
     }
