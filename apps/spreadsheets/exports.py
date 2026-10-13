@@ -307,7 +307,6 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
             b["spending_count"],
             b["net"],
             b["balance"],
-            b["store_sales"],
         ]
         for b in stats["by_building"]
     ]
@@ -324,7 +323,6 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
             count("spending_count", _("Payment count")),
             cash("net", _("Net")),
             cash("balance", _("Money held now")),
-            cash("store_sales", _("Sales at its counters")),
         ],
         by_building,
     )

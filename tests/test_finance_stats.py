@@ -28,12 +28,15 @@ def test_finance_manager_compares_all_sellers(auth_client, make_user, site):  # 
     assert "balance" not in cafe and "payouts_paid" not in cafe
 
 
-def test_building_owner_sees_own_sellers(auth_client, site):  # noqa: F811
+def test_building_owner_sees_what_their_buyers_bought(auth_client, site):  # noqa: F811
+    """By the BUYER's building: Ada (Building 1) bought at Cafe's counters in both
+    buildings; all of it counts for Building 1."""
     body = auth_client(site.owner).get(FINANCE_STATS).json()
     assert [b["code"] for b in body["buildings"]] == ["B1"]
     sellers = by_name(body)
-    assert sellers["Cafe"]["sales_total"] == "10.00"  # only the Building 1 counter
+    assert sellers["Cafe"]["sales_total"] == "50.00"
     assert sellers["Shop"]["sales_total"] == "5.00"
+    assert body["money"]["store_sales"]["sales_total"] == "55.00"
 
 
 def test_needs_finance_view(auth_client, make_user):
@@ -99,16 +102,27 @@ def test_by_building(auth_client, make_user, site):  # noqa: F811
 
 
 def test_seller_sales_by_building(auth_client, make_user, site):  # noqa: F811
-    """Each seller's sales split by the building of the counter (Cafe sells in both)."""
+    """Each seller's sales split by the buyer's building (all of them are Ada's: B1)."""
     from decimal import Decimal
 
     body = auth_client(make_user(Roles.FINANCE_MANAGER)).get(FINANCE_STATS).json()
     cafe = by_name(body)["Cafe"]
     parts = {part["code"]: part for part in cafe["by_building"]}
-    assert parts["B1"]["total"] == "10.00"
+    assert parts["B1"]["total"] == "50.00" and set(parts) == {"B1"}
     assert sum(Decimal(p["total"]) for p in parts.values()) == Decimal(
         cafe["sales_total"]
     ) + Decimal(cafe["bookings_total"])
     # A building owner only sees their building's part.
     owner = by_name(auth_client(site.owner).get(FINANCE_STATS).json())["Cafe"]
     assert [p["code"] for p in owner["by_building"]] == ["B1"]
+
+
+def test_a_building_whose_people_bought_nothing(auth_client, make_user, site):  # noqa: F811
+    """Building 2 has a Cafe counter, but its people (Bob) bought nothing: no sellers."""
+    body = (
+        auth_client(make_user(Roles.FINANCE_MANAGER))
+        .get(f"{FINANCE_STATS}?building={site.b2.pk}")
+        .json()
+    )
+    assert body["sellers"] == []
+    assert body["money"]["store_sales"]["sales_total"] == "0.00"

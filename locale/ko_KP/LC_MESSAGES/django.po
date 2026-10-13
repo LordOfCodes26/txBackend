@@ -1086,6 +1086,3 @@ msgstr "건물 없음"
 
 msgid "Net"
 msgstr "차액"
-
-msgid "Sales at its counters"
-msgstr "건물안 판매초소의 판매"
