@@ -40,7 +40,8 @@ DEVELOPER_COLUMNS = [
     Column("status", _("Status"), width=12, example="ACTIVE"),
 ]
 CARD_COLUMNS = [
-    Column("card_uid", _("Card UID"), True, 14, example="04DE00AB12"),
+    # Optional: without it, the row labels the card the developer holds now.
+    Column("card_uid", _("Card UID"), width=14, example="04DE00AB12"),
     Column("card_label", _("Card label"), width=12, example="0001"),
     Column("employee_number", _("Employee no."), width=14, example="E1001"),
 ]
@@ -188,7 +189,10 @@ class DeveloperImporter(Importer):
 
 class CardImporter(Importer):
     """New UIDs are registered; a label updates the card's label; an employee number
-    assigns the card to that developer (if it isn't theirs already)."""
+    assigns the card to that developer (if it isn't theirs already).
+
+    Without a UID, a row (employee number + label) puts the label on the card that
+    developer holds now: for a list of who has which printed card number."""
 
     title = _("Cards")
     columns = CARD_COLUMNS
@@ -196,6 +200,8 @@ class CardImporter(Importer):
     excel_permission = "excel.import_cards"
 
     def apply(self, ctx, number, row):
+        if not text(row.get("card_uid")):
+            return self._label_current_card(ctx, row)
         uid = normalize_uid(text(row.get("card_uid")))
         try:
             uid_validator(uid)
@@ -231,6 +237,41 @@ class CardImporter(Importer):
                 rfid.assign_card(actor=ctx.actor, card=card, developer=developer)
                 outcome = "created" if outcome == "created" else "updated"
         return outcome
+
+    def _label_current_card(self, ctx, row):
+        employee = text(row.get("employee_number"))
+        label = text(row.get("card_label"))
+        if not employee or not label:
+            raise RowError(
+                _("Enter the card UID, or the employee number and the card label."), "card_uid"
+            )
+        self.once(ctx, "employee_number", employee)
+        self.once(ctx, "card_label", label)
+        developer = _developer(ctx, employee, "card.assign")
+        current = (
+            RFIDCardAssignment.objects.filter(developer=developer, unassigned_at__isnull=True)
+            .select_related("card")
+            .first()
+        )
+        if current is None:
+            raise RowError(
+                _("This developer has no card yet: assign one first, or enter its UID."),
+                "employee_number",
+            )
+        card = current.card
+        if card.label == label:
+            return "unchanged"
+        old = card.label
+        card.label = label
+        card.save(update_fields=["label", "updated_at"])
+        record_audit(
+            "rfid.card_updated",
+            actor=ctx.actor,
+            entity=card,
+            old_values={"label": old},
+            new_values={"label": label},
+        )
+        return "updated"
 
 
 class BalanceImporter(Importer):

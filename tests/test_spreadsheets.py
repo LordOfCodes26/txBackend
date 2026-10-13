@@ -200,6 +200,45 @@ def test_card_errors(admin):
     assert RFIDCard.objects.count() == 1
 
 
+def test_labels_by_employee_number_without_uids(admin):
+    """A "who has which card number" list: no UIDs; each label goes on the card the
+    developer holds now."""
+    ada = Developer.objects.create(employee_number="E1", full_name="Ada")
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    Developer.objects.create(employee_number="E3", full_name="Cy")  # no card
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="0400AA"), developer=ada)
+    RFIDCardAssignment.objects.create(
+        card=RFIDCard.objects.create(uid="0400BB", label="0002"), developer=bob
+    )
+    rows = [("Employee no.", "Card label"), ("E1", "0001"), ("E2", "0002")]
+
+    check = upload(admin, "cards", *rows, dry_run=True).json()
+    assert (check["updated"], check["unchanged"], check["errors"]) == (1, 1, [])
+    assert RFIDCard.objects.get(uid="0400AA").label == ""  # a dry run saves nothing
+
+    body = upload(admin, "cards", *rows).json()
+    assert (body["updated"], body["unchanged"]) == (1, 1)
+    assert RFIDCard.objects.get(uid="0400AA").label == "0001"
+    assert AuditLog.objects.filter(action="rfid.card_updated").count() == 1
+
+    bad = upload(
+        admin,
+        "cards",
+        ("Employee no.", "Card label"),
+        ("E3", "0003"),  # no card
+        ("E9", "0009"),  # no such developer
+        ("E1", None),  # no label
+        ("E2", "0001"),  # a label twice in the file
+        ("E1", "0001"),
+    ).json()
+    assert [(e["row"], e["column"]) for e in bad["errors"]] == [
+        (2, "Employee no."),
+        (3, "Employee no."),
+        (4, "Card UID"),
+        (6, "Card label"),
+    ]
+
+
 # --- Opening balances ---------------------------------------------------------------
 
 

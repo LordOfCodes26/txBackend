@@ -1086,3 +1086,9 @@ msgstr "건물 없음"
 
 msgid "Net"
 msgstr "차액"
+
+msgid "Enter the card UID, or the employee number and the card label."
+msgstr "카드 UID를 넣거나, 직원번호와 카드번호를 넣으십시오."
+
+msgid "This developer has no card yet: assign one first, or enter its UID."
+msgstr "이 개발자에게는 아직 카드가 없습니다. 먼저 카드를 배정하거나 카드 UID를 넣으십시오."
