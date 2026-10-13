@@ -115,5 +115,20 @@ class PasswordChangeSerializer(serializers.Serializer):
         return value
 
 
+class PasswordResetSerializer(serializers.Serializer):
+    """An admin sets a new password for another user (no old password)."""
+
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError(
+                {"new_password_confirm": [_("The two passwords are not the same.")]}
+            )
+        password_validation.validate_password(attrs["new_password"], self.context["user"])
+        return attrs
+
+
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()

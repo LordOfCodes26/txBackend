@@ -60,6 +60,7 @@
         "system.delete_records",
         "system.tcp_log",
         "user.manage",
+        "user.password_reset",
         "user.view"
       ]
     },

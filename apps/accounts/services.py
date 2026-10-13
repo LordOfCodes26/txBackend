@@ -105,6 +105,18 @@ def change_password(*, user: User, new_password: str) -> None:
     record_audit("user.password_changed", actor=user, entity=user)
 
 
+@transaction.atomic
+def reset_password(*, actor: User, user: User, new_password: str) -> None:
+    """Another user's new password, set by an admin: they are signed out everywhere and use
+    the new one. Only for users whose permissions the actor fully holds."""
+    user = User.objects.select_for_update().get(pk=user.pk)
+    _ensure_can_manage(actor, granted_permissions(user))
+    user.set_password(new_password)
+    user.save(update_fields=["password"])
+    revoke_refresh_tokens(user)
+    record_audit("user.password_reset", actor=actor, entity=user)
+
+
 def revoke_refresh_tokens(user: User) -> None:
     """Blacklist every outstanding refresh token. Access tokens expire on their own."""
     for token in OutstandingToken.objects.filter(user=user).exclude(blacklistedtoken__isnull=False):

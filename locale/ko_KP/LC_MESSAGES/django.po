@@ -1092,3 +1092,9 @@ msgstr "카드 UID를 넣거나, 직원번호와 카드번호를 넣으십시오
 
 msgid "This developer has no card yet: assign one first, or enter its UID."
 msgstr "이 개발자에게는 아직 카드가 없습니다. 먼저 카드를 배정하거나 카드 UID를 넣으십시오."
+
+msgid "The two passwords are not the same."
+msgstr "두 암호가 같지 않습니다."
+
+msgid "Change your own password with your current one."
+msgstr "자기 암호는 현재 암호로 바꾸십시오."

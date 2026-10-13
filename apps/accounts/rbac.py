@@ -19,6 +19,7 @@ AREAS: dict[str, dict[str, str]] = {
     "Users and access": {
         "user.view": "See user accounts",
         "user.manage": "Create, change and deactivate user accounts",
+        "user.password_reset": "Set a new password for other users (when they forgot theirs)",
         "role.view": "See roles and what each one allows",
         "role.assign": "Give roles to users and take them away",
         "role.manage": "Create roles and change what each role allows",

@@ -24,6 +24,7 @@ from .serializers import (
     LogoutSerializer,
     MeSerializer,
     PasswordChangeSerializer,
+    PasswordResetSerializer,
     RoleAssignSerializer,
     RoleSerializer,
     RoleWriteSerializer,
@@ -102,6 +103,7 @@ class UserViewSet(
         "partial_update": ["user.manage"],
         "assign_role": ["role.assign"],
         "remove_role": ["role.assign"],
+        "reset_password": ["user.password_reset"],
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = UserFilter
@@ -123,6 +125,23 @@ class UserViewSet(
         if serializer.validated_data:
             user = services.update_user(actor=request.user, user=user, **serializer.validated_data)
         return Response(UserSerializer(user).data)
+
+    @extend_schema(request=PasswordResetSerializer, responses={204: None})
+    @action(detail=True, methods=["post"], url_path="password")
+    def reset_password(self, request, pk=None):
+        """Set a new password for this user (they forgot theirs). Your own password is
+        changed with your current one instead (`/auth/password/`)."""
+        user = self.get_object()
+        if user.pk == request.user.pk:
+            raise ValidationError(
+                {"new_password": [_("Change your own password with your current one.")]}
+            )
+        serializer = PasswordResetSerializer(data=request.data, context={"user": user})
+        serializer.is_valid(raise_exception=True)
+        services.reset_password(
+            actor=request.user, user=user, new_password=serializer.validated_data["new_password"]
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=RoleAssignSerializer, responses={201: UserSerializer})
     @action(detail=True, methods=["post"], url_path="roles")
