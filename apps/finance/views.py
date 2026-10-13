@@ -153,17 +153,41 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
 
 
 class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = AccountTransaction.objects.select_related("account__developer", "actor")
+    queryset = AccountTransaction.objects.select_related("account__developer__building", "actor")
     building_lookup = "account__developer__building"
     serializer_class = AccountTransactionSerializer
     permission_classes = [HasPermissions]
     required_permissions = {"list": ["finance.view"], "retrieve": ["finance.view"], "me": []}
     filterset_class = AccountTransactionFilter
-    search_fields = ["description", "reference", "account__developer__full_name"]
-    ordering_fields = ["created_at", "amount"]
+    # `card_label`: the card the developer holds now (annotated below).
+    search_fields = [
+        "description",
+        "reference",
+        "account__developer__full_name",
+        "account__developer__employee_number",
+        "card_label",
+    ]
+    ordering_fields = [
+        "created_at",
+        "amount",
+        "kind",
+        "balance_after",
+        "account__developer__employee_number",
+        "account__developer__full_name",
+        "account__developer__building__name",
+        "account__developer__department",
+        "card_label",
+    ]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        from django.db.models import OuterRef, Subquery
+
+        from apps.rfid.models import RFIDCardAssignment
+
+        current = RFIDCardAssignment.objects.filter(
+            developer=OuterRef("account__developer"), unassigned_at__isnull=True
+        ).values("card__label")[:1]
+        qs = super().get_queryset().annotate(card_label=Subquery(current))
         if self.action == "me":
             qs = qs.filter(account__developer=_own_developer(self.request))
         return qs

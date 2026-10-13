@@ -18,6 +18,9 @@ class DeveloperAccountFilter(django_filters.FilterSet):
 
 class AccountTransactionFilter(django_filters.FilterSet):
     developer = django_filters.NumberFilter(field_name="account__developer")
+    building = django_filters.NumberFilter(
+        field_name="account__developer__building", help_text="The developers' home building."
+    )
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lt")
 

@@ -376,3 +376,36 @@ def test_concurrent_retries_with_same_key_deposit_once():
     assert len({txn.pk for txn, _ in outcomes}) == 1
     assert sum(created for _, created in outcomes) == 1
     assert balance(dev) == Decimal("10.00")
+
+
+@pytest.mark.django_db
+def test_transaction_list_shows_and_finds_the_developer(finance, developer):
+    """Each movement shows the holder's building and card; filter by building, search by
+    employee number or card, sort by them."""
+    from apps.rfid.models import Building, RFIDCard, RFIDCardAssignment
+
+    b1 = Building.objects.create(code="B1", name="Building 1")
+    Developer.objects.filter(pk=developer.pk).update(building=b1, department="QA")
+    RFIDCardAssignment.objects.create(
+        card=RFIDCard.objects.create(uid="04AA01", label="0042"), developer=developer
+    )
+    other = Developer.objects.create(employee_number="E2", full_name="Bob")
+    deposit(finance, developer, "12.00")
+    deposit(finance, other, "5.00")
+
+    rows = finance.get(TRANSACTIONS).json()["results"]
+    ada = next(r for r in rows if r["developer"]["employee_number"] == "E1")
+    assert (ada["building_name"], ada["card_label"], ada["developer"]["department"]) == (
+        "Building 1",
+        "0042",
+        "QA",
+    )
+
+    def numbers(query):
+        found = finance.get(f"{TRANSACTIONS}?{query}").json()["results"]
+        return [r["developer"]["employee_number"] for r in found]
+
+    assert numbers(f"building={b1.pk}") == ["E1"]
+    assert numbers("search=0042") == ["E1"]
+    assert numbers("search=E2") == ["E2"]
+    assert numbers("ordering=-account__developer__employee_number") == ["E2", "E1"]

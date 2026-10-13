@@ -45,6 +45,12 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
 class AccountTransactionSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(source="account.developer", read_only=True)
     actor_username = serializers.CharField(source="actor.username", read_only=True, default=None)
+    building_name = serializers.CharField(
+        source="account.developer.building.name", read_only=True, default=None
+    )
+    card_label = serializers.CharField(
+        read_only=True, default=None, help_text="The card the developer holds now (lists only)."
+    )
 
     class Meta:
         model = AccountTransaction
@@ -52,6 +58,8 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
             "id",
             "account",
             "developer",
+            "building_name",
+            "card_label",
             "kind",
             "amount",
             "balance_after",
