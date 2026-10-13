@@ -42,6 +42,9 @@ class DeveloperSerializer(serializers.ModelSerializer):
     )
     building_name = serializers.CharField(source="building.name", read_only=True, default=None)
     photo = PhotoField(help_text="Set and removed with POST / DELETE .../photo/.")
+    card_label = serializers.SerializerMethodField(
+        help_text="Label printed on the card the developer holds now (null: no card)."
+    )
 
     class Meta:
         model = Developer
@@ -61,6 +64,7 @@ class DeveloperSerializer(serializers.ModelSerializer):
             "out_date",
             "status",
             "photo",
+            "card_label",
             "created_at",
             "updated_at",
         ]
@@ -96,6 +100,21 @@ class DeveloperSerializer(serializers.ModelSerializer):
                 {"out_date": [_("The out date cannot be before the start date.")]}
             )
         return attrs
+
+    def get_card_label(self, obj) -> str | None:
+        return _card_label(obj)
+
+
+def _card_label(developer) -> str | None:
+    if hasattr(developer, "card_label"):  # annotated by the list
+        return developer.card_label
+    from apps.rfid.models import RFIDCardAssignment
+
+    return (
+        RFIDCardAssignment.objects.filter(developer=developer, unassigned_at__isnull=True)
+        .values_list("card__label", flat=True)
+        .first()
+    )
 
 
 class MyDeveloperProfileSerializer(serializers.ModelSerializer):

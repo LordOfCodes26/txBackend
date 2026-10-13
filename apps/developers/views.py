@@ -1,9 +1,12 @@
 from django.db import transaction
+from django.db.models import F
 from django.utils.translation import gettext_lazy as _
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
@@ -44,6 +47,35 @@ class NewDeveloperCardSerializer(NewPinSerializer):
         return attrs
 
 
+class EmptyLastOrdering(OrderingFilter):
+    """Sorting where empty values (no card, no birthday, ...) come last both ways."""
+
+    def filter_queryset(self, request, queryset, view):
+        ordering = self.get_ordering(request, queryset, view)
+        if not ordering:
+            return queryset
+        return queryset.order_by(
+            *(
+                F(field[1:]).desc(nulls_last=True)
+                if field.startswith("-")
+                else F(field).asc(nulls_last=True)
+                for field in ordering
+            )
+        )
+
+
+def with_card_label(developers):
+    """Each developer's current card label ("" when the card has none, null without a card)."""
+    from django.db.models import OuterRef, Subquery
+
+    from apps.rfid.models import RFIDCardAssignment
+
+    current = RFIDCardAssignment.objects.filter(
+        developer=OuterRef("pk"), unassigned_at__isnull=True
+    ).values("card__label")[:1]
+    return developers.annotate(card_label=Subquery(current))
+
+
 class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     """DELETE is a soft delete. For someone leaving the company, set `status=TERMINATED`.
 
@@ -65,7 +97,17 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     }
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     filterset_class = DeveloperFilter
-    search_fields = ["full_name", "employee_number", "department", "position_title", "phone"]
+    filter_backends = [DjangoFilterBackend, SearchFilter, EmptyLastOrdering]
+    # `card_label`: the label of the card the developer holds now (annotated below), so a
+    # card's number finds its holder.
+    search_fields = [
+        "full_name",
+        "employee_number",
+        "department",
+        "position_title",
+        "phone",
+        "card_label",
+    ]
     ordering_fields = [
         "full_name",
         "employee_number",
@@ -74,7 +116,11 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         "out_date",
         "birthday",
         "created_at",
+        "card_label",
     ]
+
+    def get_queryset(self):
+        return with_card_label(super().get_queryset())
 
     @extend_schema(
         methods=["POST"], request=DeveloperPhotoSerializer, responses=DeveloperSerializer
