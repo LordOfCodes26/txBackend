@@ -34,6 +34,31 @@ class PeriodSerializer(serializers.Serializer):
         return {"date_from": first, "date_to": last}
 
 
+class FinanceStatsQuerySerializer(PeriodSerializer):
+    building = serializers.IntegerField(
+        required=False, min_value=1, help_text="Only this building's figures (a building id)."
+    )
+
+    def validate(self, attrs):
+        building = attrs.get("building")
+        attrs = super().validate(attrs)
+        if building is not None:
+            attrs["building"] = building
+        return attrs
+
+
+def chosen_buildings(user, permission: str, building: int | None):
+    """The buildings the figures are limited to: the user's own limit (building owners and
+    managers), narrowed to `building` when one is chosen. A building outside the user's
+    limit gives no figures (an empty limit), not an error."""
+    scope = building_scope(user, permission)
+    if building is None:
+        return scope
+    if scope is not None and building not in scope:
+        return frozenset()
+    return frozenset({building})
+
+
 class CompanyStatsView(APIView):
     """Company statistics for the BOSS dashboard (`stats.view`): developers, who is
     inside now, daily attendance, developer money (balances, deposits, spending) and
@@ -56,15 +81,16 @@ class FinanceStatsView(APIView):
     """Finance dashboard (`finance.stats.view`): developer money (balances, deposits,
     spending) and a per-seller comparison of sales and bookings, for a period of
     company-local days.
-    Building owners get the figures of their buildings (`buildings`)."""
+    Building owners get the figures of their buildings (`buildings`); `building` narrows
+    them to one building (its developers' money, the sales at its counters)."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"get": ["finance.stats.view"]}
 
-    @extend_schema(parameters=[PeriodSerializer], responses=OpenApiTypes.OBJECT)
+    @extend_schema(parameters=[FinanceStatsQuerySerializer], responses=OpenApiTypes.OBJECT)
     def get(self, request):
-        period = PeriodSerializer(data=request.query_params)
-        period.is_valid(raise_exception=True)
-        data = period.validated_data
-        buildings = building_scope(request.user, "finance.stats.view")
+        query = FinanceStatsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        data = query.validated_data
+        buildings = chosen_buildings(request.user, "finance.stats.view", data.get("building"))
         return Response(finance_stats(data["date_from"], data["date_to"], buildings))

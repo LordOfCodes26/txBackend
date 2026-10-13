@@ -59,3 +59,19 @@ def test_developers_by_deposits(auth_client, make_user, site):  # noqa: F811
 def test_building_owner_sees_own_developers_only(auth_client, site):  # noqa: F811
     rows = auth_client(site.owner).get(FINANCE_STATS).json()["developers"]
     assert [r["employee_number"] for r in rows] == ["E1"]
+
+
+def test_one_building(auth_client, make_user, site):  # noqa: F811
+    """`building`: that building's developers' money and the sales at its counters."""
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+    body = client.get(f"{FINANCE_STATS}?building={site.b1.pk}").json()
+    assert [b["code"] for b in body["buildings"]] == ["B1"]
+    assert [r["employee_number"] for r in body["developers"]] == ["E1"]
+    assert body == auth_client(site.owner).get(FINANCE_STATS).json()  # = B1's owner's view
+    # A building owner can't look at another building.
+    other = auth_client(site.owner).get(f"{FINANCE_STATS}?building={site.b2.pk}").json()
+    assert other["developers"] == [] and other["money"]["deposits"]["total"] == "0.00"
+    # The Excel download follows the filter.
+    admin = auth_client(make_user(Roles.ADMIN))
+    r = admin.get(f"/api/v1/exports/finance-stats/?building={site.b1.pk}")
+    assert r.status_code == 200 and r["Content-Type"].startswith("application/vnd.openxml")

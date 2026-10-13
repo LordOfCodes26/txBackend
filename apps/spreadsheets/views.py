@@ -9,7 +9,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.stats.views import PeriodSerializer
+from apps.stats.views import FinanceStatsQuerySerializer, PeriodSerializer
 from common.permissions import HasPermissions
 
 from . import exports
@@ -115,6 +115,13 @@ class ExportView(APIView):
         dates = PeriodSerializer(data=request.query_params)
         dates.is_valid(raise_exception=True)
         first, last = dates.validated_data["date_from"], dates.validated_data["date_to"]
+        if kind == "finance-stats":  # the page's building filter too
+            query = FinanceStatsQuerySerializer(data=request.query_params)
+            query.is_valid(raise_exception=True)
+            book = exports.finance_stats_workbook(
+                request.user, first, last, query.validated_data.get("building")
+            )
+            return _file(book, f"{kind}-{first}-to-{last}.xlsx")
         build = {
             "money": exports.money_workbook,
             "goods": exports.goods_workbook,

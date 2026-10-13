@@ -249,10 +249,13 @@ def goods_workbook(user, first: date, last: date) -> bytes:
     return workbook([catalog, stock])
 
 
-def finance_stats_workbook(user, first: date, last: date) -> bytes:
+def finance_stats_workbook(user, first: date, last: date, building: int | None = None) -> bytes:
     """The finance statistics page as a workbook: the totals, each day, each seller and
-    each developer (by deposit total), with the same building limits as the page."""
-    stats = finance_stats(first, last, building_scope(user, "finance.stats.view"))
+    each developer (by deposit total), with the same building limits (and building
+    filter) as the page."""
+    from apps.stats.views import chosen_buildings
+
+    stats = finance_stats(first, last, chosen_buildings(user, "finance.stats.view", building))
     money = stats["money"]
     label, value = Column("label", _("Figure"), width=28), Column("value", _("Value"), width=18)
     summary = [
