@@ -93,6 +93,14 @@ def test_by_building(auth_client, make_user, site):  # noqa: F811
     assert held == Decimal(body["money"]["developer_accounts"]["total_balance"])
     b1 = rows["B1"]
     assert Decimal(b1["net"]) == Decimal(b1["deposits"]) - Decimal(b1["spending"])
+    # Each day, per building: they add up to the building's totals and the day's figures.
+    for row in rows.values():
+        assert sum(Decimal(d["deposits"]) for d in row["daily"]) == Decimal(row["deposits"])
+        assert sum(Decimal(d["spending"]) for d in row["daily"]) == Decimal(row["spending"])
+    for i, day in enumerate(body["money"]["daily"]):
+        assert sum(Decimal(r["daily"][i]["deposits"]) for r in rows.values()) == Decimal(
+            day["deposits"]
+        )
     # One building chosen (or a one-building owner): no breakdown.
     one = auth_client(make_user(Roles.FINANCE_MANAGER)).get(
         f"{FINANCE_STATS}?building={site.b1.pk}"

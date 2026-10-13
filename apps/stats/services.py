@@ -306,9 +306,9 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
 
 
 def building_money(first: date, last: date, buildings=None) -> list[dict]:
-    """Per building (the developers' home building): deposits, spending and balances now.
-    Developers without a building are a row of their own (`id` null) when the figures are
-    company-wide."""
+    """Per building (the developers' home building): deposits, spending and balances now,
+    and `daily` deposits and spending for the chart. Developers without a building are a
+    row of their own (`id` null) when the figures are company-wide."""
     start, end = _local_bounds(first, last)
     period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
     accounts = DeveloperAccount.objects.all()
@@ -328,6 +328,18 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
     }
+    per_day = {}
+    for row in (
+        period.annotate(day=TruncDate("created_at", tzinfo=start.tzinfo))
+        .order_by()
+        .values("account__developer__building", "day")
+        .annotate(
+            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
+            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+        )
+    ):
+        per_day[(row["account__developer__building"], row["day"])] = row
+    days = list(_days(first, last))
     held = {
         row["developer__building"]: row
         for row in accounts.order_by()
@@ -354,6 +366,14 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
                 "net": _money(deposits - spending),
                 "balance": _money(h.get("balance")),
                 "wallets": h.get("wallets", 0),
+                "daily": [
+                    {
+                        "date": day.isoformat(),
+                        "deposits": _money(per_day.get((pk, day), {}).get("deposits")),
+                        "spending": _money(-(per_day.get((pk, day), {}).get("spending") or ZERO)),
+                    }
+                    for day in days
+                ],
             }
         )
     return out
