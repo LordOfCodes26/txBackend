@@ -415,7 +415,7 @@ def test_the_desk_books_every_court(desk, world, make_user):
         lambda: tomorrow_at(10, 30),  # off the slot grid
         lambda: tomorrow_at(7),  # before opening
         lambda: tomorrow_at(19, 0),  # 2 slots would end at 21:00
-        lambda: timezone.now() - timedelta(hours=1),  # in the past
+        lambda: tomorrow_at(10) - timedelta(days=2),  # in the past (yesterday 10:00)
         lambda: tomorrow_at(10) + timedelta(days=20),  # beyond max_days_ahead
     ],
 )

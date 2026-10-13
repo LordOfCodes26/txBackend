@@ -1,10 +1,19 @@
+import uuid
+from pathlib import Path
+
 from django.conf import settings
+from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models import Q
 
 from common.models import SoftDeleteModel, TimeStampedModel
 
 ALIVE = Q(deleted_at__isnull=True)
+
+
+def _photo_path(instance, filename):
+    # A random name: media files are served without a login, so the URL must not be guessable.
+    return f"developers/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
 
 
 class DeveloperStatus(models.TextChoices):
@@ -51,6 +60,12 @@ class Developer(TimeStampedModel, SoftDeleteModel):
     )
     status = models.CharField(
         max_length=20, choices=DeveloperStatus.choices, default=DeveloperStatus.ACTIVE
+    )
+    # Shown where staff check who someone is: the developer's page, checkout, booking checks.
+    photo = models.ImageField(
+        upload_to=_photo_path,
+        blank=True,
+        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])],
     )
 
     class Meta:

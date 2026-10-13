@@ -4,6 +4,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.finance.serializers import NewPinSerializer
@@ -17,7 +18,11 @@ from . import services
 from .exceptions import DeveloperProfileNotFound
 from .filters import DeveloperFilter
 from .models import Developer
-from .serializers import DeveloperSerializer, MyDeveloperProfileSerializer
+from .serializers import (
+    DeveloperPhotoSerializer,
+    DeveloperSerializer,
+    MyDeveloperProfileSerializer,
+)
 
 
 class NewDeveloperCardSerializer(NewPinSerializer):
@@ -53,6 +58,7 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         "retrieve": ["developer.view"],
         "create": ["developer.create"],
         "partial_update": ["developer.update"],
+        "photo": ["developer.update"],
         "destroy": ["developer.delete"],
         "me": [],
         "departments": ["developer.view"],
@@ -69,6 +75,28 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         "birthday",
         "created_at",
     ]
+
+    @extend_schema(
+        methods=["POST"], request=DeveloperPhotoSerializer, responses=DeveloperSerializer
+    )
+    @extend_schema(methods=["DELETE"], request=None, responses=DeveloperSerializer)
+    @action(
+        detail=True,
+        methods=["post", "delete"],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def photo(self, request, pk=None):
+        """POST (multipart field `photo`): set or replace the photo. DELETE: remove it."""
+        developer = self.get_object()
+        if request.method == "DELETE":
+            developer = services.set_photo(actor=request.user, developer=developer, photo=None)
+        else:
+            body = DeveloperPhotoSerializer(data=request.data)
+            body.is_valid(raise_exception=True)
+            developer = services.set_photo(
+                actor=request.user, developer=developer, photo=body.validated_data["photo"]
+            )
+        return Response(DeveloperSerializer(developer).data)
 
     def create(self, request, *args, **kwargs):
         """With `card`, `pin` and `pin_confirm`, the new developer also gets that card and

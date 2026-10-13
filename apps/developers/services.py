@@ -70,3 +70,27 @@ def delete_developer(*, actor, developer: Developer) -> None:
         entity=developer,
         old_values=snapshot(developer, AUDITED_FIELDS),
     )
+
+
+@transaction.atomic
+def set_photo(*, actor, developer: Developer, photo) -> Developer:
+    """Set (`photo`) or remove (`None`) the developer's photo; the old file is deleted once
+    the change is saved."""
+    developer = Developer.objects.select_for_update().get(pk=developer.pk)
+    old = developer.photo.name if developer.photo else ""
+    if photo is None:
+        developer.photo = ""
+    else:
+        developer.photo.save(photo.name, photo, save=False)
+    developer.save(update_fields=["photo", "updated_at"])
+    if old:
+        storage = Developer._meta.get_field("photo").storage
+        transaction.on_commit(lambda: storage.delete(old))
+    record_audit(
+        "developer.photo_changed" if photo is not None else "developer.photo_removed",
+        actor=actor,
+        entity=developer,
+        old_values={"photo": old or None},
+        new_values={"photo": developer.photo.name or None},
+    )
+    return developer

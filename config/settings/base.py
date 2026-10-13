@@ -254,6 +254,7 @@ ATTENDANCE_DAY_START_HOUR = env.int("ATTENDANCE_DAY_START_HOUR", default=0)
 CURRENCY = env("CURRENCY", default="USD")
 GOOD_IMAGE_MAX_BYTES = env.int("GOOD_IMAGE_MAX_BYTES", default=5 * 1024 * 1024)
 GOOD_MAX_IMAGES = env.int("GOOD_MAX_IMAGES", default=10)
+DEVELOPER_PHOTO_MAX_BYTES = env.int("DEVELOPER_PHOTO_MAX_BYTES", default=5 * 1024 * 1024)
 
 # --- Finance ------------------------------------------------------------------
 # Largest single deposit. Bigger amounts will go through approvals (later phase).

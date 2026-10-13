@@ -1074,3 +1074,6 @@ msgstr "%(name)s - 이미 입장확인됨: %(court)s %(time)s"
 #, python-format
 msgid "%(name)s - checked in: %(court)s %(time)s"
 msgstr "%(name)s - 입장확인: %(court)s %(time)s"
+
+msgid "Use a JPEG, PNG or WebP image."
+msgstr "JPEG, PNG 또는 WebP 화상을 쓰십시오."
