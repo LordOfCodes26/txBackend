@@ -151,7 +151,11 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
         "developer_accounts": {
             "count": sum(by_status.values()),
             "by_status": by_status,
-            "total_balance": _money(accounts.aggregate(t=Sum("balance"))["t"]),
+            # Money held: what the wallets hold, positive balances only; what wallets below
+            # zero owe is "minus" (below).
+            "total_balance": _money(
+                accounts.filter(balance__gt=0).aggregate(t=Sum("balance"))["t"]
+            ),
         },
         # Wallets below zero now (purchases may go down to the minus limit): what they owe.
         "minus": {
@@ -354,7 +358,9 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         for row in accounts.order_by()
         .values("developer__building")
         .annotate(
-            held_total=Sum("balance"),  # not "balance": the filters below mean each wallet's
+            # Money held: positive balances only (what wallets below zero owe is "minus").
+            # Not named "balance": the filters mean each wallet's balance, not this sum.
+            held_total=Sum("balance", filter=Q(balance__gt=0)),
             wallets=Count("pk"),
             minus=Sum("balance", filter=Q(balance__lt=0)),
             minus_count=Count("pk", filter=Q(balance__lt=0)),

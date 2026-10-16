@@ -407,3 +407,17 @@ def test_transaction_list_shows_and_finds_the_developer(finance, developer):
     assert numbers("search=0042") == ["E1"]
     assert numbers("search=E2") == ["E2"]
     assert numbers("ordering=-account__developer__employee_number") == ["E2", "E1"]
+
+
+@pytest.mark.django_db
+def test_wallets_filter_below_zero(finance, developer):
+    from decimal import Decimal
+
+    other = Developer.objects.create(employee_number="E2", full_name="Bob")
+    services.open_account(other)
+    DeveloperAccount.objects.filter(developer=developer).update(balance=Decimal("-4.00"))
+    DeveloperAccount.objects.filter(developer=other).update(balance=Decimal("7.00"))
+    minus = finance.get(f"{ACCOUNTS}?in_minus=true").json()["results"]
+    assert [a["balance"] for a in minus] == ["-4.00"]
+    rest = finance.get(f"{ACCOUNTS}?in_minus=false").json()["results"]
+    assert [a["balance"] for a in rest] == ["7.00"]

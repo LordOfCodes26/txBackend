@@ -150,6 +150,8 @@ def test_wallets_in_minus_by_building(auth_client, make_user, site):  # noqa: F8
     DeveloperAccount.objects.filter(developer=site.ada).update(balance=Decimal("-12.50"))
     DeveloperAccount.objects.filter(developer=carl).update(balance=Decimal("-3.00"))
     DeveloperAccount.objects.filter(developer=site.bob).update(balance=Decimal("-5.00"))
+    dina = Developer.objects.create(employee_number="E4", full_name="Dina", building=site.b1)
+    finance.deposit(actor=None, developer=dina, amount="40.00", idempotency_key="minus-dina")
 
     client = auth_client(make_user(Roles.FINANCE_MANAGER))
     body = client.get(FINANCE_STATS).json()
@@ -157,5 +159,10 @@ def test_wallets_in_minus_by_building(auth_client, make_user, site):  # noqa: F8
     rows = {row["code"]: row for row in body["by_building"]}
     assert (rows["B1"]["minus"], rows["B1"]["minus_count"]) == ("-15.50", 2)
     assert (rows["B2"]["minus"], rows["B2"]["minus_count"]) == ("-5.00", 1)
+    # Money held is the positive balances only: B1 holds Dina's 40.00, B2 nothing.
+    assert (rows["B1"]["balance"], rows["B2"]["balance"]) == ("40.00", "0.00")
+    held = sum(Decimal(r["balance"]) for r in rows.values())
+    assert held == Decimal(body["money"]["developer_accounts"]["total_balance"])
+    assert body["money"]["developer_accounts"]["total_balance"] == "40.00"
     one = client.get(f"{FINANCE_STATS}?building={site.b1.pk}").json()
     assert one["money"]["minus"] == {"total": "-15.50", "count": 2}
