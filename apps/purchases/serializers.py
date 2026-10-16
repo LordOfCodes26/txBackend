@@ -9,12 +9,15 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
+from apps.finance.models import PIN_LENGTH
 from apps.goods.models import Good
 from apps.rfid.serializers import UIDField
 from apps.sellers.models import ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
 
-from .models import Purchase, PurchaseItem
+from .models import Purchase, PurchaseItem, PurchaseStatus
+
+TAKES_CARD = (PurchaseStatus.DRAFT, PurchaseStatus.CONFIRMED)
 
 
 class PurchaseItemSerializer(serializers.ModelSerializer):
@@ -115,18 +118,18 @@ class PurchaseSerializer(serializers.ModelSerializer):
     developer = DeveloperSummarySerializer(read_only=True)
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
     items = PurchaseItemSerializer(many=True, read_only=True)
+    booking = serializers.SerializerMethodField(
+        help_text="Court bookings: the booking's id (to move it); null otherwise."
+    )
     presented_card = serializers.SerializerMethodField()
     waiting_for_card = serializers.SerializerMethodField(
         help_text="The seller pressed Scan card to buy: the next tap on the reader goes here."
     )
     total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
-    balance_after = serializers.DecimalField(
-        source="account_transaction.balance_after",
-        max_digits=14,
-        decimal_places=2,
-        read_only=True,
-        default=None,
+    balance_after = serializers.SerializerMethodField(
+        help_text="The wallet balance after the purchase's last money movement (the payment, "
+        "or a later refund or extra charge)."
     )
 
     class Meta:
@@ -141,6 +144,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "reader",
             "reader_name",
             "items",
+            "booking",
             "total",
             "currency",
             "presented_card",
@@ -153,12 +157,24 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "confirmed_by",
             "confirmed_at",
             "cancelled_at",
+            "refunded_by",
+            "refunded_at",
         ]
         read_only_fields = fields
 
+    def get_booking(self, purchase) -> int | None:
+        if purchase.kind != "BOOKING" or purchase.status != "CONFIRMED":
+            return None
+        return purchase.bookings.values_list("pk", flat=True).first()
+
     def get_presented_card(self, purchase) -> dict | None:
-        """The card tapped on this counter's reader, while still valid (drafts only)."""
-        if purchase.status != "DRAFT" or purchase.presented_event_id is None:
+        """The card tapped on this counter's reader, while still valid (to pay a draft, or a
+        paid purchase's dearer change)."""
+        if (
+            purchase.status not in TAKES_CARD
+            or purchase.presented_event_id is None
+            or purchase.presented_at is None  # the tap was used
+        ):
             return None
         window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
         if purchase.presented_at < timezone.now() - window:
@@ -166,7 +182,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
         return PresentedCardSerializer(purchase).data
 
     def get_waiting_for_card(self, purchase) -> bool:
-        if purchase.status != "DRAFT" or purchase.waiting_since is None:
+        if purchase.status not in TAKES_CARD or purchase.waiting_since is None:
             return False
         window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
         return purchase.waiting_since >= timezone.now() - window
@@ -176,6 +192,24 @@ class PurchaseSerializer(serializers.ModelSerializer):
             return f"{purchase.total:.2f}"
         total = sum((i.good.price * i.quantity for i in purchase.items.all()), Decimal("0.00"))
         return f"{total:.2f}"
+
+    def get_balance_after(self, purchase) -> str | None:
+        txn = purchase.account_transaction
+        if txn is None:
+            return None
+        if purchase.status == "CONFIRMED" and -txn.amount == purchase.total:
+            return f"{txn.balance_after:.2f}"  # never changed since it was paid
+        from apps.finance.models import AccountTransaction
+
+        last = (
+            AccountTransaction.objects.filter(
+                account_id=txn.account_id, reference=f"purchase:{purchase.pk}"
+            )
+            .order_by("-created_at", "-id")
+            .values_list("balance_after", flat=True)
+            .first()
+        )
+        return f"{last:.2f}"
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
@@ -252,6 +286,33 @@ class ItemUpdateSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1, max_value=999)
 
 
+class PaidLineSerializer(serializers.Serializer):
+    # Deleted or deactivated goods too: a line already paid keeps its good.
+    good = serializers.PrimaryKeyRelatedField(queryset=Good.all_objects.all())
+    quantity = serializers.IntegerField(min_value=1, max_value=999)
+
+
+class PaidChangeSerializer(serializers.Serializer):
+    items = PaidLineSerializer(
+        many=True,
+        allow_empty=False,
+        help_text="The whole new list of lines; a line left out is removed.",
+    )
+    pin = serializers.CharField(
+        write_only=True,
+        max_length=PIN_LENGTH,
+        required=False,
+        allow_blank=True,
+        help_text="The developer's PIN; needed only when the new total is higher.",
+    )
+
+    def validate_items(self, items):
+        goods = [line["good"].pk for line in items]
+        if len(goods) != len(set(goods)):
+            raise serializers.ValidationError(_("Each good can only be listed once."))
+        return items
+
+
 class ConfirmSerializer(serializers.Serializer):
     card_uid = UIDField(
         required=False,
@@ -259,7 +320,7 @@ class ConfirmSerializer(serializers.Serializer):
         "accepted only if the server allows manual entry.",
     )
     pin = serializers.CharField(
-        write_only=True, max_length=6, help_text="PIN typed by the developer."
+        write_only=True, max_length=PIN_LENGTH, help_text="PIN typed by the developer."
     )
 
 

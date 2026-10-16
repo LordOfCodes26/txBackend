@@ -173,8 +173,8 @@ msgstr "이 계정은 동결되여 출금할수 없습니다."
 msgid "Pay out or adjust the remaining balance to zero before closing."
 msgstr "페쇄하기전에 남은 잔고를 지불하거나 0으로 조정하십시오."
 
-msgid "The PIN must be 4 to 6 digits."
-msgstr "암호번호는 4~6자리 수자여야 합니다."
+msgid "The PIN must be 4 digits."
+msgstr "암호번호는 4자리 수자여야 합니다."
 
 msgid "Choose a less obvious PIN (not 1111 or 1234)."
 msgstr "쉽게 알아낼수 없는 암호번호를 선택하십시오 (1111, 1234 등은 안됩니다)."
@@ -1098,3 +1098,21 @@ msgstr "두 암호가 같지 않습니다."
 
 msgid "Change your own password with your current one."
 msgstr "자기 암호는 현재 암호로 바꾸십시오."
+
+msgid "Only paid purchases can be changed or deleted."
+msgstr "지불된 구입만 변경하거나 삭제할수 있습니다."
+
+msgid "A paid court booking can't be edited here: move it to another time, or delete it."
+msgstr "지불된 경기장예약은 여기서 편집할수 없습니다. 다른 시간으로 옮기거나 삭제하십시오."
+
+msgid "The new total is higher: the developer taps their card and enters their PIN to pay the difference."
+msgstr "새 합계가 더 많습니다. 개발자가 카드를 대고 암호번호를 넣어 차액을 지불합니다."
+
+msgid "Tap the card of the developer who paid for this purchase."
+msgstr "이 구매를 지불한 개발자의 카드를 대십시오."
+
+msgid "Each good can only be listed once."
+msgstr "매 상품은 한번만 넣을수 있습니다."
+
+msgid "Refunded"
+msgstr "환불됨"

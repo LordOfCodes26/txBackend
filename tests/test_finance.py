@@ -231,9 +231,7 @@ def test_ledger_is_append_only(finance, developer):
 
 
 @pytest.mark.django_db
-def test_database_rejects_negative_balance_and_wrong_signs(developer):
-    with pytest.raises(IntegrityError), transaction.atomic():
-        DeveloperAccount.objects.filter(developer=developer).update(balance=-1)
+def test_database_rejects_wrong_signs(developer):
     with pytest.raises(IntegrityError), transaction.atomic():
         AccountTransaction.objects.create(
             account=developer.account, kind="DEPOSIT", amount=-5, balance_after=0

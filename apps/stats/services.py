@@ -24,6 +24,8 @@ from apps.rfid.models import Building
 from apps.sellers.models import Seller
 
 ZERO = Decimal("0.00")
+# Money spent: purchases less what was refunded (paid purchases changed or deleted).
+SPENDING = Q(kind__in=(TransactionKind.PURCHASE, TransactionKind.REFUND))
 
 
 def _days(first: date, last: date) -> list[date]:
@@ -117,7 +119,7 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
     totals = period.aggregate(
         deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
         deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
-        spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+        spending=Sum("amount", filter=SPENDING),
         spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
     )
     per_day = {
@@ -127,7 +129,7 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
         .values("day")
         .annotate(
             deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
-            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending=Sum("amount", filter=SPENDING),
         )
     }
     daily = [
@@ -267,7 +269,7 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
     period = AccountTransaction.objects.filter(
         created_at__gte=start,
         created_at__lt=end,
-        kind__in=(TransactionKind.DEPOSIT, TransactionKind.PURCHASE),
+        kind__in=(TransactionKind.DEPOSIT, TransactionKind.PURCHASE, TransactionKind.REFUND),
     )
     if buildings is not None:
         period = period.filter(account__developer__building__in=buildings)
@@ -284,7 +286,7 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
         .annotate(
             deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
             deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
-            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
     )
@@ -326,7 +328,7 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         .annotate(
             deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
             deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
-            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
     }
@@ -337,7 +339,7 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         .values("account__developer__building", "day")
         .annotate(
             deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
-            spending=Sum("amount", filter=Q(kind=TransactionKind.PURCHASE)),
+            spending=Sum("amount", filter=SPENDING),
         )
     ):
         per_day[(row["account__developer__building"], row["day"])] = row

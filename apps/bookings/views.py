@@ -114,7 +114,8 @@ class BookingViewSet(
     viewsets.GenericViewSet,
 ):
     """Court bookings. They are paid at the desk through `/bookings/checkout/` (card tap +
-    PIN). Until it starts, a booking can be moved (`change`); there are no refunds.
+    PIN). Until it starts, a booking can be moved (`change`), or deleted with its purchase
+    (`DELETE /purchases/{id}/`, refunded).
 
     Sellers see bookings of their rentals; `purchase.view` sees all.
     """
@@ -155,7 +156,9 @@ class BookingViewSet(
     @action(detail=True, methods=["post"])
     def change(self, request, pk=None):
         """Move a paid booking to another date / time, and optionally another court of the
-        same seller. Allowed until it starts; the new time must cost the same as paid."""
+        same seller. Allowed until it starts (or later if the court allows
+        `refund_after_start`). A cheaper time refunds the difference; a dearer one charges it
+        and needs the developer's `pin`."""
         booking = self.get_object()
         serializer = BookingChangeSerializer(
             data=request.data, context=self.get_serializer_context()
@@ -169,6 +172,7 @@ class BookingViewSet(
             start_time=data["start_time"],
             end_time=data["end_time"],
             good=data.get("good"),
+            pin=data.get("pin") or None,
         )
         return Response(BookingSerializer(self.queryset.get(pk=booking.pk)).data)
 

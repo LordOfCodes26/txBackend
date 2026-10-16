@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
+from apps.finance.models import PIN_LENGTH
 from apps.goods.models import Good, GoodKind
 from apps.goods.serializers import GoodImageSerializer, RentalSettingsSerializer
 from apps.purchases.serializers import ReaderField, TillReaderSerializer
@@ -197,6 +198,13 @@ class BookingChangeSerializer(BookingTimeSerializer):
         queryset=Good.objects.filter(kind=GoodKind.RENTAL),
         required=False,
         help_text="Another court of the same seller; leave out to keep the court.",
+    )
+    pin = serializers.CharField(
+        write_only=True,
+        max_length=PIN_LENGTH,
+        required=False,
+        allow_blank=True,
+        help_text="The developer's PIN; needed only when the new time costs more.",
     )
 
     def validate_good(self, good):

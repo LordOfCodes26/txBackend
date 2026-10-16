@@ -72,6 +72,7 @@ RENTAL_FIELDS = [
     "closing_time",
     "weekdays",
     "max_days_ahead",
+    "refund_after_start",
 ]
 
 

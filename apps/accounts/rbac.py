@@ -57,12 +57,15 @@ AREAS: dict[str, dict[str, str]] = {
         "finance.pin_reset": "Reset a forgotten PIN so the developer sets a new one",
         "finance.freeze": "Freeze and unfreeze wallets (spending stops, deposits still work)",
         "finance.close": "Close and reopen wallets (only a zero balance can close)",
+        "finance.minus_limit": "Set how far below zero purchases may take a wallet",
     },
     "Sales": {
         "purchase.view": "See purchases and sales statistics",
         "purchase.create": "Open a till and build a purchase",
         "purchase.confirm": "Take payment for a purchase (card and PIN)",
         "purchase.cancel": "Cancel a purchase that is not paid yet",
+        "purchase.change": "Change a paid purchase (the difference is refunded or charged)",
+        "purchase.delete": "Delete a paid purchase (the money goes back to the wallet)",
     },
     "Playground": {
         "booking.view": "See court bookings and the playground desk",
@@ -165,7 +168,8 @@ ROLES: dict[str, RoleSpec] = {
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
-        _prefixed("finance")
+        # The minus limit is the admins' decision.
+        (_prefixed("finance") - {"finance.minus_limit"})
         | {"developer.view", "purchase.view", "booking.view", "audit.view"}
         | {"excel.export", "excel.import_balances"},
     ),

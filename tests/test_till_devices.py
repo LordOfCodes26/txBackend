@@ -153,6 +153,33 @@ def test_tap_is_presented_to_open_purchase_and_confirmed(shop):
 
 
 @pytest.mark.django_db
+def test_a_used_tap_stays_linked_but_cannot_pay_again(shop):
+    """After checkout the tap still answers "it paid purchase X" (a reader re-sending it
+    gets the same reply), but it cannot pay a later, dearer change of that purchase."""
+    dev, card = make_developer(1)
+    pid = open_purchase(shop)
+    first = shop["till_client"].post(EVENTS, {"uid": card.uid, "client_event_id": "tap-1"})
+    assert first.json()["purchase"] == pid
+    assert confirm(shop, pid).status_code == 201
+
+    again = shop["till_client"].post(EVENTS, {"uid": card.uid, "client_event_id": "tap-1"})
+    assert again.status_code == 200
+    assert (again.json()["purchase"], again.json()["display_message"]) == (pid, "Dev 1 - enter PIN")
+
+    more = {"items": [{"good": shop["tea"].pk, "quantity": 3}], "pin": PIN}
+    r = shop["seller_client"].patch(f"{PURCHASES}{pid}/", more, format="json")
+    assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"
+    wait(shop, pid)
+    tap(shop, card)
+    r = shop["seller_client"].patch(f"{PURCHASES}{pid}/", more, format="json")
+    assert r.status_code == 200, r.json()
+    assert DeveloperAccount.objects.get(developer=dev).balance == Decimal("42.50")
+    # That tap is used up too, and the event still points at the purchase.
+    assert shop["seller_client"].get(f"{PURCHASES}{pid}/").json()["presented_card"] is None
+    assert Purchase.objects.get(pk=pid).presented_event_id is not None
+
+
+@pytest.mark.django_db
 def test_confirm_without_tap_is_rejected(shop):
     pid = open_purchase(shop)
     assert confirm(shop, pid).json()["error"]["code"] == "CARD_NOT_PRESENTED"

@@ -27,7 +27,7 @@ class DeveloperSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Developer
-        fields = ["id", "employee_number", "full_name", "department", "photo"]
+        fields = ["id", "employee_number", "full_name", "department", "position_title", "photo"]
 
 
 class DeveloperSerializer(serializers.ModelSerializer):

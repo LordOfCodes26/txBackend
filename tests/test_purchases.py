@@ -8,20 +8,23 @@ import pytest
 from django.db import connection, transaction
 from django.utils import timezone
 from openpyxl import load_workbook
+from rest_framework.test import APIClient
 
 from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.developers.models import Developer, DeveloperStatus
 from apps.finance import services as finance
-from apps.finance.models import AccountTransaction, DeveloperAccount
+from apps.finance.models import AccountTransaction, DeveloperAccount, WalletSettings
 from apps.goods import services as goods
 from apps.goods.models import Good, InventoryMovement
 from apps.purchases import services
 from apps.purchases.models import Purchase
-from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
+from apps.rfid import services as rfid
+from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment, RFIDDevice
 from apps.sellers.models import Seller, ServicePosition
 
 PURCHASES = "/api/v1/purchases/"
+EVENTS = "/api/v1/rfid/events/"
 PIN = "4826"
 
 
@@ -341,6 +344,220 @@ def test_cancel_draft(till, world):
     assert till.post(f"{PURCHASES}{pid}/cancel/").json()["status"] == "CANCELLED"
     assert confirm(till, pid).json()["error"]["code"] == "PURCHASE_NOT_DRAFT"
     assert (balance(world), stock(world.tea)) == (Decimal("50.00"), 10)
+
+
+# --- Changing or deleting a paid purchase -------------------------------------------
+
+
+def paid(client, world, *items):
+    pid = new_purchase(client, world, *items)
+    assert confirm(client, pid).status_code == 201
+    return pid
+
+
+def lines(*items, pin=None):
+    body = {"items": [{"good": good.pk, "quantity": qty} for good, qty in items]}
+    return body if pin is None else body | {"pin": pin}
+
+
+@pytest.mark.django_db
+def test_seller_deletes_own_paid_purchase_and_money_goes_back(till, world):
+    pid = paid(till, world, (world.tea, 3), (world.coffee, 1))
+    assert (balance(world), stock(world.tea)) == (Decimal("39.50"), 7)
+
+    response = till.delete(f"{PURCHASES}{pid}/")
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["status"] == "REFUNDED" and body["refunded_at"]
+    assert body["balance_after"] == "50.00"
+    assert (balance(world), stock(world.tea)) == (Decimal("50.00"), 10)
+    refund = AccountTransaction.objects.get(kind="REFUND")
+    assert (refund.amount, refund.reference) == (Decimal("10.50"), f"purchase:{pid}")
+    back = InventoryMovement.objects.get(kind="RETURN")
+    assert (back.good_id, back.quantity_delta) == (world.tea.pk, 3)
+    assert AuditLog.objects.filter(action="purchase.refunded", entity_id=str(pid)).exists()
+    assert_books_balanced()
+
+    # Only once; and drafts are cancelled, not deleted.
+    assert till.delete(f"{PURCHASES}{pid}/").json()["error"]["code"] == "PURCHASE_NOT_PAID"
+    draft = new_purchase(till, world, (world.tea, 1))
+    assert till.delete(f"{PURCHASES}{draft}/").json()["error"]["code"] == "PURCHASE_NOT_PAID"
+    assert balance(world) == Decimal("50.00")
+
+
+@pytest.mark.django_db
+def test_lower_total_refunds_the_difference(till, world):
+    pid = paid(till, world, (world.tea, 3), (world.cake, 1))  # 7.50 + 4.00
+    assert balance(world) == Decimal("38.50")
+
+    response = till.patch(f"{PURCHASES}{pid}/", lines((world.tea, 1)), format="json")
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["status"] == "CONFIRMED" and body["total"] == "2.50"
+    assert body["balance_after"] == "47.50"
+    assert [(i["good_name"], i["quantity"], i["line_total"]) for i in body["items"]] == [
+        ("Tea", 1, "2.50")
+    ]
+    assert balance(world) == Decimal("47.50")
+    assert (stock(world.tea), stock(world.cake)) == (9, 2)
+    assert AccountTransaction.objects.get(kind="REFUND").amount == Decimal("9.00")
+    assert AuditLog.objects.filter(action="purchase.changed", entity_id=str(pid)).exists()
+    assert_books_balanced()
+
+    # The same list again changes nothing (a retry is safe).
+    till.patch(f"{PURCHASES}{pid}/", lines((world.tea, 1)), format="json")
+    assert AccountTransaction.objects.filter(kind="REFUND").count() == 1
+
+
+def tap_on_till(client, world, pid, uid="04AABBCCDD"):
+    """The seller presses Scan card on the purchase's till reader; the card is tapped."""
+    if not RFIDDevice.objects.filter(code="TILL-CAFE").exists():
+        _device, world.till_key = rfid.register_device(
+            actor=None, code="TILL-CAFE", purpose="TILL", seller=world.seller
+        )
+        client.post(f"{PURCHASES}{pid}/reader/", {"reader": "TILL-CAFE"})
+    assert client.post(f"{PURCHASES}{pid}/wait/").status_code == 200
+    reader = APIClient()
+    reader.credentials(HTTP_AUTHORIZATION=f"Device {world.till_key}")
+    assert reader.post(EVENTS, {"uid": uid}).status_code in (200, 201)
+
+
+@pytest.mark.django_db
+def test_higher_total_needs_card_tap_and_pin(till, world):
+    pid = paid(till, world, (world.tea, 1))
+    Good.objects.filter(pk=world.tea.pk).update(price="9.00")  # the paid line keeps its price
+
+    more = lines((world.tea, 2), (world.cake, 1))  # 2 × 2.50 + 4.00
+    response = till.patch(f"{PURCHASES}{pid}/", more, format="json")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "PIN_REQUIRED"
+    no_tap = till.patch(f"{PURCHASES}{pid}/", more | {"pin": PIN}, format="json")
+    assert no_tap.json()["error"]["code"] == "CARD_NOT_PRESENTED"
+
+    # Someone else's card does not pay for Ada's purchase.
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BBBB"), developer=bob)
+    tap_on_till(till, world, pid, uid="04BBBB")
+    body = till.get(f"{PURCHASES}{pid}/").json()
+    assert body["presented_card"]["developer"]["full_name"] == "Bob"
+    other = till.patch(f"{PURCHASES}{pid}/", more | {"pin": PIN}, format="json")
+    assert other.json()["error"]["code"] == "CARD_NOT_USABLE"
+
+    tap_on_till(till, world, pid)
+    wrong = till.patch(f"{PURCHASES}{pid}/", more | {"pin": "0000"}, format="json")
+    assert wrong.json()["error"]["code"] == "INVALID_PIN"
+    assert (balance(world), stock(world.tea)) == (Decimal("47.50"), 9)
+
+    response = till.patch(f"{PURCHASES}{pid}/", more | {"pin": PIN}, format="json")
+    assert response.status_code == 200, response.json()
+    assert response.json()["total"] == "9.00"
+    assert response.json()["presented_card"] is None  # the tap was used up
+    assert balance(world) == Decimal("41.00")
+    assert (stock(world.tea), stock(world.cake)) == (8, 1)
+    charges = AccountTransaction.objects.filter(kind="PURCHASE").order_by("id")
+    assert [t.amount for t in charges] == [Decimal("-2.50"), Decimal("-6.50")]
+    assert_books_balanced()
+
+    # Cheaper changes need no tap; deleting refunds everything that was paid.
+    r = till.patch(f"{PURCHASES}{pid}/", lines((world.tea, 2)), format="json")
+    assert r.status_code == 200, r.json()
+    till.delete(f"{PURCHASES}{pid}/")
+    assert (balance(world), stock(world.tea), stock(world.cake)) == (Decimal("50.00"), 10, 2)
+    assert_books_balanced()
+
+
+@pytest.mark.django_db
+def test_change_checks_stock_and_input(till, world):
+    pid = paid(till, world, (world.cake, 1))
+    r = till.patch(f"{PURCHASES}{pid}/", lines((world.cake, 5), pin=PIN), format="json")
+    assert r.json()["error"]["code"] == "INSUFFICIENT_STOCK"
+    r = till.patch(f"{PURCHASES}{pid}/", {"items": []}, format="json")
+    assert r.status_code == 400
+    r = till.patch(f"{PURCHASES}{pid}/", lines((world.cake, 1), (world.cake, 1)), format="json")
+    assert r.status_code == 400
+    assert (balance(world), stock(world.cake)) == (Decimal("46.00"), 1)
+
+
+@pytest.mark.django_db
+def test_only_own_paid_purchases_can_be_changed(auth_client, make_user, till, world):
+    pid = paid(till, world, (world.tea, 2))
+    other_user = make_user(*SELLER_ROLES)
+    Seller.objects.create(name="Other", user=other_user)
+    other = auth_client(other_user)
+    assert other.delete(f"{PURCHASES}{pid}/").status_code == 404
+    response = other.patch(f"{PURCHASES}{pid}/", lines((world.tea, 1)), format="json")
+    assert response.status_code == 404
+    assert auth_client(make_user(Roles.BOSS)).delete(f"{PURCHASES}{pid}/").status_code == 403
+    assert auth_client(world.dev_user).delete(f"{PURCHASES}{pid}/").status_code == 403
+    assert balance(world) == Decimal("45.00")
+
+    assert auth_client(make_user(Roles.ADMIN)).delete(f"{PURCHASES}{pid}/").status_code == 200
+    assert balance(world) == Decimal("50.00")
+
+
+@pytest.mark.django_db
+def test_spending_stats_net_out_refunds(till, world):
+    from apps.stats import services as stats
+
+    pid = paid(till, world, (world.tea, 2))
+    paid(till, world, (world.cake, 1))
+    till.delete(f"{PURCHASES}{pid}/")
+    today = timezone.localdate()
+    assert stats.money(today, today)["spending"]["total"] == "4.00"
+
+
+# --- Minus limit --------------------------------------------------------------------
+
+SETTINGS = "/api/v1/finance/settings/"
+
+
+@pytest.mark.django_db
+def test_only_admins_set_the_minus_limit(auth_client, make_user, world):
+    assert auth_client(make_user(Roles.BOSS)).get(SETTINGS).json()["minus_limit"] == "0.00"
+    finance_manager = auth_client(make_user(Roles.FINANCE_MANAGER))
+    assert finance_manager.patch(SETTINGS, {"minus_limit": "20.00"}).status_code == 403
+    admin = auth_client(make_user(Roles.ADMIN))
+    assert admin.patch(SETTINGS, {"minus_limit": "-1"}).status_code == 400
+    r = admin.patch(SETTINGS, {"minus_limit": "20.00"})
+    assert r.status_code == 200, r.json()
+    assert r.json()["minus_limit"] == "20.00"
+    assert AuditLog.objects.filter(action="finance.minus_limit_changed").exists()
+
+
+@pytest.mark.django_db
+def test_purchases_may_go_into_minus_up_to_the_limit(auth_client, make_user, till, world):
+    Good.objects.filter(pk__in=[world.tea.pk, world.cake.pk]).update(price="30.00")
+    first = paid(till, world, (world.tea, 1))  # 50.00 -> 20.00
+    pid = new_purchase(till, world, (world.cake, 1))
+    r = confirm(till, pid)  # 20.00 - 30.00: no minus allowed yet
+    assert r.json()["error"]["code"] == "INSUFFICIENT_BALANCE"
+
+    WalletSettings.objects.update_or_create(pk=1, defaults={"minus_limit": "15.00"})
+    r = confirm(till, pid)
+    assert r.status_code == 201, r.json()
+    assert balance(world) == Decimal("-10.00")
+    assert r.json()["balance_after"] == "-10.00"
+    # Down to -15.00 at most.
+    third = new_purchase(till, world, (world.coffee, 2))  # 6.00
+    r = confirm(till, third)
+    assert r.json()["error"]["code"] == "INSUFFICIENT_BALANCE"
+    assert r.json()["error"]["details"]["minus_limit"] == "15.00"
+
+    # Manual corrections never push a wallet into minus.
+    finance_manager = auth_client(make_user(Roles.FINANCE_MANAGER))
+    r = finance_manager.post(
+        "/api/v1/finance/adjustments/",
+        {"developer": world.developer.pk, "amount": "-1.00", "reason": "test"},
+        HTTP_IDEMPOTENCY_KEY=key(),
+    )
+    assert r.json()["error"]["code"] == "INSUFFICIENT_BALANCE"
+
+    # Refunds and deposits always go through while in minus.
+    auth_client(world.seller_user).delete(f"{PURCHASES}{first}/")
+    assert balance(world) == Decimal("20.00")
+    finance.deposit(actor=None, developer=world.developer, amount="5.00", idempotency_key="d-2")
+    assert balance(world) == Decimal("25.00")
+    assert_books_balanced()
 
 
 # --- Scoping ------------------------------------------------------------------------

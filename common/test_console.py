@@ -130,7 +130,8 @@ class SimulateTapView(APIView):
     def post(self, request):
         _ensure_enabled()
         purchase = _purchase_for(request, request.data.get("purchase"))
-        if purchase.status != PurchaseStatus.DRAFT:
+        # A draft to pay, or a paid purchase whose change costs more.
+        if purchase.status not in (PurchaseStatus.DRAFT, PurchaseStatus.CONFIRMED):
             raise ValidationError({"purchase": [_("Only draft purchases can be paid.")]})
         uid = str(request.data.get("uid") or "").strip()
         if not uid:

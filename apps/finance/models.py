@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -7,6 +8,8 @@ from apps.developers.models import Developer
 from common.models import AppendOnlyModel, TimeStampedModel
 
 MONEY = {"max_digits": 14, "decimal_places": 2}
+# Purchase PINs are exactly this many digits.
+PIN_LENGTH = 4
 
 
 class AccountStatus(models.TextChoices):
@@ -20,7 +23,8 @@ class DeveloperAccount(TimeStampedModel):
 
     `balance` is a cache of the ledger (`AccountTransaction`). It only changes through
     `finance.services.post_transaction`, which locks this row, so concurrent deposits
-    and purchases are applied one at a time. The database refuses a negative balance.
+    and purchases are applied one at a time. Purchases and bookings may take it below
+    zero down to the company's minus limit (`WalletSettings`); nothing else can.
     """
 
     developer = models.OneToOneField(Developer, on_delete=models.PROTECT, related_name="account")
@@ -36,11 +40,6 @@ class DeveloperAccount(TimeStampedModel):
 
     class Meta:
         ordering = ["developer__full_name", "id"]
-        constraints = [
-            models.CheckConstraint(
-                condition=Q(balance__gte=0), name="account_balance_not_negative"
-            ),
-        ]
 
     def __str__(self):
         return f"{self.developer} ({self.balance})"
@@ -89,9 +88,6 @@ class AccountTransaction(AppendOnlyModel):
                 ),
                 name="transaction_amount_sign_matches_kind",
             ),
-            models.CheckConstraint(
-                condition=Q(balance_after__gte=0), name="transaction_balance_not_negative"
-            ),
             models.UniqueConstraint(
                 "idempotency_key",
                 condition=~Q(idempotency_key=""),
@@ -102,3 +98,32 @@ class AccountTransaction(AppendOnlyModel):
 
     def __str__(self):
         return f"{self.kind} {self.amount} → {self.balance_after}"
+
+
+class WalletSettings(TimeStampedModel):
+    """Company-wide wallet rules, set by admins. One row (pk=1); see `current()`."""
+
+    minus_limit = models.DecimalField(
+        **MONEY,
+        default=0,
+        validators=[MinValueValidator(0)],
+        help_text="How far below zero purchases and bookings may take a wallet (0: never).",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        verbose_name_plural = "wallet settings"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(minus_limit__gte=0), name="wallet_minus_limit_not_negative"
+            ),
+        ]
+
+    def __str__(self):
+        return f"Minus limit {self.minus_limit}"
+
+    @classmethod
+    def current(cls) -> "WalletSettings":
+        return cls.objects.get_or_create(pk=1)[0]

@@ -86,6 +86,11 @@ class RentalSettings(models.Model):
     max_days_ahead = models.PositiveSmallIntegerField(
         default=30, help_text="How many days in advance a slot can be booked."
     )
+    refund_after_start = models.BooleanField(
+        default=False,
+        help_text="Paid bookings can still be changed, or deleted and refunded, once they have "
+        "started or ended (e.g. a no-show). Never after the developer checked in.",
+    )
 
     class Meta:
         constraints = [

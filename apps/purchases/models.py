@@ -15,6 +15,7 @@ class PurchaseStatus(models.TextChoices):
     DRAFT = "DRAFT", "Draft (bucket being built)"
     CONFIRMED = "CONFIRMED", "Confirmed (paid)"
     CANCELLED = "CANCELLED", "Cancelled"
+    REFUNDED = "REFUNDED", "Refunded (deleted after payment)"
 
 
 class PurchaseKind(models.TextChoices):
@@ -27,7 +28,10 @@ class Purchase(TimeStampedModel):
 
     A seller builds a DRAFT bucket, then confirms it with the developer's card and PIN.
     Confirmation is one database transaction: stock, the developer's balance and the
-    purchase are updated together or not at all. Confirmed purchases are final.
+    purchase are updated together or not at all. A confirmed till sale can later be
+    changed (the difference is refunded or charged) or deleted (REFUNDED: the total goes
+    back to the wallet and the goods back to stock); see services.change_paid_purchase /
+    refund_purchase.
     """
 
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="purchases")
@@ -83,6 +87,10 @@ class Purchase(TimeStampedModel):
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    refunded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    refunded_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]

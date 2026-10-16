@@ -7,6 +7,7 @@ import pytest
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+from rest_framework.test import APIClient
 
 from apps.accounts.rbac import SELLER_ROLES, Roles
 from apps.audit.models import AuditLog
@@ -849,16 +850,57 @@ def test_change_to_another_court(desk, world, paid):
 
 
 @pytest.mark.django_db
-def test_change_must_cost_the_same(desk, world, paid):
+def test_shorter_booking_refunds_and_longer_one_charges_with_pin(desk, world, paid):
     day = tomorrow_at(0).date().isoformat()
+    pid = paid.purchase_id
+    # 2 slots -> 1: 20.00 back to the wallet; the purchase follows.
     r = change(desk, paid.pk, date=day, start_time="14:00", end_time="15:00")
-    assert r.status_code == 409
-    assert r.json()["error"] == {
-        "code": "BOOKING_PRICE_DIFFERENT",
-        "message": "The new time must cost the same as the booking (same number of slots "
-        "and price).",
-        "details": {"paid": "40.00", "new_price": "20.00"},
-    }
+    assert r.status_code == 200, r.json()
+    assert (r.json()["total"], r.json()["slots"]) == ("20.00", 1)
+    assert balance(world) == Decimal("80.00")
+    body = desk.get(f"{PURCHASES}{pid}/").json()
+    assert (body["total"], body["balance_after"], body["booking"]) == ("20.00", "80.00", paid.pk)
+    line = body["items"][0]
+    assert (line["quantity"], line["start_time"], line["line_total"]) == (1, "14:00", "20.00")
+
+    # 1 slot -> 3: 40.00 more, only with the developer's card tap and PIN.
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="17:00")
+    assert r.json()["error"]["code"] == "PIN_REQUIRED"
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="17:00", pin=PIN)
+    assert r.json()["error"]["code"] == "CARD_NOT_PRESENTED"
+    _till, till_key = rfid.register_device(
+        actor=None, code="TILL-DESK", purpose="TILL", seller=world.seller
+    )
+    desk.post(f"{PURCHASES}{pid}/reader/", {"reader": "TILL-DESK"})
+    assert desk.post(f"{PURCHASES}{pid}/wait/").status_code == 200
+    reader = APIClient()
+    reader.credentials(HTTP_AUTHORIZATION=f"Device {till_key}")
+    reader.post("/api/v1/rfid/events/", {"uid": UID})
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="17:00", pin="0000")
+    assert r.json()["error"]["code"] == "INVALID_PIN"
+    assert balance(world) == Decimal("80.00")
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="17:00", pin=PIN)
+    assert r.status_code == 200, r.json()
+    assert balance(world) == Decimal("40.00")
+    assert Purchase.objects.get(pk=pid).total == Decimal("60.00")
+    assert finance.ledger_mismatches() == []
+
+    # Deleting it refunds everything paid in the end.
+    desk.delete(f"{PURCHASES}{pid}/")
+    assert balance(world) == Decimal("100.00")
+
+
+@pytest.mark.django_db
+def test_court_option_allows_moving_a_past_booking(desk, world, paid):
+    past = timezone.now() - timedelta(days=2)
+    Booking.objects.filter(pk=paid.pk).update(start=past, end=past + timedelta(hours=2))
+    day = tomorrow_at(0).date().isoformat()
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.json()["error"]["code"] == "BOOKING_STARTED"
+    RentalSettings.objects.filter(good=world.playground).update(refund_after_start=True)
+    r = change(desk, paid.pk, date=day, start_time="14:00", end_time="16:00")
+    assert r.status_code == 200, r.json()
+    assert balance(world) == Decimal("60.00")
 
 
 @pytest.mark.django_db
@@ -886,6 +928,65 @@ def test_started_bookings_cannot_change(desk, world, paid):
     day = tomorrow_at(0).date().isoformat()
     r = change(desk, paid.pk, date=day, start_time="14:00", end_time="16:00")
     assert r.json()["error"]["code"] == "BOOKING_STARTED"
+
+
+@pytest.mark.django_db
+def test_deleting_a_paid_booking_refunds_it_and_frees_the_time(desk, world, paid):
+    pid = paid.purchase_id
+    r = desk.patch(f"{PURCHASES}{pid}/", {"items": []}, format="json")
+    assert r.status_code == 400  # a paid booking is moved, not edited
+    r = desk.patch(
+        f"{PURCHASES}{pid}/",
+        {"items": [{"good": world.playground.pk, "quantity": 1}]},
+        format="json",
+    )
+    assert r.json()["error"]["code"] == "PAID_BOOKING_NOT_EDITABLE"
+
+    r = desk.delete(f"{PURCHASES}{pid}/")
+    assert r.status_code == 200, r.json()
+    assert r.json()["status"] == "REFUNDED"
+    assert balance(world) == Decimal("100.00")
+    assert not Booking.objects.exists()
+    assert AuditLog.objects.filter(action="booking.deleted").exists()
+    assert finance.ledger_mismatches() == []
+    # The time is free again.
+    assert book(desk, world, tomorrow_at(10), slots=2).status_code == 201
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("state", ["started", "checked_in"])
+def test_started_or_checked_in_bookings_cannot_be_deleted(desk, world, paid, state):
+    if state == "started":
+        Booking.objects.filter(pk=paid.pk).update(
+            start=timezone.now() - timedelta(minutes=5),
+            end=timezone.now() + timedelta(minutes=55),
+        )
+    else:
+        Booking.objects.filter(pk=paid.pk).update(checked_in_at=timezone.now())
+    r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
+    assert r.json()["error"]["code"] in {"BOOKING_STARTED", "BOOKING_CHECKED_IN"}
+    assert balance(world) == Decimal("60.00")
+    assert Booking.objects.exists()
+
+
+@pytest.mark.django_db
+def test_court_option_allows_refunding_a_past_booking_unless_checked_in(desk, world, paid):
+    from apps.goods.models import RentalSettings
+
+    RentalSettings.objects.filter(good=world.playground).update(refund_after_start=True)
+    past = timezone.now() - timedelta(days=2)
+    Booking.objects.filter(pk=paid.pk).update(
+        checked_in_at=timezone.now(), start=past, end=past + timedelta(hours=2)
+    )
+    r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
+    assert r.json()["error"]["code"] == "BOOKING_CHECKED_IN"
+
+    Booking.objects.filter(pk=paid.pk).update(checked_in_at=None)  # a no-show
+    r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
+    assert r.status_code == 200, r.json()
+    assert balance(world) == Decimal("100.00")
+    assert not Booking.objects.exists()
+    assert finance.ledger_mismatches() == []
 
 
 @pytest.mark.django_db

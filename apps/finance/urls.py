@@ -12,5 +12,6 @@ router.register(
 urlpatterns = [
     path("finance/deposits/", views.DepositView.as_view(), name="finance-deposit"),
     path("finance/adjustments/", views.AdjustmentView.as_view(), name="finance-adjustment"),
+    path("finance/settings/", views.WalletSettingsView.as_view(), name="finance-settings"),
     *router.urls,
 ]

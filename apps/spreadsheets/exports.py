@@ -369,7 +369,12 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
 
 
 # The purchases page's short names.
-PURCHASE_STATUS = {"CONFIRMED": _("Paid"), "DRAFT": _("Draft"), "CANCELLED": _("Cancelled")}
+PURCHASE_STATUS = {
+    "CONFIRMED": _("Paid"),
+    "DRAFT": _("Draft"),
+    "CANCELLED": _("Cancelled"),
+    "REFUNDED": _("Refunded"),
+}
 PURCHASE_KIND = {"SALE": _("Sale"), "BOOKING": _("Booking")}
 
 

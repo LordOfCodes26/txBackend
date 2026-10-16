@@ -31,6 +31,7 @@ from .serializers import (
     ConfirmSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
+    PaidChangeSerializer,
     PerformanceSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
@@ -56,6 +57,8 @@ SELLER_ACTIONS = (
     "stop_waiting",
     "confirm",
     "cancel",
+    "partial_update",
+    "destroy",
 )
 
 
@@ -68,6 +71,8 @@ class PurchaseViewSet(
     viewsets.GenericViewSet,
 ):
     """Till flow: create a draft, add items, confirm with the developer's card + PIN.
+    A paid purchase can then be changed (PATCH) or deleted (DELETE): the money is refunded
+    or the difference charged.
 
     Active sellers work with their own purchases; `purchase.*` permissions cover all.
     Developers see their own confirmed purchases at `/purchases/me/`.
@@ -98,6 +103,8 @@ class PurchaseViewSet(
         "stop_waiting": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
+        "partial_update": ["purchase.change"],
+        "destroy": ["purchase.delete"],
         "me": [],
     }
     seller_actions = SELLER_ACTIONS
@@ -303,8 +310,30 @@ class PurchaseViewSet(
     @extend_schema(request=None, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
-        """Abandon a draft. Confirmed purchases are final."""
+        """Abandon a draft. Paid purchases are deleted with DELETE (refunded)."""
         purchase = services.cancel_purchase(actor=request.user, purchase=self.get_object())
+        return self._respond(purchase)
+
+    @extend_schema(request=PaidChangeSerializer, responses=PurchaseSerializer)
+    def partial_update(self, request, *args, **kwargs):
+        """Change a paid till sale: send the whole new list of lines. A lower total is
+        refunded to the developer's wallet at once; a higher total charges the difference:
+        the developer taps their card on the purchase's reader (`wait` first) and gives their
+        `pin`. Paid court bookings are moved on their own page."""
+        purchase = self.get_object()
+        serializer = PaidChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase = services.change_paid_purchase(
+            actor=request.user, purchase=purchase, **serializer.validated_data
+        )
+        return self._respond(purchase)
+
+    @extend_schema(request=None, responses={200: PurchaseSerializer})
+    def destroy(self, request, *args, **kwargs):
+        """Delete a paid purchase: the total goes back to the developer's wallet, the goods
+        back to stock, and the purchase is kept as REFUNDED. A court booking can be deleted
+        until it starts (not after check-in). Drafts are cancelled instead (`cancel`)."""
+        purchase = services.refund_purchase(actor=request.user, purchase=self.get_object())
         return self._respond(purchase)
 
     @action(detail=False, methods=["get"])

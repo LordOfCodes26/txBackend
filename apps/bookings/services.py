@@ -14,7 +14,6 @@ from apps.sellers.models import SellerStatus
 from .exceptions import (
     AlreadyBookedThen,
     BookingCheckedIn,
-    BookingPriceDifferent,
     BookingStarted,
     InvalidSlot,
     RentalNotAvailable,
@@ -255,75 +254,128 @@ def start_checkout(
 # --- Changing a paid booking -------------------------------------------------------------
 
 
-@transaction.atomic
 def change_booking(
-    *, actor, booking: Booking, day: date, start_time, end_time, good: Good | None = None
+    *,
+    actor,
+    booking: Booking,
+    day: date,
+    start_time,
+    end_time,
+    good: Good | None = None,
+    pin: str | None = None,
 ) -> Booking:
     """Move a paid booking to another time and/or another court of the same seller.
 
-    Allowed until the booking starts. For now the new time must cost the same as what was
-    paid (no money moves); the same rules as a new booking apply, ignoring the booking
-    itself. Locks: account, then the courts by id (as at checkout).
+    Allowed until the booking starts (later too if its court allows `refund_after_start`,
+    e.g. to rebook a no-show), never after check-in. The same rules as a new booking apply,
+    ignoring the booking itself. The new time may cost more or less than what was paid: a
+    cheaper one refunds the difference to the wallet, a dearer one charges it and needs the
+    developer's card tap on the purchase's reader and their `pin` (as at checkout). The
+    purchase's line and total follow the booking.
+    Locks: purchase, booking, account, then the courts by id (as at checkout).
     """
-    booking = Booking.objects.select_for_update().select_related("purchase").get(pk=booking.pk)
-    if booking.start <= timezone.now():
-        raise BookingStarted()
-    if booking.checked_in_at is not None:
-        raise BookingCheckedIn()
-    target = good or booking.good
-    DeveloperAccount.objects.select_for_update().filter(developer=booking.developer_id).first()
-    courts = {
-        g.pk: g
-        for g in Good.all_objects.select_for_update(of=("self",))
-        .select_related("service_position__seller", "rental")
-        .filter(pk__in={booking.good_id, target.pk})
-        .order_by("pk")
-    }
-    target = courts[target.pk]
-    if target.service_position.seller_id != booking.good.service_position.seller_id:
-        raise RentalNotAvailable(_("A booking can only move to a court of the same seller."))
-    rules = _ensure_bookable(target)
-    start, slots = time_range(good=target, day=day, start_time=start_time, end_time=end_time)
-    end = _validate_slot(rules, start, slots)
+    from apps.finance import services as finance
+    from apps.finance.models import TransactionKind
+    from apps.purchases import services as purchases
 
-    paid = booking.purchase.total
-    price = target.price * slots
-    if price != paid:
-        raise BookingPriceDifferent(details={"paid": str(paid), "new_price": str(price)})
+    if pin:
+        # Own transaction (as at checkout), so a wrong PIN is counted even if we fail later.
+        finance.verify_pin(account=finance.open_account(booking.developer), pin=pin)
 
-    if (
-        Booking.objects.filter(good=target, start__lt=end, end__gt=start)
-        .exclude(pk=booking.pk)
-        .exists()
-    ):
-        raise SlotUnavailable()
-    _ensure_developer_free(booking.developer, start, end, exclude=booking.pk)
+    with transaction.atomic():
+        purchase = Purchase.objects.select_for_update().get(pk=booking.purchase_id)
+        booking = (
+            Booking.objects.select_for_update(of=("self",))
+            .select_related("good__rental", "developer")
+            .get(pk=booking.pk)
+        )
+        if booking.checked_in_at is not None:
+            raise BookingCheckedIn()
+        rules_now = getattr(booking.good, "rental", None)
+        if booking.start <= timezone.now() and not (rules_now and rules_now.refund_after_start):
+            raise BookingStarted()
+        target = good or booking.good
+        account = DeveloperAccount.objects.select_for_update().get(
+            developer_id=booking.developer_id
+        )
+        courts = {
+            g.pk: g
+            for g in Good.all_objects.select_for_update(of=("self",))
+            .select_related("service_position__seller", "rental")
+            .filter(pk__in={booking.good_id, target.pk})
+            .order_by("pk")
+        }
+        target = courts[target.pk]
+        if target.service_position.seller_id != booking.good.service_position.seller_id:
+            raise RentalNotAvailable(_("A booking can only move to a court of the same seller."))
+        rules = _ensure_bookable(target)
+        start, slots = time_range(good=target, day=day, start_time=start_time, end_time=end_time)
+        end = _validate_slot(rules, start, slots)
 
-    old = {
-        "good": booking.good_id,
-        "start": booking.start.isoformat(),
-        "end": booking.end.isoformat(),
-        "slots": booking.slots,
-    }
-    booking.good, booking.start, booking.end, booking.slots = target, start, end, slots
-    booking.change_count += 1
-    try:
-        with transaction.atomic():
-            booking.save()
-    except IntegrityError as exc:
-        raise _constraint_error(exc) from exc
-    record_audit(
-        "booking.changed",
-        actor=actor,
-        entity=booking,
-        old_values=old,
-        new_values={
-            "good": target.pk,
-            "start": start.isoformat(),
-            "end": end.isoformat(),
-            "slots": slots,
-        },
-    )
+        paid = purchase.total
+        price = finance.money(target.price * slots)
+        difference = price - paid
+        if difference > 0:
+            purchases.ensure_payer_present(purchase, pin)
+
+        if (
+            Booking.objects.filter(good=target, start__lt=end, end__gt=start)
+            .exclude(pk=booking.pk)
+            .exists()
+        ):
+            raise SlotUnavailable()
+        _ensure_developer_free(booking.developer, start, end, exclude=booking.pk)
+
+        old = {
+            "good": booking.good_id,
+            "start": booking.start.isoformat(),
+            "end": booking.end.isoformat(),
+            "slots": booking.slots,
+            "total": str(paid),
+        }
+        booking.good, booking.start, booking.end, booking.slots = target, start, end, slots
+        booking.change_count += 1
+        try:
+            with transaction.atomic():
+                booking.save()
+        except IntegrityError as exc:
+            raise _constraint_error(exc) from exc
+
+        txn = None
+        if difference:
+            txn = finance.post_transaction(
+                account=account,
+                kind=TransactionKind.PURCHASE if difference > 0 else TransactionKind.REFUND,
+                amount=-difference,
+                actor=actor,
+                description=f"Booking {booking.pk} changed",
+                reference=f"purchase:{purchase.pk}",
+                allow_minus=True,
+            )
+            if difference > 0:
+                purchases.clear_presented(purchase)
+        purchase.items.update(
+            good=target, start=start, quantity=slots, unit_price=target.price, line_total=price
+        )
+        if price != paid:
+            purchase.total = price
+            purchase.save(update_fields=["total", "updated_at"])
+
+        record_audit(
+            "booking.changed",
+            actor=actor,
+            entity=booking,
+            old_values=old,
+            new_values={
+                "good": target.pk,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "slots": slots,
+                "total": str(price),
+                "difference": str(difference),
+                "balance_after": str(txn.balance_after if txn else account.balance),
+            },
+        )
     return booking
 
 

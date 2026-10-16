@@ -22,7 +22,14 @@ from .exceptions import (
     PinNotSet,
     SelfTransactionForbidden,
 )
-from .models import AccountStatus, AccountTransaction, DeveloperAccount, TransactionKind
+from .models import (
+    PIN_LENGTH,
+    AccountStatus,
+    AccountTransaction,
+    DeveloperAccount,
+    TransactionKind,
+    WalletSettings,
+)
 
 CENT = Decimal("0.01")
 
@@ -45,12 +52,14 @@ def post_transaction(
     description: str = "",
     reference: str = "",
     idempotency_key: str = "",
+    allow_minus: bool = False,
 ) -> AccountTransaction:
     """The only way a balance changes. Must run inside a transaction.
 
     Locks the account row: concurrent deposits and purchases on one account are applied
-    strictly one after another, and the balance can never go below zero. Checkout will
-    call this with kind=PURCHASE after locking the account first.
+    strictly one after another. A debit may not take the balance below zero, except with
+    `allow_minus` (purchases and bookings): then down to the company's minus limit.
+    Credits always go through, even while the balance is below zero.
     """
     amount = money(amount)
     account = DeveloperAccount.objects.select_for_update().get(pk=account.pk)
@@ -60,10 +69,13 @@ def post_transaction(
         raise AccountNotActive(_("This account is frozen and cannot be debited."))
 
     new_balance = account.balance + amount
-    if new_balance < 0:
-        raise InsufficientBalance(
-            details={"balance": str(account.balance), "required": str(-amount)}
-        )
+    if amount < 0 and new_balance < 0:
+        limit = money(WalletSettings.current().minus_limit) if allow_minus else money(0)
+        if new_balance < -limit:
+            details = {"balance": str(account.balance), "required": str(-amount)}
+            if allow_minus:
+                details["minus_limit"] = str(limit)
+            raise InsufficientBalance(details=details)
     account.balance = new_balance
     account.save(update_fields=["balance", "updated_at"])
     return AccountTransaction.objects.create(
@@ -246,8 +258,8 @@ def _pin_is_trivial(pin: str) -> bool:
 def validate_pin_format(pin: str) -> None:
     from rest_framework.exceptions import ValidationError
 
-    if not (pin.isdigit() and 4 <= len(pin) <= 6):
-        raise ValidationError({"pin": [_("The PIN must be 4 to 6 digits.")]})
+    if not (pin.isdigit() and len(pin) == PIN_LENGTH):
+        raise ValidationError({"pin": [_("The PIN must be 4 digits.")]})
     if _pin_is_trivial(pin):
         raise ValidationError({"pin": [_("Choose a less obvious PIN (not 1111 or 1234).")]})
 
@@ -349,3 +361,26 @@ def verify_pin(*, account: DeveloperAccount, pin: str) -> None:
             failure = InvalidPin(details={"attempts_remaining": remaining})
         account.save(update_fields=["pin_failed_attempts", "pin_locked_until"])
     raise failure
+
+
+# --- Wallet settings ------------------------------------------------------------
+
+
+def set_minus_limit(*, actor, minus_limit) -> WalletSettings:
+    """How far below zero purchases and bookings may take any wallet. Lowering it does
+    not touch wallets already below the new limit; they just can't spend further."""
+    with transaction.atomic():
+        current = WalletSettings.current()
+        current = WalletSettings.objects.select_for_update().get(pk=current.pk)
+        old = current.minus_limit
+        current.minus_limit = money(minus_limit)
+        current.updated_by = actor if getattr(actor, "pk", None) else None
+        current.save(update_fields=["minus_limit", "updated_by", "updated_at"])
+        record_audit(
+            "finance.minus_limit_changed",
+            actor=actor,
+            entity=current,
+            old_values={"minus_limit": old},
+            new_values={"minus_limit": current.minus_limit},
+        )
+    return current

@@ -39,6 +39,7 @@ class RentalSettingsSerializer(serializers.ModelSerializer):
             "closing_time",
             "weekdays",
             "max_days_ahead",
+            "refund_after_start",
         ]
 
     def validate_weekdays(self, value):

@@ -34,14 +34,6 @@ class BookingStarted(DomainError):
     default_detail = _("This booking has already started and can't be changed.")
 
 
-class BookingPriceDifferent(DomainError):
-    status_code = status.HTTP_409_CONFLICT
-    code = "BOOKING_PRICE_DIFFERENT"
-    default_detail = _(
-        "The new time must cost the same as the booking (same number of slots and price)."
-    )
-
-
 class BookingCheckedIn(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "BOOKING_CHECKED_IN"

@@ -20,8 +20,10 @@ class Booking(TimeStampedModel):
     Prepared at the playground desk as a line of a draft `Purchase` (rental good, start,
     number of slots); the developer taps their card and enters their PIN, and confirming
     the purchase creates the booking. So the ledger, the seller's earnings and the
-    reconciliation checks treat it like any other sale. There are no refunds; until it
-    starts, a booking can be moved to another time or court of the same price.
+    reconciliation checks treat it like any other sale. Until it starts, a booking can be
+    moved to another time or court of the same price, or deleted with its purchase (the
+    money goes back to the wallet; purchases.services.refund_purchase). Courts with
+    `refund_after_start` also allow that deletion later, until the developer checks in.
 
     Exclusion constraints make overlapping bookings impossible at the database level, even
     under concurrent requests: of the same court, and by the same developer (one court at a

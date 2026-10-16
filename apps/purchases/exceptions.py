@@ -60,3 +60,24 @@ class ManualCardEntryDisabled(DomainError):
 class NoTillReader(PurchaseConflict):
     code = "NO_TILL_READER"
     default_detail = _("Choose one of the seller's till readers first.")
+
+
+class PurchaseNotPaid(PurchaseConflict):
+    code = "PURCHASE_NOT_PAID"
+    default_detail = _("Only paid purchases can be changed or deleted.")
+
+
+class PaidBookingNotEditable(PurchaseConflict):
+    code = "PAID_BOOKING_NOT_EDITABLE"
+    default_detail = _(
+        "A paid court booking can't be edited here: move it to another time, or delete it."
+    )
+
+
+class PinRequired(DomainError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "PIN_REQUIRED"
+    default_detail = _(
+        "The new total is higher: the developer taps their card and enters their PIN to pay "
+        "the difference."
+    )

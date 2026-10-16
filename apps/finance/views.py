@@ -12,7 +12,7 @@ from common.permissions import HasPermissions
 
 from . import services
 from .filters import AccountTransactionFilter, DeveloperAccountFilter
-from .models import AccountTransaction, DeveloperAccount
+from .models import AccountTransaction, DeveloperAccount, WalletSettings
 from .serializers import (
     AccountTransactionSerializer,
     AdjustmentSerializer,
@@ -22,6 +22,7 @@ from .serializers import (
     ResetPinSerializer,
     SetPinSerializer,
     StatusChangeSerializer,
+    WalletSettingsSerializer,
 )
 
 IDEMPOTENCY_PARAM = OpenApiParameter(
@@ -91,7 +92,7 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
     @extend_schema(request=SetPinSerializer, responses={204: None})
     @action(detail=False, methods=["post"], url_path="me/pin")
     def set_my_pin(self, request):
-        """Set your purchase PIN (4-6 digits), or change it by also sending `current_pin`."""
+        """Set your purchase PIN (4 digits), or change it by also sending `current_pin`."""
         serializer = SetPinSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         account = services.open_account(_own_developer(request))
@@ -245,3 +246,23 @@ class AdjustmentView(APIView):
             actor=request.user, idempotency_key=key, **serializer.validated_data
         )
         return _money_response(txn, created)
+
+
+class WalletSettingsView(APIView):
+    """Company-wide wallet rules: the minus limit. Admins change it."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["finance.view"], "patch": ["finance.minus_limit"]}
+
+    @extend_schema(responses=WalletSettingsSerializer)
+    def get(self, request):
+        return Response(WalletSettingsSerializer(WalletSettings.current()).data)
+
+    @extend_schema(request=WalletSettingsSerializer, responses=WalletSettingsSerializer)
+    def patch(self, request):
+        serializer = WalletSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = services.set_minus_limit(
+            actor=request.user, minus_limit=serializer.validated_data["minus_limit"]
+        )
+        return Response(WalletSettingsSerializer(current).data)

@@ -111,7 +111,10 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [{"address": REDIS_URL, **REDIS_CONNECTION_KWARGS}],
+            # redis-py 8 times every read out after 5 s by default, but channels_redis waits
+            # up to 5 s (BZPOPMIN) for the next message: each idle wait then raised
+            # TimeoutError and dropped the WebSocket. Reads must outlast that wait.
+            "hosts": [{"address": REDIS_URL, "socket_timeout": 15, **REDIS_CONNECTION_KWARGS}],
             "capacity": 500,
             "expiry": 30,
         },

@@ -7,7 +7,7 @@ from rest_framework import serializers
 from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
 
-from .models import AccountTransaction, DeveloperAccount
+from .models import PIN_LENGTH, AccountTransaction, DeveloperAccount, WalletSettings
 
 
 class DeveloperAccountSerializer(serializers.ModelSerializer):
@@ -76,7 +76,7 @@ class DepositSerializer(serializers.Serializer):
     developer = serializers.PrimaryKeyRelatedField(queryset=Developer.objects.all())
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     description = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    pin = serializers.CharField(write_only=True, min_length=4, max_length=6)
+    pin = serializers.CharField(write_only=True, min_length=PIN_LENGTH, max_length=PIN_LENGTH)
 
 
 class AdjustmentSerializer(serializers.Serializer):
@@ -97,10 +97,10 @@ class StatusChangeSerializer(serializers.Serializer):
 
 
 class NewPinSerializer(serializers.Serializer):
-    """A PIN the developer types twice (4-6 digits, not trivial like 1111 or 1234)."""
+    """A PIN the developer types twice (4 digits, not trivial like 1111 or 1234)."""
 
-    pin = serializers.CharField(write_only=True, max_length=6)
-    pin_confirm = serializers.CharField(write_only=True, max_length=6)
+    pin = serializers.CharField(write_only=True, max_length=PIN_LENGTH)
+    pin_confirm = serializers.CharField(write_only=True, max_length=PIN_LENGTH)
 
     def validate(self, attrs):
         if attrs["pin"] != attrs["pin_confirm"]:
@@ -111,11 +111,11 @@ class NewPinSerializer(serializers.Serializer):
 class ResetPinSerializer(serializers.Serializer):
     pin = serializers.CharField(
         write_only=True,
-        max_length=6,
+        max_length=PIN_LENGTH,
         required=False,
         help_text="New PIN typed by the developer; leave out to only clear the old one.",
     )
-    pin_confirm = serializers.CharField(write_only=True, max_length=6, required=False)
+    pin_confirm = serializers.CharField(write_only=True, max_length=PIN_LENGTH, required=False)
 
     def validate(self, attrs):
         if attrs.get("pin") and attrs.get("pin") != attrs.get("pin_confirm"):
@@ -124,10 +124,10 @@ class ResetPinSerializer(serializers.Serializer):
 
 
 class SetPinSerializer(serializers.Serializer):
-    pin = serializers.CharField(write_only=True, max_length=6)
+    pin = serializers.CharField(write_only=True, max_length=PIN_LENGTH)
     current_pin = serializers.CharField(
         write_only=True,
-        max_length=6,
+        max_length=PIN_LENGTH,
         required=False,
         help_text="Required to change an existing PIN.",
     )
@@ -136,4 +136,26 @@ class SetPinSerializer(serializers.Serializer):
 class DeskChangePinSerializer(NewPinSerializer):
     """At the PIN desk the developer types the current PIN, then the new one twice."""
 
-    current_pin = serializers.CharField(write_only=True, max_length=6)
+    current_pin = serializers.CharField(write_only=True, max_length=PIN_LENGTH)
+
+
+class WalletSettingsSerializer(serializers.ModelSerializer):
+    updated_by_name = serializers.CharField(
+        source="updated_by.username", read_only=True, default=None
+    )
+    currency = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WalletSettings
+        fields = ["minus_limit", "currency", "updated_at", "updated_by_name"]
+        read_only_fields = ["currency", "updated_at", "updated_by_name"]
+        extra_kwargs = {
+            "minus_limit": {
+                "min_value": 0,
+                "help_text": "How far below zero purchases and bookings may take a wallet "
+                "(0: never).",
+            }
+        }
+
+    def get_currency(self, obj) -> str:
+        return settings.CURRENCY
