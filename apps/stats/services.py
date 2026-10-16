@@ -153,6 +153,11 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
             "by_status": by_status,
             "total_balance": _money(accounts.aggregate(t=Sum("balance"))["t"]),
         },
+        # Wallets below zero now (purchases may go down to the minus limit): what they owe.
+        "minus": {
+            "total": _money(accounts.filter(balance__lt=0).aggregate(t=Sum("balance"))["t"]),
+            "count": accounts.filter(balance__lt=0).count(),
+        },
         "deposits": {"total": _money(totals["deposits"]), "count": totals["deposit_count"]},
         "spending": {
             "total": _money(-(totals["spending"] or ZERO)),
@@ -348,7 +353,12 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         row["developer__building"]: row
         for row in accounts.order_by()
         .values("developer__building")
-        .annotate(balance=Sum("balance"), wallets=Count("pk"))
+        .annotate(
+            held_total=Sum("balance"),  # not "balance": the filters below mean each wallet's
+            wallets=Count("pk"),
+            minus=Sum("balance", filter=Q(balance__lt=0)),
+            minus_count=Count("pk", filter=Q(balance__lt=0)),
+        )
     }
     rows = [(b.pk, b.code, b.name) for b in places]
     if buildings is None and (None in moves or None in held):
@@ -368,8 +378,10 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
                 "spending": _money(spending),
                 "spending_count": m.get("spending_count", 0),
                 "net": _money(deposits - spending),
-                "balance": _money(h.get("balance")),
+                "balance": _money(h.get("held_total")),
                 "wallets": h.get("wallets", 0),
+                "minus": _money(h.get("minus")),
+                "minus_count": h.get("minus_count", 0),
                 "daily": [
                     {
                         "date": day.isoformat(),

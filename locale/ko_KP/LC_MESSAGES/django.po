@@ -1152,3 +1152,9 @@ msgstr "이 계정은 상품을 변경할수 없습니다."
 
 msgid "Store no."
 msgstr "매장번호"
+
+msgid "In minus now"
+msgstr "현재 미결량"
+
+msgid "Wallets in minus"
+msgstr "마이너스 지갑수"

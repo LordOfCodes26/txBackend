@@ -135,3 +135,27 @@ def test_a_building_whose_people_bought_nothing(auth_client, make_user, site):  
     )
     assert body["sellers"] == []
     assert body["money"]["store_sales"]["sales_total"] == "0.00"
+
+
+def test_wallets_in_minus_by_building(auth_client, make_user, site):  # noqa: F811
+    """What wallets below zero owe now: in total, and per home building (adding up)."""
+    from decimal import Decimal
+
+    from apps.developers.models import Developer
+    from apps.finance import services as finance
+    from apps.finance.models import DeveloperAccount
+
+    carl = Developer.objects.create(employee_number="E3", full_name="Carl", building=site.b1)
+    finance.open_account(carl)
+    DeveloperAccount.objects.filter(developer=site.ada).update(balance=Decimal("-12.50"))
+    DeveloperAccount.objects.filter(developer=carl).update(balance=Decimal("-3.00"))
+    DeveloperAccount.objects.filter(developer=site.bob).update(balance=Decimal("-5.00"))
+
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+    body = client.get(FINANCE_STATS).json()
+    assert body["money"]["minus"] == {"total": "-20.50", "count": 3}
+    rows = {row["code"]: row for row in body["by_building"]}
+    assert (rows["B1"]["minus"], rows["B1"]["minus_count"]) == ("-15.50", 2)
+    assert (rows["B2"]["minus"], rows["B2"]["minus_count"]) == ("-5.00", 1)
+    one = client.get(f"{FINANCE_STATS}?building={site.b1.pk}").json()
+    assert one["money"]["minus"] == {"total": "-15.50", "count": 2}

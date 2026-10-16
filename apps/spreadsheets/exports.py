@@ -265,6 +265,8 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
         [str(_("Deposit count")), money["deposits"]["count"]],
         [str(_("Spending")), Decimal(money["spending"]["total"])],
         [str(_("Payment count")), money["spending"]["count"]],
+        [str(_("In minus now")), Decimal(money["minus"]["total"])],
+        [str(_("Wallets in minus")), money["minus"]["count"]],
     ]
     daily = [
         [date.fromisoformat(d["date"]), d.get("deposits"), d.get("spending")]
@@ -305,6 +307,8 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
             b["spending_count"],
             b["net"],
             b["balance"],
+            b["minus"],
+            b["minus_count"],
         ]
         for b in stats["by_building"]
     ]
@@ -321,6 +325,8 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
             count("spending_count", _("Payment count")),
             cash("net", _("Net")),
             cash("balance", _("Money held now")),
+            cash("minus", _("In minus now")),
+            count("minus_count", _("Wallets in minus")),
         ],
         by_building,
     )
