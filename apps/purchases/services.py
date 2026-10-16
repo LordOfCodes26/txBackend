@@ -173,7 +173,8 @@ def set_reader(*, purchase: Purchase, reader) -> Purchase:
 def wait_for_card(*, purchase: Purchase) -> Purchase:
     """The seller pressed "Scan card to buy": the next tap on the purchase's reader (within
     PURCHASE_CARD_PRESENTATION_SECONDS) goes to this purchase. Any other purchase waiting on
-    the same reader stops waiting."""
+    the same reader stops waiting. A card tapped before no longer counts (e.g. the wrong
+    person tapped and the seller scans again)."""
     purchase = _lock_takes_card(purchase)
     if purchase.reader_id is None:
         raise NoTillReader()
@@ -187,7 +188,8 @@ def wait_for_card(*, purchase: Purchase) -> Purchase:
         other.save(update_fields=["waiting_since", "updated_at"])
         notify_purchase(other.pk, other.service_position_id, "purchase_updated")
     purchase.waiting_since = timezone.now()
-    purchase.save(update_fields=["waiting_since", "updated_at"])
+    purchase.presented_at = None
+    purchase.save(update_fields=["waiting_since", "presented_at", "updated_at"])
     return purchase
 
 

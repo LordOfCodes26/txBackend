@@ -213,7 +213,9 @@ def test_a_tap_ends_the_wait_and_scanning_again_takes_a_new_card(shop):
     pid = open_purchase(shop)
     assert tap(shop, card1).json()["purchase"] == pid
     assert tap(shop, card2).json()["purchase"] is None  # nobody is waiting any more
-    wait(shop, pid)  # wrong person: the seller scans again
+    # Wrong person: the seller scans again, and the earlier card stops counting.
+    assert wait(shop, pid)["presented_card"] is None
+    assert confirm(shop, pid).json()["error"]["code"] == "CARD_NOT_PRESENTED"
     assert tap(shop, card2).json()["purchase"] == pid
     r = confirm(shop, pid)
     assert r.json()["developer"]["id"] == dev2.pk
