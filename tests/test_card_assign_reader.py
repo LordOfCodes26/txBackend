@@ -149,5 +149,51 @@ def test_deposit_desk_reads_the_card_holder(reader, make_user):
         "full_name": "Ada",
         "employee_number": "E7",
         "department": "R&D",
+        "position_title": "",
+        "photo": None,
+        "status": "ACTIVE",
+        "balance": None,  # no wallet yet
+        "account": None,  # finance managers work the PIN desk too
+    }
+    # With a wallet: the deposit desk shows the balance now.
+    from apps.finance import services as finance
+
+    finance.deposit(actor=None, developer=dev, amount="12.50", idempotency_key="desk-1")
+    assert tap("04DD0007") == "CARD_OK\r\n"
+    read = client.get(READS, {"device": reader.pk, "after": read["event"]}).json()["read"]
+    assert read["card"]["developer"]["balance"] == "12.50"
+    # Card assign staff without money rights see the holder, not the balance.
+    manager = staff(make_user, Roles.MANAGER)
+    read = manager.get(READS, {"device": reader.pk, "after": 0}).json()["read"]
+    assert "balance" not in read["card"]["developer"]
+
+
+def test_pin_desk_gets_the_holders_wallet(reader, make_user):
+    """PIN desk staff (finance.pin_change, no finance.view) get the wallet to work on."""
+    from apps.accounts.models import Permission, Role, UserRole
+    from apps.finance import services as finance
+
+    dev = Developer.objects.create(employee_number="E8", full_name="Bo")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04DD0008"), developer=dev)
+    account = finance.open_account(dev)
+    finance.set_pin(actor=None, account=account, pin="4826", current_pin=None)
+    role = Role.objects.create(code="PIN_DESK", name="PIN desk")
+    role.permissions.set(
+        Permission.objects.filter(codename__in=["finance.pin_change", "card.assign"])
+    )
+    user = make_user()
+    UserRole.objects.create(user=user, role=role)
+    client = APIClient()
+    client.force_authenticate(user)
+    cursor = client.get(READS, {"device": reader.pk}).json()["cursor"]
+    tap("04DD0008")
+    holder = client.get(READS, {"device": reader.pk, "after": cursor or 0}).json()["read"]["card"][
+        "developer"
+    ]
+    assert holder["account"] == {
+        "id": account.pk,
+        "has_pin": True,
+        "pin_locked_until": None,
         "status": "ACTIVE",
     }
+    assert "balance" not in holder  # no deposit or wallet rights

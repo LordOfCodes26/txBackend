@@ -470,17 +470,36 @@ class CardReadView(APIView):
             "assigned": holder is not None,
             # Holders outside a building manager's buildings stay anonymous.
             "holder": holder.developer.full_name if visible else None,
-            "developer": {
-                "id": holder.developer.pk,
-                "full_name": holder.developer.full_name,
-                "employee_number": holder.developer.employee_number,
-                "department": holder.developer.department,
-                "status": holder.developer.status,
-            }
-            if visible
-            else None,
+            "developer": self._holder(request, holder.developer) if visible else None,
         }
         return read
+
+    @staticmethod
+    def _holder(request, developer) -> dict:
+        """Who holds the tapped card, with their photo; the deposit desk also gets their
+        wallet balance, the PIN desk their wallet and PIN state (the person is at the desk)."""
+        from apps.developers.serializers import DeveloperSummarySerializer
+        from apps.finance.models import DeveloperAccount
+
+        data = dict(DeveloperSummarySerializer(developer, context={"request": request}).data)
+        data["status"] = developer.status
+        user = request.user
+        account = DeveloperAccount.objects.filter(developer=developer).first()
+        if user.has_rbac_perm("finance.deposit") or user.has_rbac_perm("finance.view"):
+            data["balance"] = None if account is None else f"{account.balance:.2f}"
+        # The PIN desk: the wallet to change or reset the PIN of, and whether one is set.
+        if user.has_rbac_perm("finance.pin_change") or user.has_rbac_perm("finance.pin_reset"):
+            data["account"] = (
+                None
+                if account is None
+                else {
+                    "id": account.pk,
+                    "has_pin": account.has_pin,
+                    "pin_locked_until": account.pin_locked_until,
+                    "status": account.status,
+                }
+            )
+        return data
 
 
 def _int_param(request, name: str) -> int | None:
