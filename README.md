@@ -78,6 +78,12 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
   developers who were present, with ledger, seller and stock entries dated in the month; it
   closes the month with an allowance deposit and a stock delivery so current
   balances and stock don't change, and checks that everything reconciles.
+- **Wallets in minus:** `manage.py seed_minus_wallets [--count 5] [--limit 20.00]` takes a
+  few developers' wallets below zero (one adjustment each, spread over the buildings),
+  raising the minus limit if it is lower, to try the minus figures on Finance → Statistics.
+  `--undo` reverses it (balances and limit). Test servers only (DEBUG or
+  `TEST_CONSOLE_ENABLED`); on staging run it with `--settings=config.settings.staging` and
+  `.env.staging` loaded.
 
 ## Deploying to an offline server
 
