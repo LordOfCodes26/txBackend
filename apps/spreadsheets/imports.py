@@ -1,4 +1,4 @@
-"""Excel imports: developers, cards (with assignment) and opening balances.
+"""Excel imports: developers, cards (with assignment), opening balances and goods.
 
 Every row goes through the same validation and services as the web forms (audit log
 included). All or nothing: if any row has an error nothing is saved, and every error is
@@ -18,9 +18,14 @@ from apps.developers import services as developers
 from apps.developers.models import Developer, DeveloperStatus
 from apps.developers.serializers import DeveloperSerializer
 from apps.finance import services as finance
+from apps.goods import services as goods
+from apps.goods.models import Good, GoodKind, MovementKind
+from apps.goods.serializers import GoodSerializer
 from apps.rfid import services as rfid
 from apps.rfid.models import Building, RFIDCard, RFIDCardAssignment, normalize_uid, uid_validator
 from apps.rfid.scope import building_scope
+from apps.sellers.access import GOODS, acting_positions, acting_seller
+from apps.sellers.models import Seller, ServicePosition
 from common.exceptions import DomainError
 
 from .xlsx import BadWorkbook, Column, as_date, read_rows
@@ -49,6 +54,19 @@ BALANCE_COLUMNS = [
     EMPLOYEE,
     Column("amount", _("Amount"), True, 12, kind="money", example="100.00"),
     Column("description", _("Description"), width=30, example="Opening balance"),
+]
+# The goods export's Goods sheet uses the same columns, so it can be edited and imported back.
+GOODS_COLUMNS = [
+    Column("seller", _("Seller"), width=20, example="Cafe"),
+    Column("counter", _("Counter"), width=18, example="Counter 1"),
+    Column("good", _("Good"), True, 24, example="Green tea"),
+    Column("sku", _("SKU"), width=12, example="TEA-01"),
+    Column("kind", _("Kind"), width=10, example="PRODUCT"),
+    Column("price", _("Price"), width=10, kind="money", example="2.50"),
+    Column("description", _("Description"), width=30),
+    Column("track_stock", _("Track stock"), width=11, kind="bool", example=True),
+    Column("quantity", _("In stock"), width=10, kind="int", example=20),
+    Column("is_active", _("For sale"), width=9, kind="bool", example=True),
 ]
 
 
@@ -305,10 +323,180 @@ class BalanceImporter(Importer):
         return "created" if created else "unchanged"
 
 
+YES = {"true", "yes", "y", "1", "예", "o"}
+NO = {"false", "no", "n", "0", "아니", "아니오", "x"}
+
+
+def yes_no(value, key: str) -> bool | None:
+    """An Excel TRUE/FALSE, yes/no or 1/0 cell; None when blank."""
+    if value is None or text(value) == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    word = text(value).lower()
+    if word in YES:
+        return True
+    if word in NO:
+        return False
+    raise RowError(_("Enter yes or no."), key)
+
+
+class GoodsImporter(Importer):
+    """Goods of a store's counters (not courts). A row matches a good of the same store by
+    SKU, else by name on the same counter: it is updated, otherwise created. On an update a
+    blank cell leaves that field as it is. "In stock" is the count now (a stock-take): the
+    difference is recorded as a stock adjustment. Rows go through the goods form's checks.
+
+    Staff with goods rights import for any store (in their buildings); a store's own login
+    for its own counters only."""
+
+    title = _("Goods")
+    columns = GOODS_COLUMNS
+    permissions = ["good.create", "good.update"]
+    excel_permission = "excel.import_goods"
+    seller_area = GOODS  # a goods seller imports their own store's goods
+
+    def _staff(self, ctx, permission: str) -> bool:
+        return ctx.actor.has_rbac_perm(permission)
+
+    def _position(self, ctx, row) -> ServicePosition:
+        actor = ctx.actor
+        staff = self._staff(ctx, "good.create") or self._staff(ctx, "good.update")
+        own = None if staff else acting_seller(actor)
+        seller_name = text(row.get("seller"))
+        if own is not None:
+            if seller_name and seller_name.lower() != own.name.lower():
+                raise RowError(_("You can only import goods of your own store."), "seller")
+            seller = own
+        else:
+            if not seller_name:
+                raise RowError(_("This field is required."), "seller")
+            seller = Seller.objects.filter(name__iexact=seller_name).first()
+            if seller is None:
+                raise RowError(_("No store with this name."), "seller")
+        positions = ServicePosition.objects.filter(seller=seller).order_by("id")
+        mine = None if staff else acting_positions(actor)
+        if mine is not None:
+            positions = positions.filter(pk__in=mine)
+        counter = text(row.get("counter"))
+        if counter:
+            position = positions.filter(name__iexact=counter).first()
+            if position is None:
+                raise RowError(_("No counter with this name in this store."), "counter")
+        else:
+            found = list(positions.filter(is_active=True)[:2])
+            if len(found) != 1:
+                raise RowError(_("Name the counter: this store has several."), "counter")
+            position = found[0]
+        if staff:
+            scope = building_scope(actor, "good.view")
+            if scope is not None and position.building_id not in scope:
+                raise RowError(_("This counter is not in your buildings."), "counter")
+        return position
+
+    def _existing(self, position, name: str, sku: str) -> Good | None:
+        if sku:
+            match = Good.objects.filter(
+                sku__iexact=sku, service_position__seller_id=position.seller_id
+            ).first()
+            if match is not None:
+                return match
+        return Good.objects.filter(service_position=position, name__iexact=name).first()
+
+    def _context(self, ctx) -> dict:
+        actor = ctx.actor
+        staff = self._staff(ctx, "good.create") or self._staff(ctx, "good.update")
+        return {
+            "own_seller": None if staff else acting_seller(actor),
+            "own_positions": None if staff else acting_positions(actor),
+        }
+
+    def apply(self, ctx, number, row):
+        name = text(row.get("good"))
+        sku = text(row.get("sku"))
+        position = self._position(ctx, row)
+        self.once(ctx, "good", f"{position.seller_id}|{(sku or name).lower()}")
+        good = self._existing(position, name, sku)
+        kind = text(row.get("kind")).upper()
+        if good is not None and good.kind == GoodKind.RENTAL:
+            return "unchanged"  # courts are managed on the Playground page
+        if kind == GoodKind.RENTAL:
+            raise RowError(_("Courts are added on the Playground page, not imported."), "kind")
+
+        data = {}
+        if name:
+            data["name"] = name
+        if sku:
+            data["sku"] = sku
+        if kind:
+            data["kind"] = kind
+        price = text(row.get("price"))
+        if price:
+            data["price"] = price
+        description = text(row.get("description"))
+        if description:
+            data["description"] = description
+        for key in ("track_stock", "is_active"):
+            value = yes_no(row.get(key), key)
+            if value is not None:
+                data[key] = value
+        stock = text(row.get("quantity"))
+        quantity = None
+        if stock:
+            try:
+                quantity = int(Decimal(stock))
+            except (InvalidOperation, ValueError) as exc:
+                raise RowError(_("Enter a whole number, 0 or more."), "quantity") from exc
+            if quantity < 0 or Decimal(stock) != quantity:
+                raise RowError(_("Enter a whole number, 0 or more."), "quantity")
+
+        if good is None:
+            if (
+                not ctx.actor.has_rbac_perm("good.create")
+                and self._context(ctx)["own_seller"] is None
+            ):
+                raise RowError(_("Your account cannot add goods."), "good")
+            if "price" not in data:
+                raise RowError(_("This field is required."), "price")
+            data["service_position"] = position.pk
+            if quantity:
+                data["initial_quantity"] = quantity
+            serializer = GoodSerializer(data=data, context=self._context(ctx))
+            serializer.is_valid(raise_exception=True)
+            goods.create_good(actor=ctx.actor, **serializer.validated_data)
+            return "created"
+
+        if not ctx.actor.has_rbac_perm("good.update") and self._context(ctx)["own_seller"] is None:
+            raise RowError(_("Your account cannot change goods."), "good")
+        if data.get("kind") == good.kind:
+            del data["kind"]  # the same kind is no change (a different one is refused)
+        serializer = GoodSerializer(good, data=data, partial=True, context=self._context(ctx))
+        serializer.is_valid(raise_exception=True)
+        changed = {k: v for k, v in serializer.validated_data.items() if getattr(good, k) != v}
+        if changed:
+            good = goods.update_good(actor=ctx.actor, good=good, **changed)
+        moved = False
+        if quantity is not None:
+            if not good.track_stock:
+                if quantity:
+                    raise RowError(_("This good does not track stock."), "quantity")
+            elif quantity != good.quantity:
+                goods.move_stock(
+                    good=good,
+                    kind=MovementKind.ADJUSTMENT,
+                    delta=quantity - good.quantity,
+                    actor=ctx.actor,
+                    reason="Excel import (stock count)",
+                )
+                moved = True
+        return "updated" if changed or moved else "unchanged"
+
+
 IMPORTERS = {
     "developers": DeveloperImporter(),
     "cards": CardImporter(),
     "balances": BalanceImporter(),
+    "goods": GoodsImporter(),
 }
 
 

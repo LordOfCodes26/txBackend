@@ -9,6 +9,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.sellers.access import acting_seller, seller_areas
 from apps.stats.views import FinanceStatsQuerySerializer, PeriodSerializer
 from common.permissions import HasPermissions
 
@@ -29,6 +30,10 @@ def _importer(kind: str, user):
     importer = IMPORTERS.get(kind)
     if importer is None:
         raise NotFound()
+    # A store's own login imports its own goods (each row checks the counter).
+    area = getattr(importer, "seller_area", None)
+    if area is not None and acting_seller(user) is not None and area in seller_areas(user):
+        return importer
     # Developers: either right is enough here; each row checks create or update.
     if not user.has_rbac_perm(importer.excel_permission) or not any(
         user.has_rbac_perm(p) for p in importer.permissions
@@ -48,11 +53,12 @@ class ImportSerializer(serializers.Serializer):
 
 
 class ImportView(APIView):
-    """POST an .xlsx (`file`, `dry_run`) for `developers`, `cards` or `balances`.
+    """POST an .xlsx (`file`, `dry_run`) for `developers`, `cards`, `balances` or `goods`.
     All or nothing: every error is listed with its Excel row; nothing is saved if there is
     one. `dry_run=true` only checks. Permissions: excel.import_developers with
     developer.create/update, excel.import_cards with card.assign, excel.import_balances with
-    finance.deposit."""
+    finance.deposit, excel.import_goods with good.create/update (or a goods seller, for
+    their own store)."""
 
     permission_classes = [HasPermissions]
     required_permissions = {"post": []}  # per kind, in _importer

@@ -93,6 +93,9 @@ AREAS: dict[str, dict[str, str]] = {
         ),
         "excel.import_cards": "Import cards and their holders from Excel (also needs Assign cards)",
         "excel.import_balances": "Import opening balances from Excel (also needs Deposit money)",
+        "excel.import_goods": (
+            "Import goods and stock counts from Excel (also needs Add or Change goods)"
+        ),
     },
     "System": {
         "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",

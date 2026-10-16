@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 
 from apps.developers.models import Developer
@@ -35,6 +35,11 @@ class Purchase(TimeStampedModel):
     """
 
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="purchases")
+    # The store's own running number (1, 2, 3, ... per seller), given when the purchase is
+    # opened, so drafts have one too and cancelled drafts leave gaps. `id` stays global.
+    store_number = models.PositiveIntegerField(null=True, blank=True, editable=False)
+    # The seller's own name for it (e.g. "Table 3", a customer), to tell open sales apart.
+    label = models.CharField(max_length=60, blank=True)
     # SALE: goods at a till. BOOKING: one court booking (apps.bookings), paid the same way.
     kind = models.CharField(max_length=10, choices=PurchaseKind.choices, default=PurchaseKind.SALE)
     service_position = models.ForeignKey(
@@ -96,6 +101,9 @@ class Purchase(TimeStampedModel):
         ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
+                fields=["seller", "store_number"], name="purchase_store_number_unique"
+            ),
+            models.UniqueConstraint(
                 "confirm_idempotency_key",
                 condition=~Q(confirm_idempotency_key=""),
                 name="purchase_confirm_key_unique",
@@ -120,6 +128,21 @@ class Purchase(TimeStampedModel):
 
     def __str__(self):
         return f"Purchase {self.pk} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding or self.store_number is not None:
+            return super().save(*args, **kwargs)
+        # Locking the store's row hands out each number once, even to tills opening
+        # purchases at the same moment.
+        with transaction.atomic():
+            counter = (
+                Seller.objects.select_for_update()
+                .values_list("purchase_counter", flat=True)
+                .get(pk=self.seller_id)
+            ) + 1
+            Seller.objects.filter(pk=self.seller_id).update(purchase_counter=counter)
+            self.store_number = counter
+            return super().save(*args, **kwargs)
 
 
 class PurchaseItem(models.Model):

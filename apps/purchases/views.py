@@ -31,6 +31,7 @@ from .serializers import (
     ConfirmSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
+    LabelSerializer,
     PaidChangeSerializer,
     PerformanceSerializer,
     PurchaseCreateSerializer,
@@ -52,6 +53,7 @@ SELLER_ACTIONS = (
     "add_item",
     "item",
     "set_reader",
+    "set_label",
     "readers",
     "wait",
     "stop_waiting",
@@ -98,6 +100,7 @@ class PurchaseViewSet(
         "add_item": ["purchase.create"],
         "item": ["purchase.create"],
         "set_reader": ["purchase.create"],
+        "set_label": ["purchase.create"],
         "readers": ["purchase.create"],
         "wait": ["purchase.create"],
         "stop_waiting": ["purchase.create"],
@@ -114,8 +117,8 @@ class PurchaseViewSet(
     playground_filter = Q(kind=PurchaseKind.BOOKING)
     scope_permission = "purchase.view"
     filterset_class = PurchaseFilter
-    search_fields = ["developer__full_name", "developer__employee_number", "seller__name"]
-    ordering_fields = ["created_at", "confirmed_at", "total"]
+    search_fields = ["developer__full_name", "developer__employee_number", "seller__name", "label"]
+    ordering_fields = ["created_at", "confirmed_at", "total", "store_number"]
 
     position_lookup = "service_position"
     building_lookup = "service_position__building"
@@ -236,6 +239,17 @@ class PurchaseViewSet(
         serializer = SetReaderSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         services.set_reader(purchase=purchase, reader=serializer.validated_data["reader"])
+        return self._respond(purchase)
+
+    @extend_schema(request=LabelSerializer, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="label")
+    def set_label(self, request, pk=None):
+        """The seller's own name for this purchase (e.g. "Table 3"), to tell open sales
+        apart. Empty clears it."""
+        purchase = self.get_object()
+        serializer = LabelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.set_label(purchase=purchase, label=serializer.validated_data["label"])
         return self._respond(purchase)
 
     @extend_schema(request=None, responses=PurchaseSerializer)

@@ -722,10 +722,11 @@ def test_export_purchases_and_items(auth_client, make_user, till, world):
     r = till.get(f"{PURCHASES}export/?date_from={today}&date_to={today}")
     assert r.status_code == 200 and "purchases-" in r["Content-Disposition"]
     book = sheets(r)
-    assert [row[2] for row in book["Purchases"][1:]] == ["Paid", "Draft"]
+    assert [row[3] for row in book["Purchases"][1:]] == ["Paid", "Draft"]
     first = book["Purchases"][1]
-    assert first[0] == paid and first[6:8] == ("E1", "Ada") and first[9:] == (3, 9)
-    assert [(row[7], row[8], row[10]) for row in book["Items"][1:3]] == [
+    assert first[0] == paid and first[1] == Purchase.objects.get(pk=paid).store_number
+    assert first[7:9] == ("E1", "Ada") and first[10:] == (3, 9)
+    assert [(row[8], row[9], row[11]) for row in book["Items"][1:3]] == [
         ("Tea", 2, 5),
         ("Cake", 1, 4),
     ]
@@ -737,3 +738,67 @@ def test_export_purchases_and_items(auth_client, make_user, till, world):
     other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
     assert len(sheets(auth_client(other).get(f"{PURCHASES}export/"))["Purchases"]) == 1
+
+
+# --- Store numbers -------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_each_store_numbers_its_own_purchases(till, world, make_user):
+    first = new_purchase(till, world, (world.tea, 1))
+    second = new_purchase(till, world)
+    till.post(f"{PURCHASES}{second}/cancel/")  # a cancelled draft keeps its number
+    third = new_purchase(till, world, (world.tea, 1))
+    numbers = [
+        till.get(f"{PURCHASES}{pid}/").json()["store_number"] for pid in (first, second, third)
+    ]
+    assert numbers == [1, 2, 3]
+
+    other = Seller.objects.create(name="Bakery", user=make_user(*SELLER_ROLES))
+    counter = ServicePosition.objects.create(seller=other, name="Front")
+    purchase = services.create_purchase(actor=None, service_position=counter)
+    assert purchase.store_number == 1  # counts on its own
+    assert Seller.objects.get(pk=world.seller.pk).purchase_counter == 3
+
+
+@pytest.mark.django_db(transaction=True)
+def test_tills_opening_at_once_get_different_numbers(world):
+    opened = run_concurrently(
+        [lambda: services.create_purchase(actor=None, service_position=world.position)] * 4
+    )
+    assert all(isinstance(p, Purchase) for p in opened), opened
+    assert sorted(p.store_number for p in opened) == [1, 2, 3, 4]
+
+
+@pytest.mark.django_db
+def test_migration_numbers_existing_purchases(world):
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    migration = importlib.import_module("apps.purchases.migrations.0010_store_number")
+    a = services.create_purchase(actor=None, service_position=world.position)
+    b = services.create_purchase(actor=None, service_position=world.position)
+    Purchase.objects.update(store_number=None)
+    Seller.objects.update(purchase_counter=0)
+    migration.number_existing(django_apps, None)
+    a.refresh_from_db()
+    b.refresh_from_db()
+    assert (a.store_number, b.store_number) == (1, 2)
+    assert Seller.objects.get(pk=world.seller.pk).purchase_counter == 2
+    assert services.create_purchase(actor=None, service_position=world.position).store_number == 3
+
+
+@pytest.mark.django_db
+def test_seller_labels_open_sales(till, world, auth_client, make_user):
+    pid = new_purchase(till, world, (world.tea, 2))
+    r = till.post(f"{PURCHASES}{pid}/label/", {"label": "  Table 3 "})
+    assert r.status_code == 200, r.json()
+    assert r.json()["label"] == "Table 3"
+    drafts = till.get(f"{PURCHASES}?status=DRAFT&search=table").json()["results"]
+    assert [d["id"] for d in drafts] == [pid]
+    assert till.post(f"{PURCHASES}{pid}/label/", {"label": "x" * 61}).status_code == 400
+    assert till.post(f"{PURCHASES}{pid}/label/", {"label": ""}).json()["label"] == ""
+    other = make_user(*SELLER_ROLES)
+    Seller.objects.create(name="Other", user=other)
+    assert auth_client(other).post(f"{PURCHASES}{pid}/label/", {"label": "mine"}).status_code == 404

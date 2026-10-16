@@ -136,6 +136,8 @@ class PurchaseSerializer(serializers.ModelSerializer):
         model = Purchase
         fields = [
             "id",
+            "store_number",
+            "label",
             "kind",
             "status",
             "seller",
@@ -258,6 +260,12 @@ class PurchaseCreateSerializer(serializers.Serializer):
         ):
             raise serializers.ValidationError(_("You can only sell at your own counters."))
         return position
+
+
+class LabelSerializer(serializers.Serializer):
+    label = serializers.CharField(
+        max_length=60, allow_blank=True, help_text='E.g. "Table 3" or a name; empty clears it.'
+    )
 
 
 class SetReaderSerializer(serializers.Serializer):

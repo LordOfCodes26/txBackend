@@ -265,6 +265,18 @@ def _check_stock_hint(good: Good, quantity: int) -> None:
 
 
 @transaction.atomic
+def set_label(*, purchase: Purchase, label: str) -> Purchase:
+    """The seller's own name for the purchase (e.g. "Table 3"); empty clears it."""
+    purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
+    label = label.strip()
+    if purchase.label != label:
+        purchase.label = label
+        purchase.save(update_fields=["label", "updated_at"])
+        notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
+    return purchase
+
+
+@transaction.atomic
 def cancel_purchase(*, actor, purchase: Purchase) -> Purchase:
     purchase = _lock_draft(purchase)
     purchase.status = PurchaseStatus.CANCELLED

@@ -40,6 +40,8 @@ class Seller(TimeStampedModel):
         default=False,
         help_text="Its till readers check developers in to their playground bookings.",
     )
+    # The last store number given to one of its purchases (Purchase.store_number).
+    purchase_counter = models.PositiveIntegerField(default=0, editable=False)
 
     class Meta:
         ordering = ["name", "id"]

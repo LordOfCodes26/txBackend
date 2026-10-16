@@ -380,3 +380,103 @@ def test_developers_export_follows_the_list_filters(admin, b1):
     assert rows("?status=TERMINATED") == ["E2"]
     assert rows("?search=ada") == ["E1"]
     assert rows("?out_after=2026-09-01&out_before=2026-09-30") == ["E2"]
+
+
+# --- Goods import -------------------------------------------------------------------
+
+GOODS_HEADER = ("Seller", "Counter", "Good", "SKU", "Kind", "Price", "Track stock", "In stock")
+
+
+@pytest.fixture
+def cafe(db, make_user):
+    from apps.accounts.rbac import SELLER_ROLES
+
+    owner = make_user(*SELLER_ROLES, username="cafe")
+    seller = Seller.objects.create(name="Cafe", user=owner)
+    counter = ServicePosition.objects.create(seller=seller, name="Counter 1")
+    return seller, counter, owner
+
+
+def test_goods_import_creates_updates_and_counts_stock(admin, cafe):
+    seller, counter, _owner = cafe
+    rows = [
+        GOODS_HEADER,
+        ("Cafe", "Counter 1", "Tea", "TEA-1", "PRODUCT", 2.5, True, 10),
+        ("Cafe", "Counter 1", "Massage", "", "SERVICE", "15.00", False, None),
+    ]
+    body = upload(admin, "goods", *rows).json()
+    assert (body["saved"], body["created"], body["errors"]) == (True, 2, [])
+    tea = Good.objects.get(sku="TEA-1")
+    assert (tea.price, tea.quantity, tea.service_position) == (Decimal("2.50"), 10, counter)
+    assert not Good.objects.get(name="Massage").track_stock
+
+    # Matched by SKU: renamed, repriced, stock counted down to 7 (an adjustment of -3).
+    body = upload(
+        admin, "goods", GOODS_HEADER, ("Cafe", "Counter 1", "Green tea", "tea-1", "", 3, "", 7)
+    ).json()
+    assert (body["updated"], body["errors"]) == (1, [])
+    tea.refresh_from_db()
+    assert (tea.name, tea.price, tea.quantity) == ("Green tea", Decimal("3.00"), 7)
+    move = tea.movements.order_by("-id").first()
+    assert (move.kind, move.quantity_delta) == ("ADJUSTMENT", -3)
+    assert goods.stock_mismatches() == []
+
+    # The same file again changes nothing.
+    again = upload(
+        admin, "goods", GOODS_HEADER, ("Cafe", "Counter 1", "Green tea", "tea-1", "", 3, "", 7)
+    ).json()
+    assert (again["unchanged"], again["updated"]) == (1, 0)
+
+
+def test_goods_import_errors_save_nothing(admin, cafe):
+    rows = [
+        GOODS_HEADER,
+        ("Nope", "Counter 1", "A", "", "", 1, "", ""),
+        ("Cafe", "Bar", "B", "", "", 1, "", ""),
+        ("Cafe", "Counter 1", "C", "", "", "", "", ""),
+        ("Cafe", "Counter 1", "Court", "", "RENTAL", 5, "", ""),
+        ("Cafe", "Counter 1", "D", "", "", 1, "", -2),
+        ("Cafe", "Counter 1", "E", "", "", 1, "maybe", ""),
+        ("Cafe", "Counter 1", "F", "", "", 1, "", ""),
+        ("Cafe", "Counter 1", "F", "", "", 1, "", ""),
+        ("Cafe", "Counter 1", "G", "", "SERVICE", 1, "", 5),
+    ]
+    body = upload(admin, "goods", *rows).json()
+    assert body["saved"] is False
+    assert {e["row"] for e in body["errors"]} == {2, 3, 4, 5, 6, 7, 9, 10}
+    assert not Good.objects.exists()
+
+
+def test_store_imports_only_its_own_goods(auth_client, make_user, cafe):
+    seller, counter, owner = cafe
+    other = Seller.objects.create(name="Bakery", user=make_user(Roles.GOODS_SELLER))
+    ServicePosition.objects.create(seller=other, name="Front")
+    client = auth_client(owner)
+    assert client.get(IMPORT.format("goods") + "template/").status_code == 200
+    # The store and counter may be left out: its own (only) counter.
+    body = upload(client, "goods", ("Good", "Price", "In stock"), ("Bun", 1.2, 4)).json()
+    assert (body["saved"], body["created"]) == (True, 1), body
+    assert Good.objects.get(name="Bun").service_position == counter
+    body = upload(client, "goods", ("Seller", "Good", "Price"), ("Bakery", "Cake", 3)).json()
+    assert body["saved"] is False and body["errors"][0]["column"] == "Seller"
+    # Other imports stay closed to a store.
+    assert client.get(IMPORT.format("developers") + "template/").status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("role", "allowed"),
+    [(Roles.BOSS, False), (Roles.MANAGER, False), (Roles.DEVELOPER, False), (Roles.ADMIN, True)],
+)
+def test_goods_import_permissions(auth_client, make_user, role, allowed):
+    r = auth_client(make_user(role)).get(IMPORT.format("goods") + "template/")
+    assert (r.status_code == 200) == allowed
+
+
+def test_goods_export_imports_back_unchanged(admin, cafe):
+    seller, counter, _owner = cafe
+    rows = [GOODS_HEADER, ("Cafe", "Counter 1", "Tea", "", "PRODUCT", 2.5, True, 3)]
+    upload(admin, "goods", *rows)
+    sheets = read(admin.get(EXPORT.format("goods")))
+    exported = sheets[next(iter(sheets))]
+    body = upload(admin, "goods", *[r for r in exported if any(c is not None for c in r)]).json()
+    assert (body["saved"], body["unchanged"], body["errors"]) == (True, 1, []), body

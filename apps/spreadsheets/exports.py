@@ -393,6 +393,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
         .order_by("created_at", "id")
     )
     number = Column("purchase", _("Purchase no."), width=12, kind="int")
+    store_no = Column("store_number", _("Store no."), width=10, kind="int")
     when = Column("time", _("Time"), width=17, kind="datetime")
     state = Column("status", _("Status"), width=11)
     seller = Column("seller", _("Seller"), width=20)
@@ -407,6 +408,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
         heads.append(
             [
                 p.pk,
+                p.store_number,
                 time,
                 str(PURCHASE_STATUS.get(p.status, p.status)),
                 str(PURCHASE_KIND.get(p.kind, p.kind)),
@@ -422,6 +424,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
             lines.append(
                 [
                     p.pk,
+                    p.store_number,
                     time,
                     str(PURCHASE_STATUS.get(p.status, p.status)),
                     p.seller.name,
@@ -441,6 +444,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                 _("Purchases"),
                 [
                     number,
+                    store_no,
                     when,
                     state,
                     Column("kind", _("Kind"), width=10),
@@ -458,6 +462,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                 _("Items"),
                 [
                     number,
+                    store_no,
                     when,
                     state,
                     seller,

@@ -1116,3 +1116,39 @@ msgstr "매 상품은 한번만 넣을수 있습니다."
 
 msgid "Refunded"
 msgstr "환불됨"
+
+msgid "SKU"
+msgstr "SKU"
+
+msgid "Enter yes or no."
+msgstr "예 또는 아니를 넣으십시오."
+
+msgid "You can only import goods of your own store."
+msgstr "자기 매장의 상품만 가져올수 있습니다."
+
+msgid "No store with this name."
+msgstr "이 이름의 매장이 없습니다."
+
+msgid "No counter with this name in this store."
+msgstr "이 매장에 이 이름의 매대가 없습니다."
+
+msgid "Name the counter: this store has several."
+msgstr "매대를 적으십시오. 이 매장에는 매대가 여러개 있습니다."
+
+msgid "This counter is not in your buildings."
+msgstr "이 매대는 담당 건물에 있지 않습니다."
+
+msgid "Courts are added on the Playground page, not imported."
+msgstr "경기장은 가져오지 않고 운동장 페지에서 추가합니다."
+
+msgid "Enter a whole number, 0 or more."
+msgstr "0 이상의 옹근수를 넣으십시오."
+
+msgid "Your account cannot add goods."
+msgstr "이 계정은 상품을 추가할수 없습니다."
+
+msgid "Your account cannot change goods."
+msgstr "이 계정은 상품을 변경할수 없습니다."
+
+msgid "Store no."
+msgstr "매장번호"
