@@ -1213,7 +1213,7 @@ msgstr "항목"
 
 
 msgid "Day"
-msgstr "날"
+msgstr "날자별"
 
 
 msgid "Count"
