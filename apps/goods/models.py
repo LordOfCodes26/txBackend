@@ -10,6 +10,7 @@ from django.core.validators import (
 )
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from apps.sellers.models import ServicePosition
@@ -20,6 +21,27 @@ class GoodKind(models.TextChoices):
     PRODUCT = "PRODUCT", "Product (tangible, optional stock)"
     SERVICE = "SERVICE", "Service (intangible, sold at the till)"
     RENTAL = "RENTAL", "Rental (booked by time slot)"
+
+
+class GoodCategory(TimeStampedModel):
+    """A store's own group of goods (Drinks, Food, ...): the till shows them as buttons.
+    Each store manages its own; removing one leaves its goods without a category."""
+
+    seller = models.ForeignKey(
+        "sellers.Seller", on_delete=models.CASCADE, related_name="good_categories"
+    )
+    name = models.CharField(max_length=80)
+    position = models.PositiveSmallIntegerField(default=0, help_text="Lowest is shown first.")
+
+    class Meta:
+        ordering = ["position", "name", "id"]
+        verbose_name_plural = "good categories"
+        constraints = [
+            models.UniqueConstraint(Lower("name"), "seller", name="good_category_unique_name"),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class Good(TimeStampedModel, SoftDeleteModel):
@@ -40,6 +62,10 @@ class Good(TimeStampedModel, SoftDeleteModel):
     sku = models.CharField(max_length=64, blank=True, help_text="Seller's own product code.")
     price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
     kind = models.CharField(max_length=10, choices=GoodKind.choices, default=GoodKind.PRODUCT)
+    # The store's category (a category of the good's own store), or none.
+    category = models.ForeignKey(
+        GoodCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name="goods"
+    )
     is_active = models.BooleanField(default=True, help_text="Available for sale.")
     track_stock = models.BooleanField(default=True)
     quantity = models.PositiveIntegerField(default=0)

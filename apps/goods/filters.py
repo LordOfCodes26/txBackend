@@ -8,12 +8,22 @@ class GoodFilter(django_filters.FilterSet):
     in_stock = django_filters.BooleanFilter(method="filter_in_stock")
     price_min = django_filters.NumberFilter(field_name="price", lookup_expr="gte")
     price_max = django_filters.NumberFilter(field_name="price", lookup_expr="lte")
+    # ?category=<id>; ?no_category=true: goods without one.
+    no_category = django_filters.BooleanFilter(field_name="category", lookup_expr="isnull")
     # Courts are listed under Playground, not with the goods.
     rental = django_filters.BooleanFilter(method="filter_rental")
 
     class Meta:
         model = Good
-        fields = ["seller", "service_position", "kind", "is_active", "track_stock", "in_stock"]
+        fields = [
+            "seller",
+            "service_position",
+            "kind",
+            "category",
+            "is_active",
+            "track_stock",
+            "in_stock",
+        ]
 
     def filter_in_stock(self, queryset, name, value):
         # Untracked goods are always available.
@@ -29,6 +39,7 @@ class InventoryMovementFilter(django_filters.FilterSet):
     seller = django_filters.NumberFilter(field_name="good__service_position__seller")
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lt")
+    category = django_filters.NumberFilter(field_name="good__category")
 
     class Meta:
         model = InventoryMovement

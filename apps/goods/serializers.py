@@ -2,12 +2,13 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from apps.sellers.models import ServicePosition
+from apps.sellers.models import Seller, ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
 
 from .models import (
     CourtPrice,
     Good,
+    GoodCategory,
     GoodImage,
     GoodKind,
     InventoryMovement,
@@ -16,7 +17,17 @@ from .models import (
 )
 
 
+class RelativeImageField(serializers.ImageField):
+    """Read as the image's address on this server (`/media/...`): the browser loads it from
+    the app's own address (nginx serves /media/), not the API's internal one."""
+
+    def to_representation(self, value):
+        return value.url if value else None
+
+
 class GoodImageSerializer(serializers.ModelSerializer):
+    image = RelativeImageField()
+
     class Meta:
         model = GoodImage
         fields = ["id", "image", "alt_text", "position", "created_at"]
@@ -83,6 +94,30 @@ class CourtPriceSerializer(serializers.ModelSerializer):
         extra_kwargs = {"position": {"required": False}, "is_active": {"required": False}}
 
 
+class GoodCategorySerializer(serializers.ModelSerializer):
+    """A store's group of goods. `seller`: staff choose the store; a store's login gets
+    its own."""
+
+    seller = serializers.PrimaryKeyRelatedField(
+        queryset=Seller.objects.all(),
+        required=False,
+    )
+    seller_name = serializers.CharField(source="seller.name", read_only=True)
+    goods_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = GoodCategory
+        fields = ["id", "seller", "seller_name", "name", "position", "goods_count"]
+        read_only_fields = ["id"]
+        extra_kwargs = {"position": {"required": False}}
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError(_("This field is required."))
+        return value
+
+
 class GoodSerializer(serializers.ModelSerializer):
     service_position = serializers.PrimaryKeyRelatedField(
         queryset=ServicePosition.objects.all(),
@@ -90,6 +125,13 @@ class GoodSerializer(serializers.ModelSerializer):
         help_text="Required, except for a new RENTAL (court): then the playground's position.",
     )
     position_detail = PositionSummarySerializer(source="service_position", read_only=True)
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=GoodCategory.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="One of the store's categories (GET /good-categories/), or null.",
+    )
+    category_name = serializers.CharField(source="category.name", read_only=True, default=None)
     seller = SellerSummarySerializer(source="service_position.seller", read_only=True)
     price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
     currency = serializers.SerializerMethodField()
@@ -120,6 +162,8 @@ class GoodSerializer(serializers.ModelSerializer):
             "seller",
             "name",
             "kind",
+            "category",
+            "category_name",
             "description",
             "sku",
             "price",
@@ -214,6 +258,15 @@ class GoodSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"initial_quantity": [_("Goods that don't track stock have no quantity.")]}
             )
+        category = attrs.get("category")
+        if category is not None:
+            position = attrs.get("service_position") or getattr(
+                self.instance, "service_position", None
+            )
+            if position is not None and category.seller_id != position.seller_id:
+                raise serializers.ValidationError(
+                    {"category": [_("Pick one of this store's categories.")]}
+                )
         sku = attrs.get("sku", "").strip()
         if sku:
             position = attrs.get("service_position") or self.instance.service_position
@@ -296,6 +349,7 @@ class GoodStatisticsSerializer(serializers.Serializer):
     good = serializers.IntegerField()
     name = serializers.CharField()
     kind = serializers.CharField()
+    category_name = serializers.CharField(allow_null=True)
     seller_name = serializers.CharField()
     service_position_name = serializers.CharField()
     price = serializers.DecimalField(max_digits=12, decimal_places=2)

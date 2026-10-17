@@ -1195,3 +1195,55 @@ msgstr "가격표는 운동장에만 있습니다."
 #, python-format
 msgid "Pick a time within opening hours (%(opening)s-%(closing)s)."
 msgstr "운영 시간 안의 시간을 고르십시오 (%(opening)s-%(closing)s)."
+
+msgid "Pick one of this store's categories."
+msgstr "이 매장의 분류 중 하나를 고르십시오."
+
+msgid "This store already has this category."
+msgstr "이 매장에 이미 이 분류가 있습니다."
+
+msgid "Your account cannot manage goods categories."
+msgstr "이 계정은 상품 분류를 관리할수 없습니다."
+
+msgid "Give a range: created_after < created_before."
+msgstr "기간을 주십시오: created_after < created_before."
+
+msgid "What"
+msgstr "항목"
+
+
+msgid "Day"
+msgstr "날"
+
+
+msgid "Count"
+msgstr "건수"
+
+
+msgid "Money"
+msgstr "돈"
+
+
+msgid "Goods sold"
+msgstr "팔린 상품"
+
+
+msgid "Share %"
+msgstr "비률 %"
+
+
+msgid "Quantity sold"
+msgstr "판매 수량"
+
+
+msgid "Number of sales"
+msgstr "판매 건수"
+
+
+msgid "Money taken"
+msgstr "받은 돈"
+
+
+msgid "Stock left"
+msgstr "남은 재고"
+

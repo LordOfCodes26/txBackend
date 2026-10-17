@@ -15,6 +15,7 @@ from .exceptions import (
 from .models import (
     CourtPrice,
     Good,
+    GoodCategory,
     GoodImage,
     GoodKind,
     InventoryMovement,
@@ -24,6 +25,7 @@ from .models import (
 )
 
 GOOD_FIELDS = [
+    "category_id",
     "service_position",
     "name",
     "kind",
@@ -306,3 +308,50 @@ def remove_court_price(*, actor, row: CourtPrice) -> None:
     else:
         row.delete()
     _follow_first_price(row.good)
+
+
+# --- A store's categories of goods -------------------------------------------------------
+
+CATEGORY_FIELDS = ["name", "position"]
+
+
+@transaction.atomic
+def create_category(*, actor, seller, name: str, position: int | None = None) -> GoodCategory:
+    if position is None:
+        last = GoodCategory.objects.filter(seller=seller).order_by("-position").first()
+        position = last.position + 1 if last else 0
+    row = GoodCategory.objects.create(seller=seller, name=name.strip(), position=position)
+    record_audit(
+        "good_category.created",
+        actor=actor,
+        entity=row,
+        new_values={"seller": seller.pk, **snapshot(row, CATEGORY_FIELDS)},
+    )
+    return row
+
+
+@transaction.atomic
+def update_category(*, actor, row: GoodCategory, **changes) -> GoodCategory:
+    row = GoodCategory.objects.select_for_update().get(pk=row.pk)
+    before = snapshot(row, CATEGORY_FIELDS)
+    for field, value in changes.items():
+        setattr(row, field, value.strip() if field == "name" else value)
+    row.save()
+    old, new = diff(before, snapshot(row, CATEGORY_FIELDS))
+    if new:
+        record_audit(
+            "good_category.updated", actor=actor, entity=row, old_values=old, new_values=new
+        )
+    return row
+
+
+@transaction.atomic
+def delete_category(*, actor, row: GoodCategory) -> None:
+    """Its goods stay, without a category."""
+    record_audit(
+        "good_category.deleted",
+        actor=actor,
+        entity=row,
+        old_values={"seller": row.seller_id, **snapshot(row, CATEGORY_FIELDS)},
+    )
+    row.delete()

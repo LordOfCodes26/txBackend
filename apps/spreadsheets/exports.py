@@ -487,6 +487,75 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
     )
 
 
+def sales_report_workbook(goods, rows: list[dict], after, before, first: date, last: date) -> bytes:
+    """The Sales report as a workbook: a Summary sheet (money taken, paid sales, refunds,
+    goods sold) and a Goods sold sheet (one row per good, the most money first). `goods`:
+    the goods the user may see; the sales are those with any of them."""
+    from apps.purchases.models import PurchaseKind
+
+    sales = Purchase.objects.filter(
+        kind=PurchaseKind.SALE,
+        confirmed_at__gte=after,
+        confirmed_at__lt=before,
+        items__good__in=goods,
+    ).distinct()
+    paid = sales.filter(status=PurchaseStatus.CONFIRMED)
+    refunded = sales.filter(status=PurchaseStatus.REFUNDED)
+    taken = sum((p.total or Decimal("0") for p in paid), Decimal("0"))
+    back = sum((p.total or Decimal("0") for p in refunded), Decimal("0"))
+    money_total = sum((row["money"] for row in rows), Decimal("0"))
+    summary = [
+        [str(_("From")), str(first), None, None],
+        [str(_("To")), str(last), None, None],
+        [str(_("Money taken")), None, paid.count(), taken],
+        [str(_("Refunded")), None, refunded.count(), back],
+        [str(_("Goods sold")), None, sum(row["sold"] for row in rows), money_total],
+    ]
+    goods_rows = [
+        [
+            row["name"],
+            row.get("category_name"),
+            row["seller_name"],
+            row["service_position_name"],
+            row["sold"],
+            row["sales"],
+            row["money"],
+            round(float(row["money"] / money_total * 100), 1) if money_total else None,
+            row["stock"],
+        ]
+        for row in rows
+    ]
+    return workbook(
+        [
+            Sheet(
+                _("Summary"),
+                [
+                    Column("what", _("What"), width=18),
+                    Column("day", _("Day"), width=12),
+                    Column("count", _("Count"), width=10, kind="int"),
+                    Column("money", _("Money"), width=14, kind="money"),
+                ],
+                summary,
+            ),
+            Sheet(
+                _("Goods sold"),
+                [
+                    Column("good", _("Good"), width=26),
+                    Column("category", _("Category"), width=14),
+                    Column("seller", _("Seller"), width=18),
+                    Column("counter", _("Counter"), width=16),
+                    Column("sold", _("Quantity sold"), width=12, kind="int"),
+                    Column("sales", _("Number of sales"), width=14, kind="int"),
+                    Column("money", _("Money taken"), width=14, kind="money"),
+                    Column("share", _("Share %"), width=9),
+                    Column("stock", _("Stock left"), width=10, kind="int"),
+                ],
+                goods_rows,
+            ),
+        ]
+    )
+
+
 CARD_STATUS = {"ACTIVE": _("Active"), "BLOCKED": _("Blocked"), "RETIRED": _("Retired")}
 READER_KIND = {"ATTENDANCE": _("Door"), "TILL": _("Till reader"), "ENROLL": _("Card assign reader")}
 

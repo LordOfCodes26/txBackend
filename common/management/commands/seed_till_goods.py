@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.goods import services as goods
-from apps.goods.models import Good, GoodKind
+from apps.goods.models import Good, GoodCategory, GoodKind
 from apps.sellers.models import ServicePosition
 
 SKU = "SEED-TILL-"  # each seeded good: SEED-TILL-<counter id>-<number>
@@ -22,6 +22,12 @@ KINDS = [
     "Soup",
     "Noodles",
 ]
+# Each kind's category (made for the store if it has none of that name).
+GROUPS = {
+    "Drinks": {"Coffee", "Tea", "Juice", "Water"},
+    "Food": {"Sandwich", "Salad", "Soup", "Noodles"},
+    "Sweets": {"Cake", "Cookie"},
+}
 STYLES = [
     "Small",
     "Large",
@@ -66,7 +72,17 @@ class Command(BaseCommand):
                 return
             if count < 1:
                 raise CommandError("--count must be more than 0.")
+            groups = {}
+            for name in GROUPS:
+                groups[name] = GoodCategory.objects.filter(
+                    seller=position.seller, name__iexact=name
+                ).first() or goods.create_category(actor=None, seller=position.seller, name=name)
+            category_of = {kind: groups[g] for g, kinds in GROUPS.items() for kind in kinds}
             have = set(Good.objects.filter(sku__startswith=prefix).values_list("sku", flat=True))
+            for good in Good.objects.filter(sku__startswith=prefix, category__isnull=True):
+                kind = next((k for k in KINDS if f" {k} " in f" {good.name} "), None)
+                if kind:
+                    Good.objects.filter(pk=good.pk).update(category=category_of[kind])
             rng = random.Random(position.pk)  # the same names and prices every time
             added = 0
             for number in range(1, count + 1):
@@ -83,6 +99,7 @@ class Command(BaseCommand):
                     sku=sku,
                     price=price,
                     kind=GoodKind.PRODUCT,
+                    category=category_of[kind],
                     track_stock=stocked,
                     initial_quantity=rng.randrange(5, 50) if stocked else 0,
                 )

@@ -328,7 +328,8 @@ def test_upload_and_delete_image(seller_manager, make_good, settings):
     )
     assert r.status_code == 201, r.json()
     image = r.json()["images"][0]
-    assert image["image"].startswith("http://testserver/media/goods/")
+    # Relative: the browser loads it from the app's own address (nginx serves /media/).
+    assert image["image"].startswith("/media/goods/")
     stored = list(settings.MEDIA_ROOT.rglob("*.png"))
     assert len(stored) == 1
 
