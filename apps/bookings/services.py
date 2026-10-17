@@ -20,6 +20,7 @@ from .exceptions import (
     BookingNotPaid,
     BookingNotReserved,
     BookingStarted,
+    CardNotTheBookers,
     CheckedInIndoors,
     InvalidSlot,
     RentalNotAvailable,
@@ -353,11 +354,21 @@ def desk_check_in(*, actor, booking: Booking) -> Booking:
 
 
 @transaction.atomic
-def indoor_check_in(*, actor, booking: Booking) -> Booking:
+def indoor_check_in(*, actor, booking: Booking, check: PlaygroundCheck) -> Booking:
     """The indoor playground's checker lets the developer in: a paid booking on an indoor
-    court is checked in (once). Unpaid ones are paid at the desk first."""
+    court is checked in (once), with the card tap that proves they are here (`check`: a
+    tap on the checker's store's reader in the last 2 minutes, by the booking's
+    developer). Unpaid ones are paid at the desk first."""
     from apps.sellers.access import acting_seller
 
+    store = acting_seller(actor) if getattr(actor, "pk", None) else None
+    fresh = timezone.now() - timedelta(minutes=2)
+    if (
+        check.developer_id != booking.developer_id
+        or check.created_at < fresh
+        or (store is not None and check.seller_id != store.pk)
+    ):
+        raise CardNotTheBookers()
     booking = (
         Booking.objects.select_for_update(of=("self",))
         .select_related("good__rental")
@@ -369,9 +380,14 @@ def indoor_check_in(*, actor, booking: Booking) -> Booking:
         raise BookingNotPaid()
     if booking.checked_in_at is None:
         booking.checked_in_at = timezone.now()
-        booking.checked_in_at_store = acting_seller(actor) if getattr(actor, "pk", None) else None
+        booking.checked_in_at_store_id = check.seller_id
         booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
-        record_audit("booking.checked_in", actor=actor, entity=booking, new_values={"indoor": True})
+        record_audit(
+            "booking.checked_in",
+            actor=actor,
+            entity=booking,
+            new_values={"indoor": True, "tap": check.event_id},
+        )
     return booking
 
 

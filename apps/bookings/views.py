@@ -1,8 +1,10 @@
 from django.db.models import Q
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -50,6 +52,16 @@ from .serializers import (
 )
 
 
+def indoor_only(user) -> bool:
+    """The indoor playground's checker (may check bookings, not take them) works with
+    indoor courts only: their courts and bookings lists show nothing else."""
+    return (
+        user.has_rbac_perm("booking.check")
+        and not user.has_rbac_perm("booking.create")
+        and not user.has_rbac_perm("booking.pay")
+    )
+
+
 class RentalViewSet(viewsets.ReadOnlyModelViewSet):
     """Bookable rentals (playground, pool, ...), visible to every logged-in user."""
 
@@ -76,6 +88,10 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
         except a store's goods-only login: its own courts, if any."""
         qs = super().get_queryset()
         user = self.request.user
+        if indoor_only(user):
+            from apps.goods.models import CourtPlace
+
+            return qs.filter(rental__place=CourtPlace.INDOOR)
         if user.has_rbac_perm("booking.view") or works_playground(user):
             return qs
         seller = acting_seller(user)
@@ -175,11 +191,7 @@ class BookingViewSet(
         playground's gate: they see indoor court bookings only."""
         qs = super().get_queryset()
         user = self.request.user
-        if (
-            user.has_rbac_perm("booking.check")
-            and not user.has_rbac_perm("booking.create")
-            and not user.has_rbac_perm("booking.pay")
-        ):
+        if indoor_only(user):
             from apps.goods.models import CourtPlace
 
             qs = qs.filter(good__rental__place=CourtPlace.INDOOR)
@@ -252,8 +264,17 @@ class BookingViewSet(
     @extend_schema(request=None, responses=BookingSerializer)
     @action(detail=True, methods=["post"], url_path="indoor-check-in")
     def indoor_check_in(self, request, pk=None):
-        """The checker lets the developer in: a paid indoor booking is checked in."""
-        booking = services.indoor_check_in(actor=request.user, booking=self.get_object())
+        """The checker lets the developer in: a paid indoor booking is checked in, with
+        `check`: their card tap on the store's reader (a booking check's id)."""
+        check_id = str(request.data.get("check", ""))
+        check = (
+            PlaygroundCheck.objects.filter(pk=int(check_id)).first() if check_id.isdigit() else None
+        )
+        if check is None:
+            raise ValidationError({"check": [_("Ask the developer to tap their card first.")]})
+        booking = services.indoor_check_in(
+            actor=request.user, booking=self.get_object(), check=check
+        )
         return Response(BookingSerializer(self.get_queryset().get(pk=booking.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="check-in")

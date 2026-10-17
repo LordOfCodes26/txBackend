@@ -56,3 +56,9 @@ class CheckedInIndoors(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "CHECKED_IN_INDOORS"
     default_detail = _("Indoor courts are checked in at the indoor check (a card tap).")
+
+
+class CardNotTheBookers(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "CARD_NOT_THE_BOOKERS"
+    default_detail = _("Tap the card of the developer who booked, on this store's reader.")

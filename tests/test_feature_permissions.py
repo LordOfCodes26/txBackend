@@ -164,13 +164,15 @@ def test_store_and_counter_counts(auth_client, make_user):
 
 
 @pytest.mark.django_db
-def test_checker_checks_in_a_paid_indoor_booking(auth_client, make_user):
+def test_checker_checks_in_a_paid_indoor_booking_with_a_card_tap(auth_client, make_user):
     from datetime import time, timedelta
 
     from django.utils import timezone
 
-    from apps.bookings.models import Booking
+    from apps.bookings.models import Booking, PlaygroundCheck
     from apps.goods.models import Good, GoodKind, RentalSettings
+    from apps.rfid import services as rfid
+    from apps.rfid.models import RFIDCard, RFIDCardAssignment
     from apps.sellers.models import Seller, ServicePosition
 
     position = ServicePosition.objects.create(
@@ -187,7 +189,11 @@ def test_checker_checks_in_a_paid_indoor_booking(auth_client, make_user):
         good=hall, slot_minutes=60, opening_time=time(0), closing_time=time(23), place="INDOOR"
     )
     ada = Developer.objects.create(employee_number="E1", full_name="Ada")
-    start = timezone.now() + timedelta(minutes=10)
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04AA"), developer=ada)
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid="04BB"), developer=bob)
+    # Two hours ahead: the reader's own check (20 minutes early at most) finds nothing.
+    start = timezone.now() + timedelta(hours=2)
     paid = Booking.objects.create(
         good=hall,
         developer=ada,
@@ -196,21 +202,47 @@ def test_checker_checks_in_a_paid_indoor_booking(auth_client, make_user):
         slots=1,
         status="PAID",
     )
-    unpaid = Booking.objects.create(
-        good=hall,
-        developer=ada,
-        start=start + timedelta(hours=2),
-        end=start + timedelta(hours=3),
-        slots=1,
-        status="RESERVED",
-    )
-    checker = auth_client(make_user(Roles.PLAYGROUND_CHECKER))
-    r = checker.post(f"/api/v1/bookings/{paid.pk}/indoor-check-in/")
+    user = make_user(Roles.PLAYGROUND_CHECKER)
+    gym = Seller.objects.create(name="Gym", user=user, checks_bookings=True)
+    ServicePosition.objects.create(seller=gym, name="Gym counter")
+    reader, _key = rfid.register_device(actor=None, code="Gate9", purpose="TILL", seller=gym)
+    checker = auth_client(user)
+    url = f"/api/v1/bookings/{paid.pk}/indoor-check-in/"
+
+    assert checker.post(url, {}).json()["error"]["code"] == "VALIDATION_ERROR"  # no tap
+    rfid.record_scan(device=reader, uid="04BB")  # Bob's card
+    bobs = PlaygroundCheck.objects.latest("pk")
+    assert checker.post(url, {"check": bobs.pk}).json()["error"]["code"] == "CARD_NOT_THE_BOOKERS"
+    rfid.record_scan(device=reader, uid="04AA")  # Ada's card
+    adas = PlaygroundCheck.objects.latest("pk")
+    r = checker.post(url, {"check": adas.pk})
     assert r.status_code == 200, r.json()
     assert r.json()["checked_in_at"] is not None
-    assert (
-        checker.post(f"/api/v1/bookings/{unpaid.pk}/indoor-check-in/").json()["error"]["code"]
-        == "BOOKING_NOT_PAID"
+    assert auth_client(make_user(Roles.MANAGER)).post(url, {"check": adas.pk}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_checker_sees_indoor_courts_only(auth_client, make_user):
+    from datetime import time
+
+    from apps.goods.models import Good, GoodKind, RentalSettings
+    from apps.sellers.models import Seller, ServicePosition
+
+    position = ServicePosition.objects.create(
+        seller=Seller.objects.create(name="Play"), name="Desk"
     )
-    seller = auth_client(make_user(Roles.MANAGER))
-    assert seller.post(f"/api/v1/bookings/{paid.pk}/indoor-check-in/").status_code == 403
+    for name, place in (("Hall", "INDOOR"), ("Field", "OUTDOOR")):
+        good = Good.objects.create(
+            service_position=position,
+            name=name,
+            price="10.00",
+            kind=GoodKind.RENTAL,
+            track_stock=False,
+        )
+        RentalSettings.objects.create(
+            good=good, slot_minutes=60, opening_time=time(0), closing_time=time(23), place=place
+        )
+    checker = auth_client(make_user(Roles.PLAYGROUND_CHECKER))
+    assert [r["name"] for r in checker.get("/api/v1/rentals/").json()["results"]] == ["Hall"]
+    admin = auth_client(make_user(Roles.ADMIN))
+    assert {r["name"] for r in admin.get("/api/v1/rentals/").json()["results"]} == {"Hall", "Field"}
