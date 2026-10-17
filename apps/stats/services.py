@@ -36,6 +36,18 @@ def _money(value) -> str:
     return f"{(value or ZERO):.2f}"
 
 
+DEPOSIT_TYPES = ("ECOMMERCE", "CASH", "NONE")
+
+
+def _deposit_q(deposit_type: str | None = None) -> Q:
+    """Deposits, of one type if given: ECOMMERCE, CASH, or NONE (made before the type was
+    asked)."""
+    q = Q(kind=TransactionKind.DEPOSIT)
+    if deposit_type:
+        q &= Q(method="" if deposit_type == "NONE" else deposit_type)
+    return q
+
+
 def _local_bounds(first: date, last: date):
     tz = timezone.get_current_timezone()
     start = timezone.make_aware(datetime.combine(first, time.min), tz)
@@ -99,9 +111,12 @@ def people(first: date, last: date, buildings=None) -> dict:
     }
 
 
-def money(first: date, last: date, buildings=None, sales_by: str = "counter") -> dict:
+def money(
+    first: date, last: date, buildings=None, sales_by: str = "counter", deposit_type=None
+) -> dict:
     """`sales_by`: limit store sales to `buildings` by the counter's building ("counter",
     the company dashboard) or by the buyer's home building ("buyer", finance statistics)."""
+    deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
     accounts = DeveloperAccount.objects.all()
     period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
@@ -117,8 +132,8 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
             sales = sales.filter(service_position__building__in=buildings)
     by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
     totals = period.aggregate(
-        deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
-        deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
+        deposits=Sum("amount", filter=deposit_q),
+        deposit_count=Count("pk", filter=deposit_q),
         spending=Sum("amount", filter=SPENDING),
         spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
     )
@@ -128,7 +143,7 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
         .order_by()
         .values("day")
         .annotate(
-            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposits=Sum("amount", filter=deposit_q),
             spending=Sum("amount", filter=SPENDING),
         )
     }
@@ -162,7 +177,18 @@ def money(first: date, last: date, buildings=None, sales_by: str = "counter") ->
             "total": _money(accounts.filter(balance__lt=0).aggregate(t=Sum("balance"))["t"]),
             "count": accounts.filter(balance__lt=0).count(),
         },
-        "deposits": {"total": _money(totals["deposits"]), "count": totals["deposit_count"]},
+        "deposits": {
+            "total": _money(totals["deposits"]),
+            "count": totals["deposit_count"],
+            # Every type, whatever the filter: E-commerce, Cash, and none (older deposits).
+            "by_type": {
+                kind: {"total": _money(row["t"]), "count": row["n"]}
+                for kind in DEPOSIT_TYPES
+                for row in [
+                    period.filter(_deposit_q(kind)).aggregate(t=Sum("amount"), n=Count("pk"))
+                ]
+            },
+        },
         "spending": {
             "total": _money(-(totals["spending"] or ZERO)),
             "count": totals["spending_count"],
@@ -270,10 +296,11 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
     return rows
 
 
-def developer_money(first: date, last: date, buildings=None) -> list[dict]:
+def developer_money(first: date, last: date, buildings=None, deposit_type=None) -> list[dict]:
     """Per developer with deposits or spending in the period: deposit total and count,
     spending total and count, and the balance now. Biggest deposit total first (then the
     most deposits). Limited to the developers of `buildings`."""
+    deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
     period = AccountTransaction.objects.filter(
         created_at__gte=start,
@@ -293,8 +320,8 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
             "account__balance",
         )
         .annotate(
-            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
-            deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposits=Sum("amount", filter=deposit_q),
+            deposit_count=Count("pk", filter=deposit_q),
             spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
@@ -318,10 +345,11 @@ def developer_money(first: date, last: date, buildings=None) -> list[dict]:
     return out
 
 
-def building_money(first: date, last: date, buildings=None) -> list[dict]:
+def building_money(first: date, last: date, buildings=None, deposit_type=None) -> list[dict]:
     """Per building (the developers' home building): deposits, spending and balances now,
     and `daily` deposits and spending for the chart. Developers without a building are a
     row of their own (`id` null) when the figures are company-wide."""
+    deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
     period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
     accounts = DeveloperAccount.objects.all()
@@ -335,8 +363,8 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         for row in period.order_by()
         .values("account__developer__building")
         .annotate(
-            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
-            deposit_count=Count("pk", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposits=Sum("amount", filter=deposit_q),
+            deposit_count=Count("pk", filter=deposit_q),
             spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
@@ -347,7 +375,7 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
         .order_by()
         .values("account__developer__building", "day")
         .annotate(
-            deposits=Sum("amount", filter=Q(kind=TransactionKind.DEPOSIT)),
+            deposits=Sum("amount", filter=deposit_q),
             spending=Sum("amount", filter=SPENDING),
         )
     ):
@@ -401,17 +429,17 @@ def building_money(first: date, last: date, buildings=None) -> list[dict]:
     return out
 
 
-def finance_stats(first: date, last: date, buildings=None) -> dict:
+def finance_stats(first: date, last: date, buildings=None, deposit_type=None) -> dict:
     """The money half of `company_stats`, the per-seller comparison and the per-developer
     deposits and spending."""
     return {
         **_frame(first, last, buildings),
         # Store sales by the buyer's building, like the rest of this page.
-        "money": money(first, last, buildings, sales_by="buyer"),
+        "money": money(first, last, buildings, sales_by="buyer", deposit_type=deposit_type),
         "sellers": seller_comparison(first, last, buildings),
-        "developers": developer_money(first, last, buildings),
+        "developers": developer_money(first, last, buildings, deposit_type),
         # Per building, unless the figures are already one building's.
         "by_building": []
         if buildings is not None and len(buildings) <= 1
-        else building_money(first, last, buildings),
+        else building_money(first, last, buildings, deposit_type),
     }

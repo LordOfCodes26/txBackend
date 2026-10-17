@@ -78,6 +78,9 @@ def developers_workbook(user, filters=None) -> bytes:
     return workbook([Sheet(_("Developers"), DEVELOPER_COLUMNS + CARD_COLUMNS[:2], rows)])
 
 
+DEPOSIT_METHOD = {"ECOMMERCE": _("E-commerce"), "CASH": _("Cash")}
+
+
 def money_workbook(user, first: date, last: date) -> bytes:
     start, end = _local_bounds(first, last)
     accounts = DeveloperAccount.objects.select_related("developer__building").order_by(
@@ -129,6 +132,7 @@ def money_workbook(user, first: date, last: date) -> bytes:
             EMPLOYEE,
             NAME,
             Column("kind", _("Kind"), width=12),
+            Column("method", _("Deposit type"), width=12),
             Column("amount", _("Amount"), width=12, kind="money"),
             Column("balance_after", _("Balance after"), width=13, kind="money"),
             Column("description", _("Description"), width=30),
@@ -140,6 +144,7 @@ def money_workbook(user, first: date, last: date) -> bytes:
                 t.account.developer.employee_number,
                 t.account.developer.full_name,
                 t.kind,
+                str(DEPOSIT_METHOD.get(t.method, t.method)) if t.method else None,
                 t.amount,
                 t.balance_after,
                 t.description,
@@ -249,13 +254,17 @@ def goods_workbook(user, first: date, last: date) -> bytes:
     return workbook([catalog, stock])
 
 
-def finance_stats_workbook(user, first: date, last: date, building: int | None = None) -> bytes:
+def finance_stats_workbook(
+    user, first: date, last: date, building: int | None = None, deposit_type: str | None = None
+) -> bytes:
     """The finance statistics page as a workbook: the totals, each day, each seller and
     each developer (by deposit total), with the same building limits (and building
     filter) as the page."""
     from apps.stats.views import chosen_buildings
 
-    stats = finance_stats(first, last, chosen_buildings(user, "finance.stats.view", building))
+    stats = finance_stats(
+        first, last, chosen_buildings(user, "finance.stats.view", building), deposit_type
+    )
     money = stats["money"]
     label, value = Column("label", _("Figure"), width=28), Column("value", _("Value"), width=18)
     summary = [
@@ -263,6 +272,10 @@ def finance_stats_workbook(user, first: date, last: date, building: int | None =
         [str(_("To")), last.isoformat()],
         [str(_("Deposits")), Decimal(money["deposits"]["total"])],
         [str(_("Deposit count")), money["deposits"]["count"]],
+        *[
+            [f"{_('Deposits')} · {DEPOSIT_METHOD.get(kind, _('No type'))}", Decimal(row["total"])]
+            for kind, row in money["deposits"]["by_type"].items()
+        ],
         [str(_("Spending")), Decimal(money["spending"]["total"])],
         [str(_("Payment count")), money["spending"]["count"]],
         [str(_("In minus now")), Decimal(money["minus"]["total"])],

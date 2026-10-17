@@ -38,12 +38,20 @@ class FinanceStatsQuerySerializer(PeriodSerializer):
     building = serializers.IntegerField(
         required=False, min_value=1, help_text="Only this building's figures (a building id)."
     )
+    deposit_type = serializers.ChoiceField(
+        choices=["ECOMMERCE", "CASH", "NONE"],
+        required=False,
+        help_text="Count only deposits of this type (NONE: made before the type was asked).",
+    )
 
     def validate(self, attrs):
         building = attrs.get("building")
+        deposit_type = attrs.get("deposit_type")
         attrs = super().validate(attrs)
         if building is not None:
             attrs["building"] = building
+        if deposit_type:
+            attrs["deposit_type"] = deposit_type
         return attrs
 
 
@@ -93,4 +101,6 @@ class FinanceStatsView(APIView):
         query.is_valid(raise_exception=True)
         data = query.validated_data
         buildings = chosen_buildings(request.user, "finance.stats.view", data.get("building"))
-        return Response(finance_stats(data["date_from"], data["date_to"], buildings))
+        return Response(
+            finance_stats(data["date_from"], data["date_to"], buildings, data.get("deposit_type"))
+        )

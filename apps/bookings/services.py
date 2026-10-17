@@ -20,6 +20,7 @@ from .exceptions import (
     BookingNotPaid,
     BookingNotReserved,
     BookingStarted,
+    CheckedInIndoors,
     InvalidSlot,
     RentalNotAvailable,
     SlotUnavailable,
@@ -48,13 +49,16 @@ def _ensure_bookable(good: Good) -> RentalSettings:
         raise RentalNotAvailable(_("This rental has no booking rules yet.")) from exc
 
 
+def _day_bounds(day: date) -> tuple[datetime, datetime]:
+    """Courts have no opening hours: a day is 00:00 to the next 00:00 (company-local)."""
+    return _local(day, datetime.min.time()), _local(day + timedelta(days=1), datetime.min.time())
+
+
 def slots_for_day(good: Good, day: date) -> list[dict]:
     """Every slot of `day` (company-local) with whether it can still be booked."""
     rules = _ensure_bookable(good)
-    if day.weekday() not in rules.weekdays:
-        return []
     step = timedelta(minutes=rules.slot_minutes)
-    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
+    opening, closing = _day_bounds(day)
     booked = list(
         Booking.objects.filter(good=good, start__lt=closing, end__gt=opening).values_list(
             "start", "end"
@@ -89,7 +93,7 @@ def day_schedule(good: Good, day: date, with_bookings: bool = False) -> dict:
         else:
             periods.append({"state": slot["state"], "start": slot["start"], "end": slot["end"]})
     rules = good.rental
-    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
+    opening, closing = _day_bounds(day)
     day_bookings = (
         Booking.objects.filter(good=good, start__lt=closing, end__gt=opening)
         .select_related("developer", "good__rental", "court_price")
@@ -98,9 +102,10 @@ def day_schedule(good: Good, day: date, with_bookings: bool = False) -> dict:
     return {
         "good": good,
         "bookings": [booking_brief(b) for b in day_bookings] if with_bookings else [],
-        "open": day.weekday() in rules.weekdays,
-        "opening_time": rules.opening_time,
-        "closing_time": rules.closing_time,
+        # Open all day, every day (no opening hours).
+        "open": True,
+        "opening_time": datetime.min.time(),
+        "closing_time": datetime.max.time().replace(microsecond=0),
         "slot_minutes": rules.slot_minutes,
         "periods": periods,
     }
@@ -110,14 +115,14 @@ def _validate_slot(
     rules: RentalSettings, start: datetime, slots: int, running_ok: bool = False
 ) -> datetime:
     """Check the requested range against the rental's rules; return its end. The start may
-    be any minute within opening hours; the length is whole slots (the price is per slot).
+    be any minute of any day (no opening hours; it may run past midnight); the length is
+    whole slots (the price is per slot).
     `running_ok`: the range may have started up to one slot ago ("play now": the start is
     fixed when the desk opens the payment, the PIN comes a little later)."""
     local_start = timezone.localtime(start)
     day = local_start.date()
     step = timedelta(minutes=rules.slot_minutes)
     end = start + step * slots
-    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
 
     if slots < 1:
         raise InvalidSlot(_("Book at least one slot."))
@@ -129,21 +134,8 @@ def _validate_slot(
             _("Bookings open %(days)s days in advance.") % {"days": rules.max_days_ahead},
             details={"max_days_ahead": rules.max_days_ahead},
         )
-    if day.weekday() not in rules.weekdays:
-        raise InvalidSlot(_("The rental is closed on this day."))
-    if local_start.second or local_start.microsecond or start < opening or end > closing:
-        raise InvalidSlot(
-            _("Pick a time within opening hours (%(opening)s-%(closing)s).")
-            % {
-                "opening": rules.opening_time.strftime("%H:%M"),
-                "closing": rules.closing_time.strftime("%H:%M"),
-            },
-            details={
-                "opening_time": rules.opening_time.isoformat(),
-                "closing_time": rules.closing_time.isoformat(),
-                "slot_minutes": rules.slot_minutes,
-            },
-        )
+    if local_start.second or local_start.microsecond:
+        raise InvalidSlot(_("Pick a start time in whole minutes."))
     return end
 
 
@@ -152,6 +144,8 @@ def time_range(*, good: Good, day: date, start_time, end_time) -> tuple[datetime
     any minute; the length is whole slots, e.g. 10:15-12:15 with 60-minute slots = 2 slots."""
     rules = _ensure_bookable(good)
     start, end = _local(day, start_time), _local(day, end_time)
+    if end <= start:  # e.g. 23:00-01:00: it ends the next day
+        end = _local(day + timedelta(days=1), end_time)
     minutes = (end - start).total_seconds() / 60
     if minutes <= 0 or minutes % rules.slot_minutes:
         raise InvalidSlot(
@@ -234,16 +228,8 @@ def price_of(
 
 
 def play_start(rules: RentalSettings, now: datetime | None = None) -> datetime | None:
-    """When "play now" starts: this minute, or None when the court is closed now (or
-    closes before one slot is over)."""
-    now = (now or timezone.now()).replace(second=0, microsecond=0)
-    day = timezone.localtime(now).date()
-    if day.weekday() not in rules.weekdays:
-        return None
-    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
-    if not opening <= now or now + timedelta(minutes=rules.slot_minutes) > closing:
-        return None
-    return now
+    """When "play now" starts: this minute (courts have no opening hours)."""
+    return (now or timezone.now()).replace(second=0, microsecond=0)
 
 
 def check_line(*, good: Good, start: datetime, slots: int, running_ok: bool = False) -> datetime:
@@ -336,16 +322,28 @@ def cancel_reservation(*, actor, booking: Booking) -> None:
 
 
 @transaction.atomic
+def checked_in_at_desk(good: Good) -> bool:
+    """Outdoor courts check people in at the desk (paying checks in); indoor courts have
+    their own check (the booking check's card tap) and are checked in there."""
+    from apps.goods.models import CourtPlace
+
+    rules = getattr(good, "rental", None)
+    return rules is None or rules.place != CourtPlace.INDOOR
+
+
 def desk_check_in(*, actor, booking: Booking) -> Booking:
-    """The developer is at the desk: a paid booking is checked in (paying on arrival
-    checks in by itself). An unpaid one must be paid first."""
+    """The developer is at the desk: a paid booking on an outdoor court is checked in
+    (paying there checks in by itself). An unpaid one must be paid first; an indoor
+    court's booking is checked in at the indoor check."""
     booking = (
-        Booking.objects.select_for_update()
-        .select_related("good__service_position")
+        Booking.objects.select_for_update(of=("self",))
+        .select_related("good__service_position", "good__rental")
         .get(pk=booking.pk)
     )
     if booking.status != BookingStatus.PAID:
         raise BookingNotPaid()
+    if not checked_in_at_desk(booking.good):
+        raise CheckedInIndoors()
     if booking.checked_in_at is None:
         booking.checked_in_at = timezone.now()
         booking.checked_in_at_store_id = booking.good.service_position.seller_id
@@ -354,12 +352,36 @@ def desk_check_in(*, actor, booking: Booking) -> Booking:
     return booking
 
 
+@transaction.atomic
+def indoor_check_in(*, actor, booking: Booking) -> Booking:
+    """The indoor playground's checker lets the developer in: a paid booking on an indoor
+    court is checked in (once). Unpaid ones are paid at the desk first."""
+    from apps.sellers.access import acting_seller
+
+    booking = (
+        Booking.objects.select_for_update(of=("self",))
+        .select_related("good__rental")
+        .get(pk=booking.pk)
+    )
+    if checked_in_at_desk(booking.good):
+        raise InvalidSlot(_("Outdoor courts are checked in at the playground desk."))
+    if booking.status != BookingStatus.PAID:
+        raise BookingNotPaid()
+    if booking.checked_in_at is None:
+        booking.checked_in_at = timezone.now()
+        booking.checked_in_at_store = acting_seller(actor) if getattr(actor, "pk", None) else None
+        booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
+        record_audit("booking.checked_in", actor=actor, entity=booking, new_values={"indoor": True})
+    return booking
+
+
 def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) -> Booking:
     """Called by `confirm_purchase` (in its transaction): the reserved booking this purchase
-    pays becomes PAID and is checked in (the developer is at the desk)."""
+    pays becomes PAID; on an outdoor court it is checked in too (the developer is at the
+    desk), an indoor court's at the indoor check."""
     booking = (
-        Booking.objects.select_for_update()
-        .select_related("good__service_position")
+        Booking.objects.select_for_update(of=("self",))
+        .select_related("good__service_position", "good__rental")
         .get(pk=purchase.booking_to_pay_id)
     )
     if booking.status != BookingStatus.RESERVED:
@@ -370,8 +392,9 @@ def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) ->
     booking.purchase = purchase
     booking.people = item.people
     booking.court_price_id = item.court_price_id
-    booking.checked_in_at = booking.checked_in_at or timezone.now()
-    booking.checked_in_at_store_id = booking.good.service_position.seller_id
+    if checked_in_at_desk(booking.good):
+        booking.checked_in_at = booking.checked_in_at or timezone.now()
+        booking.checked_in_at_store_id = booking.good.service_position.seller_id
     booking.save(
         update_fields=[
             "status",
@@ -415,7 +438,8 @@ def book_lines(
         _ensure_developer_free(developer, item.start, end)
         try:
             with transaction.atomic():
-                playing = item.start <= timezone.now()  # "play now": at the desk already
+                # "Play now" on an outdoor court: at the desk already, so checked in.
+                playing = item.start <= timezone.now() and checked_in_at_desk(good)
                 booking = Booking.objects.create(
                     good=good,
                     developer=developer,
@@ -548,6 +572,8 @@ def booking_brief(booking: Booking) -> dict:
         "end_time": f"{timezone.localtime(booking.end):%H:%M}",
         "date": timezone.localtime(booking.start).date().isoformat(),
         "status": booking.status,
+        # INDOOR courts are checked in at the indoor check, OUTDOOR ones at the desk.
+        "place": getattr(getattr(booking.good, "rental", None), "place", "OUTDOOR"),
         "people": booking.people,
         "price": f"{price:.2f}",
         "price_name": booking.court_price.name if booking.court_price_id else "",
@@ -586,17 +612,14 @@ def now_board(goods) -> list[dict]:
         mine = by_court.get(good.pk, [])
         current = next((b for b in mine if b.start <= now < b.end), None)
         upcoming = next((b for b in mine if b.start > now), None)
-        closing = _local(today, rules.closing_time)
         if current is not None:
             state, until = "IN_USE", current.end
-        elif running is not None:
-            state, until = "FREE", upcoming.start if upcoming else closing
         else:
-            state, until = "CLOSED", None
-        # How many slots "play now" can still take before the next booking or closing.
-        fits = (
-            int((until - running) / timedelta(minutes=rules.slot_minutes)) if state == "FREE" else 0
-        )
+            state, until = "FREE", upcoming.start if upcoming else None
+        # How many slots "play now" can still take before the next booking (no closing time;
+        # the desk offers up to 4).
+        step = timedelta(minutes=rules.slot_minutes)
+        fits = (4 if until is None else int((until - running) / step)) if state == "FREE" else 0
         board.append(
             {
                 "good": good.pk,
@@ -828,15 +851,23 @@ def change_booking(
 
 
 def booking_to_check(developer, now=None) -> Booking | None:
-    """The developer's booking a check-in tap counts for: running now, or starting within
+    """The developer's booking a check-in tap counts for: on an indoor court (the booking
+    check is the indoor playground's gate), running now or starting within
     PLAYGROUND_CHECK_IN_EARLY_MINUTES. The earliest first."""
     from django.conf import settings
+
+    from apps.goods.models import CourtPlace
 
     now = now or timezone.now()
     early = timedelta(minutes=settings.PLAYGROUND_CHECK_IN_EARLY_MINUTES)
     return (
-        Booking.objects.select_for_update()
-        .filter(developer=developer, start__lte=now + early, end__gt=now)
+        Booking.objects.select_for_update(of=("self",))
+        .filter(
+            developer=developer,
+            good__rental__place=CourtPlace.INDOOR,
+            start__lte=now + early,
+            end__gt=now,
+        )
         .order_by("start", "id")
         .first()
     )

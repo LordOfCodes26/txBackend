@@ -63,12 +63,13 @@ class DeveloperSerializer(serializers.ModelSerializer):
             "start_date",
             "out_date",
             "status",
+            "deleted_at",
             "photo",
             "card_label",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "deleted_at", "created_at", "updated_at"]
         # Uniqueness is partial (alive rows only), so it is checked by hand below.
         validators = []
 

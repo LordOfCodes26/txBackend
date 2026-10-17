@@ -18,7 +18,6 @@ def _photo_path(instance, filename):
 
 class DeveloperStatus(models.TextChoices):
     ACTIVE = "ACTIVE", "Active"
-    ON_LEAVE = "ON_LEAVE", "On leave"
     SUSPENDED = "SUSPENDED", "Suspended"
     TERMINATED = "TERMINATED", "Terminated"
 

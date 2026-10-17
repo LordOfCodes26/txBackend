@@ -123,6 +123,12 @@ class BookingSerializer(serializers.ModelSerializer):
         help_text="What it costs: the chosen price x slots (x people for a per person price)."
     )
     price_name = serializers.SerializerMethodField(help_text="Which of the court's prices.")
+    place = serializers.CharField(
+        source="good.rental.place",
+        read_only=True,
+        default="OUTDOOR",
+        help_text="INDOOR (checked in at the indoor check) or OUTDOOR (at the desk).",
+    )
     balance_after = serializers.DecimalField(
         source="purchase.account_transaction.balance_after",
         max_digits=14,
@@ -160,6 +166,7 @@ class BookingSerializer(serializers.ModelSerializer):
             "people",
             "price",
             "price_name",
+            "place",
             "change_count",
             "checked_in_at",
             "checked_in_at_store_name",
@@ -210,7 +217,8 @@ class BookingTimeSerializer(serializers.Serializer):
     end_time = serializers.TimeField(help_text="e.g. 12:00")
 
     def validate(self, attrs):
-        if attrs["end_time"] <= attrs["start_time"]:
+        # An end before the start runs past midnight (the next day); the same time is none.
+        if attrs["end_time"] == attrs["start_time"]:
             raise serializers.ValidationError(
                 {"end_time": [_("The end time must be after the start time.")]}
             )
@@ -270,7 +278,8 @@ class CheckoutCreateSerializer(serializers.Serializer):
         missing = [k for k in ("date", "start_time", "end_time") if attrs.get(k) is None]
         if missing:
             raise serializers.ValidationError({k: [_("This field is required.")] for k in missing})
-        if attrs["end_time"] <= attrs["start_time"]:
+        # An end before the start runs past midnight (the next day); the same time is none.
+        if attrs["end_time"] == attrs["start_time"]:
             raise serializers.ValidationError(
                 {"end_time": [_("The end time must be after the start time.")]}
             )

@@ -44,6 +44,7 @@ def deposit(client, developer, amount, idem=None, **extra):
         account.pin_hash = make_password("5864")
         account.save(update_fields=["pin_hash"])
     extra.setdefault("pin", "5864")
+    extra.setdefault("method", "CASH")
     return client.post(
         DEPOSITS,
         {"developer": developer.pk, "amount": amount, **extra},
@@ -421,3 +422,16 @@ def test_wallets_filter_below_zero(finance, developer):
     assert [a["balance"] for a in minus] == ["-4.00"]
     rest = finance.get(f"{ACCOUNTS}?in_minus=false").json()["results"]
     assert [a["balance"] for a in rest] == ["7.00"]
+
+
+@pytest.mark.django_db
+def test_deposit_type_is_kept(finance, developer):
+    """Each deposit says how the money came in: E-commerce or Cash (required)."""
+    r = deposit(finance, developer, "12.00", method="ECOMMERCE")
+    assert r.status_code == 201, r.json()
+    assert r.json()["method"] == "ECOMMERCE"
+    deposit(finance, developer, "3.00", method="CASH")
+    r = deposit(finance, developer, "1.00", method="")
+    assert r.status_code == 400 and "method" in r.json()["error"]["details"]
+    listed = finance.get("/api/v1/finance/transactions/", {"method": "ECOMMERCE"}).json()["results"]
+    assert [(t["amount"], t["method"]) for t in listed] == [("12.00", "ECOMMERCE")]

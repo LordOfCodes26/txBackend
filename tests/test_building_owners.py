@@ -132,7 +132,7 @@ def test_statistics_of_own_buildings(client, site):
     assert people["developers"]["total"] == 1
     assert [b["name"] for b in people["inside_now"]["buildings"]] == ["Building 1"]
     money = body["money"]
-    assert money["deposits"] == {"total": "100.00", "count": 1}
+    assert (money["deposits"]["total"], money["deposits"]["count"]) == ("100.00", 1)
     assert money["spending"] == {"total": "55.00", "count": 3}  # Ada's purchases anywhere
     assert money["developer_accounts"]["total_balance"] == "45.00"
     assert money["store_sales"] == {

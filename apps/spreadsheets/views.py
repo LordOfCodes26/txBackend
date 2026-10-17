@@ -125,7 +125,11 @@ class ExportView(APIView):
             query = FinanceStatsQuerySerializer(data=request.query_params)
             query.is_valid(raise_exception=True)
             book = exports.finance_stats_workbook(
-                request.user, first, last, query.validated_data.get("building")
+                request.user,
+                first,
+                last,
+                query.validated_data.get("building"),
+                query.validated_data.get("deposit_type"),
             )
             return _file(book, f"{kind}-{first}-to-{last}.xlsx")
         build = {

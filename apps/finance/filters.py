@@ -34,4 +34,4 @@ class AccountTransactionFilter(django_filters.FilterSet):
 
     class Meta:
         model = AccountTransaction
-        fields = ["account", "developer", "kind", "reference"]
+        fields = ["account", "developer", "kind", "method", "reference"]

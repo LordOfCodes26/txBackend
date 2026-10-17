@@ -136,7 +136,7 @@ class Command(BaseCommand):
                     department=dept,
                     position_title="Team lead" if dept not in leads else "Developer",
                     start_date=today - timedelta(days=random.randint(20, 3000)),
-                    status=DeveloperStatus.ON_LEAVE if i % 37 == 0 else DeveloperStatus.ACTIVE,
+                    status=DeveloperStatus.SUSPENDED if i % 37 == 0 else DeveloperStatus.ACTIVE,
                     building=buildings[i % len(buildings)],
                 )
                 leads.setdefault(dept, dev)

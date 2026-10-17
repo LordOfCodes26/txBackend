@@ -166,3 +166,30 @@ def test_wallets_in_minus_by_building(auth_client, make_user, site):  # noqa: F8
     assert body["money"]["developer_accounts"]["total_balance"] == "40.00"
     one = client.get(f"{FINANCE_STATS}?building={site.b1.pk}").json()
     assert one["money"]["minus"] == {"total": "-15.50", "count": 2}
+
+
+def test_deposits_by_type(auth_client, make_user, site):  # noqa: F811
+    """The deposits split by type (E-commerce, Cash, none), and every deposit figure for
+    one type with ?deposit_type=."""
+    from apps.finance import services as finance
+
+    finance.deposit(
+        actor=None, developer=site.ada, amount="7.00", idempotency_key="e-1", method="ECOMMERCE"
+    )
+    finance.deposit(
+        actor=None, developer=site.ada, amount="3.00", idempotency_key="c-1", method="CASH"
+    )
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+    deposits = client.get(FINANCE_STATS).json()["money"]["deposits"]
+    assert deposits["total"] == "410.00"  # the 400.00 of the site has no type
+    assert {k: (v["total"], v["count"]) for k, v in deposits["by_type"].items()} == {
+        "ECOMMERCE": ("7.00", 1),
+        "CASH": ("3.00", 1),
+        "NONE": ("400.00", 2),
+    }
+    body = client.get(FINANCE_STATS, {"deposit_type": "ECOMMERCE"}).json()
+    assert (body["money"]["deposits"]["total"], body["money"]["deposits"]["count"]) == ("7.00", 1)
+    assert [
+        (r["employee_number"], r["deposits"]) for r in body["developers"] if r["deposit_count"]
+    ] == [("E1", "7.00")]
+    assert client.get(FINANCE_STATS, {"deposit_type": "X"}).status_code == 400

@@ -67,7 +67,7 @@ class Command(BaseCommand):
                 day = first + timedelta(days=offset)
                 if (dev.pk, day) in existing:
                     continue
-                if dev.status == DeveloperStatus.ON_LEAVE or (
+                if dev.status == DeveloperStatus.SUSPENDED or (
                     dev.start_date and day < dev.start_date
                 ):
                     continue

@@ -90,6 +90,7 @@ RENTAL_FIELDS = [
     "weekdays",
     "max_days_ahead",
     "price_per",
+    "place",
     "max_people",
     "refund_after_start",
 ]

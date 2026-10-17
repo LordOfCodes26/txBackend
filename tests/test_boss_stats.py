@@ -94,7 +94,7 @@ def test_period_validation(boss_client):
 def test_people_and_attendance(boss_client):
     b1 = Building.objects.create(code="B1", name="Building 1")
     ada = Developer.objects.create(employee_number="E1", full_name="Ada", building=b1)
-    bob = Developer.objects.create(employee_number="E2", full_name="Bob", status="ON_LEAVE")
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob", status="SUSPENDED")
     Developer.objects.create(employee_number="E3", full_name="Cy", status="TERMINATED")
     today = timezone.localdate()
     yesterday = today - timedelta(days=1)
@@ -112,7 +112,7 @@ def test_people_and_attendance(boss_client):
     body = boss_client.get(f"{STATS}?date_from={yesterday}&date_to={today}").json()
     devs = body["people"]["developers"]
     assert devs["total"] == 2  # terminated not counted
-    assert devs["by_status"] == {"ACTIVE": 1, "ON_LEAVE": 1, "SUSPENDED": 0, "TERMINATED": 1}
+    assert devs["by_status"] == {"ACTIVE": 1, "SUSPENDED": 1, "TERMINATED": 1}
     assert {(b["name"], b["count"]) for b in devs["by_building"]} == {("Building 1", 1), (None, 1)}
     attendance = body["people"]["attendance"]
     assert attendance["daily"] == [
@@ -139,7 +139,7 @@ def test_money(boss_client, make_user):
 
     body = boss_client.get(STATS).json()["money"]
     assert body["developer_accounts"]["total_balance"] == "70.00"
-    assert body["deposits"] == {"total": "100.00", "count": 1}
+    assert (body["deposits"]["total"], body["deposits"]["count"]) == ("100.00", 1)
     assert body["spending"] == {"total": "30.00", "count": 1}
     today = [d for d in body["daily"] if d["date"] == timezone.localdate().isoformat()]
     assert today == [

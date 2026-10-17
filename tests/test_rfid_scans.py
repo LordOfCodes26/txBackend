@@ -64,7 +64,6 @@ def test_accepted_scan(reader, card, developer, device_and_key):
         ("blocked", "BLOCKED_CARD"),
         ("retired", "RETIRED_CARD"),
         ("suspended", "INACTIVE_DEVELOPER"),
-        ("on_leave", "ACCEPTED"),
     ],
 )
 def test_scan_results(reader, card, developer, setup, expected):
@@ -76,7 +75,7 @@ def test_scan_results(reader, card, developer, setup, expected):
     elif setup in ("blocked", "retired"):
         card.status = CardStatus[setup.upper()]
         card.save()
-    elif setup in ("suspended", "on_leave"):
+    elif setup == "suspended":
         developer.status = DeveloperStatus[setup.upper()]
         developer.save()
 

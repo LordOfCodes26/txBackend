@@ -68,14 +68,14 @@ def test_import_creates_and_updates_developers(admin, b1):
         "developers",
         ("Employee no.", "Full name", "Department", "Building", "Start date", "Status"),
         ("E1", "Ada Lovelace", None, "b1", None, None),  # blank cells: unchanged
-        (1002, "Alan Turing", "Research", "Building 1", date(2026, 10, 1), "on leave"),
+        (1002, "Alan Turing", "Research", "Building 1", date(2026, 10, 1), "suspended"),
     )
     body = r.json()
     assert (body["created"], body["updated"], body["errors"], body["saved"]) == (1, 1, [], True)
     ada = Developer.objects.get(employee_number="E1")
     assert (ada.full_name, ada.department, ada.building) == ("Ada Lovelace", "QA", b1)
     alan = Developer.objects.get(employee_number="1002")  # a number cell becomes text
-    assert (alan.start_date, alan.status, alan.building) == (date(2026, 10, 1), "ON_LEAVE", b1)
+    assert (alan.start_date, alan.status, alan.building) == (date(2026, 10, 1), "SUSPENDED", b1)
     assert DeveloperAccount.objects.filter(developer=alan).exists()  # same service as the form
     assert AuditLog.objects.filter(action="developer.created").count() == 1
 
@@ -338,7 +338,8 @@ def test_money_and_goods_exports(admin, make_user, b1, auth_client):
     money = read(admin.get(EXPORT.format("money")))
     assert list(money) == ["Balances", "Transactions", "Purchases"]
     assert money["Balances"][1][0] == "E1" and money["Balances"][1][-1] == 50
-    assert money["Transactions"][1][3:5] == ("DEPOSIT", 50)
+    # Kind, deposit type (none: made without one), amount.
+    assert money["Transactions"][1][3:6] == ("DEPOSIT", None, 50)
     stock = read(admin.get(EXPORT.format("goods")))
     assert stock["Goods"][1][:3] == ("Cafe", "Counter", "Tea") and stock["Goods"][1][6] == 10
     assert stock["Stock movements"][1][3:5] == ("INITIAL_STOCK", 10)

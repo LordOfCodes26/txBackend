@@ -7,7 +7,7 @@ from rest_framework import serializers
 from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
 
-from .models import PIN_LENGTH, AccountTransaction, DeveloperAccount, WalletSettings
+from .models import PIN_LENGTH, AccountTransaction, DepositMethod, DeveloperAccount, WalletSettings
 
 
 class DeveloperAccountSerializer(serializers.ModelSerializer):
@@ -64,6 +64,7 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
             "amount",
             "balance_after",
             "description",
+            "method",
             "reference",
             "actor",
             "actor_username",
@@ -76,6 +77,9 @@ class DepositSerializer(serializers.Serializer):
     developer = serializers.PrimaryKeyRelatedField(queryset=Developer.objects.all())
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     description = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    method = serializers.ChoiceField(
+        choices=DepositMethod.choices, help_text="How the money came in: ECOMMERCE or CASH."
+    )
     pin = serializers.CharField(write_only=True, min_length=PIN_LENGTH, max_length=PIN_LENGTH)
 
 

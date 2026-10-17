@@ -102,6 +102,7 @@ def test_gate_asks_an_unpaid_booking_to_pay_first(desk, world, at_1020):  # noqa
     world.seller.checks_bookings = True
     world.seller.save()
     gate, _key = rfid.register_device(actor=None, code="GATE1", purpose="TILL", seller=world.seller)
+    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
     r = reserve(desk, world, same_day(at_1020, 11))
     assert r.status_code == 201, r.json()
     # Running now (10:00-12:00), not paid.
@@ -219,3 +220,27 @@ def test_the_desk_finds_who_a_booking_is_for(desk, world):  # noqa: F811
     one = desk.get(f"{BOOKINGS}people/", {"id": world.developer.pk}).json()["results"]
     assert one[0]["employee_number"] == world.developer.employee_number
     assert desk.get(f"{BOOKINGS}people/", {"search": " "}).json()["results"] == []
+
+
+@pytest.mark.django_db
+def test_paying_checks_in_outdoors_only(desk, world, reader, at_1020):  # noqa: F811
+    """Outdoor: paying at the desk (on arrival, or Play now) checks in. Indoor: it stays
+    Paid until the indoor check's card tap."""
+    from apps.bookings.services import desk_check_in
+
+    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
+    booking = reserve(desk, world, same_day(at_1020, 14)).json()
+    pay = desk.post(f"{BOOKINGS}{booking['id']}/pay/", {"reader": "DESK1", "event": tap(reader).pk})
+    assert confirm(desk, pay.json()["id"]).status_code == 201
+    indoor = Booking.objects.get(pk=booking["id"])
+    assert (indoor.status, indoor.checked_in_at) == ("PAID", None)
+    r = desk.post(f"{BOOKINGS}{indoor.pk}/check-in/")
+    assert r.json()["error"]["code"] == "CHECKED_IN_INDOORS"
+    with pytest.raises(Exception):
+        desk_check_in(actor=None, booking=indoor)
+
+    RentalSettings.objects.filter(good=world.playground).update(place="OUTDOOR")
+    later = reserve(desk, world, same_day(at_1020, 16)).json()
+    pay = desk.post(f"{BOOKINGS}{later['id']}/pay/", {"reader": "DESK1", "event": tap(reader).pk})
+    assert confirm(desk, pay.json()["id"]).status_code == 201
+    assert Booking.objects.get(pk=later["id"]).checked_in_at is not None

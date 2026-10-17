@@ -139,9 +139,11 @@ class BookingViewSet(
         "retrieve": ["booking.view"],
         "change": ["booking.change"],
         "reserve": ["booking.create"],
-        "pay": ["booking.create"],
+        "pay": ["booking.pay"],
         "cancel": ["booking.cancel"],
         "check_in": ["booking.create"],
+        # The indoor playground's checker: check in a paid indoor booking.
+        "indoor_check_in": ["booking.check"],
         "now": ["booking.view"],
         "arrival": ["booking.view"],
         "people": ["booking.create"],
@@ -167,6 +169,21 @@ class BookingViewSet(
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
     ordering_fields = ["start", "created_at"]
+
+    def get_queryset(self):
+        """A checker (who may check bookings but not take them) works the indoor
+        playground's gate: they see indoor court bookings only."""
+        qs = super().get_queryset()
+        user = self.request.user
+        if (
+            user.has_rbac_perm("booking.check")
+            and not user.has_rbac_perm("booking.create")
+            and not user.has_rbac_perm("booking.pay")
+        ):
+            from apps.goods.models import CourtPlace
+
+            qs = qs.filter(good__rental__place=CourtPlace.INDOOR)
+        return qs
 
     @staticmethod
     def owner_seller_id(obj):
@@ -232,6 +249,13 @@ class BookingViewSet(
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(request=None, responses=BookingSerializer)
+    @extend_schema(request=None, responses=BookingSerializer)
+    @action(detail=True, methods=["post"], url_path="indoor-check-in")
+    def indoor_check_in(self, request, pk=None):
+        """The checker lets the developer in: a paid indoor booking is checked in."""
+        booking = services.indoor_check_in(actor=request.user, booking=self.get_object())
+        return Response(BookingSerializer(self.get_queryset().get(pk=booking.pk)).data)
+
     @action(detail=True, methods=["post"], url_path="check-in")
     def check_in(self, request, pk=None):
         """The developer is at the desk: a paid booking is checked in."""
@@ -340,14 +364,14 @@ class BookingCheckoutViewSet(
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {
-        "create": ["booking.create"],
+        "create": ["booking.pay"],
         "retrieve": ["booking.view"],
-        "confirm": ["booking.create"],
+        "confirm": ["booking.pay"],
         "cancel": ["booking.cancel"],
-        "wait": ["booking.create"],
-        "stop_waiting": ["booking.create"],
-        "readers": ["booking.create"],
-        "set_reader": ["booking.create"],
+        "wait": ["booking.pay"],
+        "stop_waiting": ["booking.pay"],
+        "readers": ["booking.pay"],
+        "set_reader": ["booking.pay"],
     }
     seller_actions = (
         "create",

@@ -2,6 +2,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils.translation import gettext_lazy as _
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -92,6 +93,12 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
         "partial_update": ["developer.update"],
         "photo": ["developer.update"],
         "destroy": ["developer.delete"],
+        # Deleted developers, and bringing one back: the right to delete them.
+        "deleted": ["developer.delete"],
+        "restore": ["developer.delete"],
+        # Their last card, and giving it back (e.g. after an Unassign by mistake).
+        "last_card": ["card.view"],
+        "restore_card": ["card.assign"],
         "me": [],
         "departments": ["developer.view"],
     }
@@ -120,7 +127,61 @@ class DeveloperViewSet(BuildingScopedMixin, viewsets.ModelViewSet):
     ]
 
     def get_queryset(self):
+        if self.action in ("deleted", "restore"):
+            self.queryset = Developer.all_objects.filter(deleted_at__isnull=False).select_related(
+                "building"
+            )
         return with_card_label(super().get_queryset())
+
+    @action(detail=False, methods=["get"])
+    def deleted(self, request):
+        """Deleted developers (newest first), with the list's search and filters, and the
+        card taken back on delete (`old_card`: uid, label, state FREE / TAKEN / BLOCKED /
+        RETIRED, or null)."""
+        self.ordering = ["-deleted_at"]
+        response = self.list(request)
+        rows = response.data.get("results", response.data)
+        people = {d.pk: d for d in Developer.all_objects.filter(pk__in=[r["id"] for r in rows])}
+        for row in rows:
+            old = services.card_taken_on_delete(people[row["id"]])
+            row["old_card"] = (
+                {"uid": old[0].uid, "label": old[0].label, "state": old[1]} if old else None
+            )
+        return response
+
+    @action(detail=True, methods=["get"], url_path="last-card")
+    def last_card(self, request, pk=None):
+        """`card`: their most recent card taken back (uid, label, state FREE / TAKEN /
+        BLOCKED / RETIRED), or null."""
+        old = services.last_card(self.get_object())
+        if old is None:
+            return Response({"card": None})
+        card, state = old
+        return Response(
+            {"card": {"id": card.pk, "uid": card.uid, "label": card.label, "state": state}}
+        )
+
+    @extend_schema(request=None, responses=OpenApiTypes.OBJECT)
+    @action(detail=True, methods=["post"], url_path="restore-card")
+    def restore_card(self, request, pk=None):
+        """Give back their last card, if they have none and it is still free."""
+        card = services.restore_card(actor=request.user, developer=self.get_object())
+        return Response({"id": card.pk, "uid": card.uid, "label": card.label})
+
+    @extend_schema(request=None, responses=DeveloperSerializer)
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        """Bring a deleted developer back. `{"card": true}`: give back the card taken on
+        delete if it is still free (`card_restored` says whether it was)."""
+        developer, card = services.restore_developer(
+            actor=request.user,
+            developer=self.get_object(),
+            with_card=str(request.data.get("card", "")).lower() in ("true", "1", "on"),
+        )
+        body = dict(DeveloperSerializer(developer, context={"request": request}).data)
+        body["card_restored"] = card is not None
+        body["card_label"] = card.label if card is not None else body.get("card_label")
+        return Response(body)
 
     @extend_schema(
         methods=["POST"], request=DeveloperPhotoSerializer, responses=DeveloperSerializer

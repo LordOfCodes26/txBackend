@@ -232,7 +232,7 @@ def test_developer_browses_rentals_and_availability(desk, world):
 
     day = tomorrow_at(0).date()
     slots = desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()
-    assert len(slots) == 12  # 08:00-20:00 in 1h slots
+    assert len(slots) == 24  # no opening hours: 00:00-24:00 in 1h slots
     assert all(s["available"] for s in slots)
 
     book(desk, world, tomorrow_at(10), slots=2)
@@ -271,15 +271,16 @@ def test_day_schedule_shows_booked_and_free_times_of_every_court(
     playground = courts["Playground"]
     assert (playground["open"], playground["slot_minutes"]) == (True, 60)
     assert [(p["state"], p["start_time"], p["end_time"]) for p in playground["periods"]] == [
-        ("FREE", "08:00", "10:00"),
+        ("FREE", "00:00", "10:00"),
         ("BOOKED", "10:00", "12:00"),
         ("FREE", "12:00", "15:00"),
         ("BOOKED", "15:00", "16:00"),
-        ("FREE", "16:00", "20:00"),
+        ("FREE", "16:00", "00:00"),
     ]
+    # No opening hours: the whole day, whatever the court's old hours were.
     assert [
         (p["state"], p["start_time"], p["end_time"]) for p in courts["Tennis court"]["periods"]
-    ] == [("FREE", "09:00", "12:00")]
+    ] == [("FREE", "00:00", "00:00")]
     # The desk sees who booked (the board and day view); others only booked / free.
     playground = next(c for c in body["courts"] if c["name"] == "Playground")
     assert [b["start_time"] for b in playground["bookings"]] == ["10:00", "15:00"]
@@ -310,11 +311,7 @@ def test_schedule_marks_past_and_closed_days(desk, world):
     periods = desk.get(f"{RENTALS}schedule/?date={far}").json()["courts"][0]["periods"]
     assert {p["state"] for p in periods} == {"NOT_YET_OPEN"}
 
-    RentalSettings.objects.filter(good=world.playground).update(
-        weekdays=[d for d in range(7) if d != far.weekday()]
-    )
-    court = desk.get(f"{RENTALS}schedule/?date={far}").json()["courts"][0]
-    assert (court["open"], court["periods"]) == (False, [])
+    assert desk.get(f"{RENTALS}schedule/?date={far}").json()["courts"][0]["open"] is True
 
 
 @pytest.mark.django_db
@@ -325,13 +322,16 @@ def test_inactive_rental_is_hidden(desk, world):
 
 
 @pytest.mark.django_db
-def test_closed_weekday_has_no_slots(desk, world):
+def test_courts_have_no_opening_hours(desk, world):
+    """Old opening hours and weekdays no longer limit bookings: any day, any time."""
     day = tomorrow_at(0).date()
     RentalSettings.objects.filter(good=world.playground).update(
-        weekdays=[d for d in range(7) if d != day.weekday()]
+        weekdays=[d for d in range(7) if d != day.weekday()],
+        opening_time=time(9),
+        closing_time=time(17),
     )
-    assert desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json() == []
-    assert book(desk, world, tomorrow_at(10)).json()["error"]["code"] == "INVALID_SLOT"
+    assert len(desk.get(f"{RENTALS}{world.playground.pk}/availability/?date={day}").json()) == 24
+    assert book(desk, world, tomorrow_at(6)).status_code == 201
 
 
 # --- Booking --------------------------------------------------------------------------
@@ -422,8 +422,6 @@ def test_the_desk_books_every_court(desk, world, make_user):
 @pytest.mark.parametrize(
     "start_fn",
     [
-        lambda: tomorrow_at(7),  # before opening
-        lambda: tomorrow_at(19, 0),  # 2 slots would end at 21:00
         lambda: tomorrow_at(10) - timedelta(days=2),  # in the past (yesterday 10:00)
         lambda: tomorrow_at(10) + timedelta(days=20),  # beyond max_days_ahead
     ],
@@ -436,13 +434,16 @@ def test_invalid_slots(desk, world, start_fn):
 
 @pytest.mark.django_db
 def test_a_booking_starts_at_any_minute(desk, world):
-    """Off the hour is fine (10:30-12:30 is 2 slots); it still ends by closing."""
+    """Off the hour is fine (10:30-12:30 is 2 slots), and late at night past midnight."""
     assert book(desk, world, tomorrow_at(10, 30), slots=2).status_code == 201
     assert Booking.objects.get().end == tomorrow_at(12, 30)
     assert balance(world) == Decimal("60.00")
     # Right after it, at 12:30, is free; 12:00 overlaps.
     assert book(desk, world, tomorrow_at(12), slots=1).json()["error"]["code"] == "SLOT_UNAVAILABLE"
-    assert book(desk, world, tomorrow_at(19, 30), slots=1).json()["error"]["code"] == "INVALID_SLOT"
+    assert book(desk, world, tomorrow_at(23, 30), slots=1).status_code == 201
+    assert Booking.objects.get(start=tomorrow_at(23, 30)).end == tomorrow_at(23, 30) + timedelta(
+        hours=1
+    )
 
 
 @pytest.mark.django_db
@@ -734,9 +735,9 @@ def test_checkout_input_validation(desk, world):
     assert set(r.json()["error"]["details"]) == {"date", "start_time", "end_time"}
     r = desk.post(
         CHECKOUT,
-        {"good": world.playground.pk, "date": day, "start_time": "12:00", "end_time": "10:00"},
+        {"good": world.playground.pk, "date": day, "start_time": "12:00", "end_time": "12:00"},
     )
-    assert "end_time" in r.json()["error"]["details"]
+    assert "end_time" in r.json()["error"]["details"]  # (an earlier end runs past midnight)
     r = desk.post(
         CHECKOUT,
         {"good": world.playground.pk, "date": day, "start_time": "10:00", "end_time": "11:30"},
@@ -935,7 +936,7 @@ def test_change_follows_the_booking_rules(desk, world, paid):
     day = tomorrow_at(0).date().isoformat()
     r = change(desk, paid.pk, date=day, start_time="15:00", end_time="17:00")
     assert r.json()["error"]["code"] == "SLOT_UNAVAILABLE"
-    r = change(desk, paid.pk, date=day, start_time="19:30", end_time="21:30")  # past closing
+    r = change(desk, paid.pk, date=day, start_time="10:00", end_time="11:30")  # not whole slots
     assert r.json()["error"]["code"] == "INVALID_SLOT"
     paid.refresh_from_db()
     assert (paid.start, paid.change_count) == (tomorrow_at(10), 0)
@@ -1041,6 +1042,8 @@ def gate(world, make_user):
     g.store = Seller.objects.create(name="Gym", user=g.checker, checks_bookings=True)
     g.position = ServicePosition.objects.create(seller=g.store, name="Gym counter")
     g.reader, _key = rfid.register_device(actor=None, code="Gate1", purpose="TILL", seller=g.store)
+    # The gate checks indoor courts: the playground is one here.
+    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
 
     def booking(start):
         purchase = Purchase.objects.create(
@@ -1057,6 +1060,19 @@ def gate(world, make_user):
 
     g.booking = booking
     return g
+
+
+@pytest.mark.django_db
+def test_the_gate_checks_indoor_courts_only(gate, world, auth_client):
+    """The booking check is the indoor playground's: an outdoor court's booking is not
+    checked in there."""
+    RentalSettings.objects.filter(good=world.playground).update(place="OUTDOOR")
+    outdoor = gate.booking(timezone.now() + timedelta(minutes=10))
+    rfid.record_scan(device=gate.reader, uid=UID)
+    outdoor.refresh_from_db()
+    assert outdoor.checked_in_at is None
+    rows = auth_client(gate.checker).get(CHECKS).json()["results"]
+    assert rows[0]["result"] == "NO_BOOKING"
 
 
 @pytest.mark.django_db

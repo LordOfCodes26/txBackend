@@ -12,7 +12,7 @@ from common.permissions import HasPermissions
 
 from . import services
 from .filters import AccountTransactionFilter, DeveloperAccountFilter
-from .models import AccountTransaction, DeveloperAccount, WalletSettings
+from .models import AccountTransaction, DeveloperAccount, TransactionKind, WalletSettings
 from .serializers import (
     AccountTransactionSerializer,
     AdjustmentSerializer,
@@ -158,7 +158,12 @@ class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewS
     building_lookup = "account__developer__building"
     serializer_class = AccountTransactionSerializer
     permission_classes = [HasPermissions]
-    required_permissions = {"list": ["finance.view"], "retrieve": ["finance.view"], "me": []}
+    required_permissions = {
+        "list": ["finance.view"],
+        "retrieve": ["finance.view"],
+        "me": [],
+        "deposits": ["finance.deposits.view"],
+    }
     filterset_class = AccountTransactionFilter
     # `card_label`: the card the developer holds now (annotated below).
     search_fields = [
@@ -191,7 +196,15 @@ class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewS
         qs = super().get_queryset().annotate(card_label=Subquery(current))
         if self.action == "me":
             qs = qs.filter(account__developer=_own_developer(self.request))
+        if self.action == "deposits":
+            qs = qs.filter(kind=TransactionKind.DEPOSIT)
         return qs
+
+    @action(detail=False, methods=["get"])
+    def deposits(self, request):
+        """Deposits only, with the list's filters (`method`, dates, building, search): the
+        deposit list, for those who may see it but not every wallet movement."""
+        return self.list(request)
 
     @action(detail=False, methods=["get"])
     def me(self, request):

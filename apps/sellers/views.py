@@ -16,6 +16,29 @@ from .models import Seller, ServicePosition
 from .serializers import SellerSerializer, ServicePositionSerializer
 
 
+def _count(rows, field: str):
+    """How many of `rows` point to the outer row through `field` (0 when none)."""
+    from django.db.models import Count, IntegerField, OuterRef, Subquery
+    from django.db.models.functions import Coalesce
+
+    counted = rows.filter(**{field: OuterRef("pk")}).order_by().values(field)
+    return Coalesce(
+        Subquery(counted.annotate(n=Count("pk")).values("n")[:1], output_field=IntegerField()), 0
+    )
+
+
+def _goods(**extra):
+    from apps.goods.models import Good, GoodKind
+
+    return Good.objects.filter(deleted_at__isnull=True, **extra).exclude(kind=GoodKind.RENTAL)
+
+
+def _courts(**extra):
+    from apps.goods.models import Good, GoodKind
+
+    return Good.objects.filter(deleted_at__isnull=True, kind=GoodKind.RENTAL, **extra)
+
+
 class SellerViewSet(
     BuildingScopedMixin,
     mixins.ListModelMixin,
@@ -26,8 +49,28 @@ class SellerViewSet(
 ):
     """Sellers are never deleted; close them with `PATCH {"status": "CLOSED"}`."""
 
-    queryset = Seller.objects.all()
+    queryset = Seller.objects.select_related("user")
     serializer_class = SellerSerializer
+
+    def get_queryset(self):
+        """Each store with its counts: counters, goods, courts and till readers."""
+        from apps.rfid.models import DevicePurpose, RFIDDevice
+
+        return (
+            super()
+            .get_queryset()
+            .annotate(
+                counters_count=_count(
+                    ServicePosition.objects.filter(deleted_at__isnull=True, is_active=True),
+                    "seller",
+                ),
+                goods_count=_count(_goods(), "service_position__seller"),
+                courts_count=_count(_courts(), "service_position__seller"),
+                till_readers_count=_count(
+                    RFIDDevice.objects.filter(purpose=DevicePurpose.TILL, is_active=True), "seller"
+                ),
+            )
+        )
 
     def filter_by_buildings(self, qs, scope):
         return qs.filter(pk__in=sellers_with_positions_in(scope).values("pk"))
@@ -91,7 +134,10 @@ class ServicePositionViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, vie
     """Sellers manage their own positions; users with seller.* (e.g. ADMIN) manage all.
     DELETE is soft."""
 
-    queryset = ServicePosition.objects.select_related("seller")
+    queryset = ServicePosition.objects.select_related("seller", "building", "manager").annotate(
+        goods_count=_count(_goods(), "service_position"),
+        courts_count=_count(_courts(), "service_position"),
+    )
     serializer_class = ServicePositionSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {

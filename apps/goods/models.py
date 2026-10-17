@@ -99,6 +99,11 @@ class PricePer(models.TextChoices):
     PERSON = "PERSON", "Per person"
 
 
+class CourtPlace(models.TextChoices):
+    INDOOR = "INDOOR", "Indoor"
+    OUTDOOR = "OUTDOOR", "Outdoor"
+
+
 class RentalSettings(models.Model):
     """Booking rules for a RENTAL good. Times are company-local (settings.TIME_ZONE)."""
 
@@ -120,6 +125,8 @@ class RentalSettings(models.Model):
     # How the price is counted: per court per slot (price x slots), or per person per slot
     # (price x people x slots; the desk says how many people, one card pays for all).
     price_per = models.CharField(max_length=6, choices=PricePer.choices, default=PricePer.COURT)
+    # Indoor courts are the ones the booking check (the indoor playground's gate) checks.
+    place = models.CharField(max_length=7, choices=CourtPlace.choices, default=CourtPlace.OUTDOOR)
     max_people = models.PositiveSmallIntegerField(
         default=20,
         validators=[MinValueValidator(1), MaxValueValidator(500)],

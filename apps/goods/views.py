@@ -123,8 +123,9 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         "stock": ["good.stock"],
         "upload_image": ["good.update"],
         "delete_image": ["good.update"],
-        "statistics": ["good.view", "purchase.view"],
-        "statistics_export": ["good.view", "purchase.view"],
+        # The sales report (a store's login sees its own goods' figures as a seller action).
+        "statistics": ["purchase.report.view"],
+        "statistics_export": ["purchase.report.view"],
         "prices": ["good.update"],
         "price": ["good.update"],
     }
@@ -426,11 +427,17 @@ class GoodCategoryViewSet(viewsets.ModelViewSet):
     ordering_fields = ["position", "name"]
     pagination_class = None
 
+    def check_permissions(self, request):
+        """Before anything else (data checks too): may this user read or change them?"""
+        super().check_permissions(request)
+        if request.method != "OPTIONS":
+            self._store()
+
     def _store(self):
         """None: staff (every store). Else the user's own goods store; no store: denied."""
         user = self.request.user
-        need = "good.view" if self.request.method in ("GET", "HEAD", "OPTIONS") else "good.update"
-        if user.has_rbac_perm(need):
+        reading = self.request.method in ("GET", "HEAD", "OPTIONS")
+        if user.has_rbac_perm("good.category") or (reading and user.has_rbac_perm("good.view")):
             return None
         seller = acting_seller(user)
         if seller is None or GOODS not in seller_areas(user):

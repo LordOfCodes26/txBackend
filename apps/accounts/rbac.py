@@ -48,7 +48,7 @@ AREAS: dict[str, dict[str, str]] = {
         "attendance.view": "See who is inside, attendance and statistics",
         "attendance.correct": "Add manual attendance records and void wrong ones",
     },
-    "Money": {
+    "Finance": {
         "finance.view": "See wallets, balances and transactions",
         "finance.stats.view": "See finance statistics and download money reports",
         "finance.deposit": "Deposit money into wallets",
@@ -58,33 +58,39 @@ AREAS: dict[str, dict[str, str]] = {
         "finance.freeze": "Freeze and unfreeze wallets (spending stops, deposits still work)",
         "finance.close": "Close and reopen wallets (only a zero balance can close)",
         "finance.minus_limit": "Set how far below zero purchases may take a wallet",
+        "finance.deposits.view": "See the deposit list and deposit totals by type",
     },
-    "Sales": {
-        "purchase.view": "See purchases and sales statistics",
+    "Purchases and till": {
+        "purchase.view": "See purchases (every sale) and their pages",
         "purchase.create": "Open a till and build a purchase",
         "purchase.confirm": "Take payment for a purchase (card and PIN)",
         "purchase.cancel": "Cancel a purchase that is not paid yet",
         "purchase.change": "Change a paid purchase (the difference is refunded or charged)",
         "purchase.delete": "Delete a paid purchase (the money goes back to the wallet)",
+        "purchase.report.view": "See the sales report: goods sold and money in a range, with Excel",
     },
     "Playground": {
-        "booking.view": "See court bookings and the playground desk",
-        "booking.create": "Book a court at the desk (card and PIN)",
+        "booking.view": "See courts, bookings and the playground desk",
+        "booking.create": "Book courts at the playground desk (free, paid on arrival)",
+        "booking.pay": "Take payment for bookings: on arrival, Pay now, Play now (card and PIN)",
         "booking.change": "Move a booking to another time or court",
-        "booking.cancel": "Cancel a court checkout that is not paid yet",
+        "booking.cancel": "Cancel bookings (an unpaid one is dropped, a paid one refunded)",
         "court.manage": "Add courts and change their prices and rules",
-        "booking.check": "Check developers in to their bookings (card tap at a checking store)",
+        "booking.check": (
+            "Check developers in to indoor court bookings (card tap at a checking store)"
+        ),
     },
-    "Stores and goods": {
+    "Stores, goods and inventory": {
         "seller.view": "See stores and their counters",
         "seller.create": "Add stores",
         "seller.update": "Change stores",
         "counter.manage": "Add, change and delete stores' counters",
-        "good.view": "See goods and stock movements",
+        "good.view": "See goods, stock, stock movements and categories",
         "good.create": "Add goods",
         "good.update": "Change goods, prices and photos",
         "good.delete": "Delete goods (soft delete)",
         "good.stock": "Restock, write off and count stock",
+        "good.category": "Add, rename, reorder and remove goods categories",
     },
     "Excel": {
         "excel.export": "Download lists as Excel (only data you can see)",
@@ -173,7 +179,7 @@ ROLES: dict[str, RoleSpec] = {
         "Manages developer balances and deposits",
         # The minus limit is the admins' decision.
         (_prefixed("finance") - {"finance.minus_limit"})
-        | {"developer.view", "purchase.view", "booking.view", "audit.view"}
+        | {"developer.view", "purchase.view", "purchase.report.view", "booking.view", "audit.view"}
         | {"excel.export", "excel.import_balances"},
     ),
     # Every permission of this role is narrowed to the user's buildings
@@ -196,6 +202,7 @@ ROLES: dict[str, RoleSpec] = {
             "attendance.view",
             "attendance.correct",
             "purchase.view",
+            "purchase.report.view",
             "booking.view",
             "excel.export",
             "excel.import_developers",

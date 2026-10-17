@@ -35,6 +35,10 @@ class SellerSerializer(serializers.ModelSerializer):
         help_text="The store's login: a user with a seller role. They manage only this store.",
     )
     user_username = serializers.CharField(source="user.username", read_only=True, default=None)
+    counters_count = serializers.IntegerField(read_only=True, default=0)
+    goods_count = serializers.IntegerField(read_only=True, default=0)
+    courts_count = serializers.IntegerField(read_only=True, default=0)
+    till_readers_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = Seller
@@ -49,6 +53,10 @@ class SellerSerializer(serializers.ModelSerializer):
             "status",
             "notes",
             "checks_bookings",
+            "counters_count",
+            "goods_count",
+            "courts_count",
+            "till_readers_count",
             "created_at",
             "updated_at",
         ]
@@ -79,6 +87,8 @@ class SellerSerializer(serializers.ModelSerializer):
 class ServicePositionSerializer(serializers.ModelSerializer):
     seller = serializers.PrimaryKeyRelatedField(queryset=Seller.objects.all(), required=False)
     seller_detail = SellerSummarySerializer(source="seller", read_only=True)
+    goods_count = serializers.IntegerField(read_only=True, default=0)
+    courts_count = serializers.IntegerField(read_only=True, default=0)
     building = serializers.PrimaryKeyRelatedField(
         queryset=Building.objects.all(),
         required=False,
@@ -106,6 +116,8 @@ class ServicePositionSerializer(serializers.ModelSerializer):
             "location",
             "building",
             "building_name",
+            "goods_count",
+            "courts_count",
             "manager",
             "manager_username",
             "is_active",

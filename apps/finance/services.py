@@ -53,6 +53,7 @@ def post_transaction(
     reference: str = "",
     idempotency_key: str = "",
     allow_minus: bool = False,
+    method: str = "",
 ) -> AccountTransaction:
     """The only way a balance changes. Must run inside a transaction.
 
@@ -86,6 +87,7 @@ def post_transaction(
         description=description,
         reference=reference,
         idempotency_key=idempotency_key,
+        method=method,
         actor=actor if getattr(actor, "pk", None) else None,
     )
 
@@ -106,7 +108,7 @@ def _previous(key: str, *, account, kind, amount) -> AccountTransaction | None:
 
 
 def _post_once(
-    *, actor, account, kind, amount, description, idempotency_key, audit_action
+    *, actor, account, kind, amount, description, idempotency_key, audit_action, method=""
 ) -> tuple[AccountTransaction, bool]:
     """Post a manual transaction exactly once per idempotency key. Returns (txn, created)."""
     existing = _previous(idempotency_key, account=account, kind=kind, amount=amount)
@@ -121,6 +123,7 @@ def _post_once(
                 actor=actor,
                 description=description,
                 idempotency_key=idempotency_key,
+                method=method,
             )
             record_audit(
                 audit_action,
@@ -132,6 +135,7 @@ def _post_once(
                     "amount": amount,
                     "transaction": txn.pk,
                     "description": description,
+                    **({"method": method} if method else {}),
                 },
             )
     except IntegrityError:
@@ -151,7 +155,9 @@ def deposit(
     idempotency_key: str,
     description: str = "",
     pin: str | None = None,
+    method: str = "",
 ) -> tuple[AccountTransaction, bool]:
+    """`method`: how the money came in (DepositMethod: E-commerce or Cash)."""
     amount = money(amount)
     limit = money(settings.FINANCE_MAX_DEPOSIT)
     if amount > limit:
@@ -168,7 +174,29 @@ def deposit(
         description=description or "Deposit",
         idempotency_key=idempotency_key,
         audit_action="finance.deposit",
+        method=method,
     )
+
+
+def ensure_wallet_empty(developer: Developer) -> None:
+    """Before a developer leaves (Terminated): their wallet must be at 0 (pay out what is
+    left, or adjust what they owe, first)."""
+    account = DeveloperAccount.objects.filter(developer=developer).first()
+    if account is not None and account.balance != 0:
+        raise InvalidAccountTransition(
+            _("Their wallet holds %(balance)s. Pay it out or adjust it to 0 before Terminated.")
+            % {"balance": account.balance},
+            details={"balance": str(account.balance)},
+        )
+
+
+@transaction.atomic
+def close_on_leaving(*, actor, developer: Developer) -> None:
+    """A developer left (Terminated, wallet at 0): their wallet is closed (it can be
+    reopened if they come back)."""
+    account = DeveloperAccount.objects.filter(developer=developer).first()
+    if account is not None and account.status != AccountStatus.CLOSED:
+        change_status(actor=actor, account=account, transition="close", reason="Terminated")
 
 
 def adjust(

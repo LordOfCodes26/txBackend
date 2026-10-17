@@ -56,6 +56,13 @@ class TransactionKind(models.TextChoices):
     ADJUSTMENT = "ADJUSTMENT", "Manual adjustment"
 
 
+class DepositMethod(models.TextChoices):
+    """How deposited money came in."""
+
+    ECOMMERCE = "ECOMMERCE", "E-commerce"
+    CASH = "CASH", "Cash"
+
+
 class AccountTransaction(AppendOnlyModel):
     """One ledger entry. Immutable (DB trigger); mistakes are fixed with new entries.
 
@@ -69,6 +76,9 @@ class AccountTransaction(AppendOnlyModel):
     amount = models.DecimalField(**MONEY)
     balance_after = models.DecimalField(**MONEY)
     description = models.CharField(max_length=255, blank=True)
+    # Deposits: how the money came in (E-commerce or Cash). Empty for everything else, and
+    # for deposits made before it was asked (and opening balances from imports).
+    method = models.CharField(max_length=10, choices=DepositMethod.choices, blank=True, default="")
     reference = models.CharField(max_length=100, blank=True, help_text="e.g. purchase id.")
     idempotency_key = models.CharField(max_length=64, blank=True)
     actor = models.ForeignKey(

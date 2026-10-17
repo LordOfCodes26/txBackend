@@ -163,13 +163,13 @@ def test_user_can_link_to_only_one_developer(manager_client, make_developer, mak
 
 def test_filters_search_and_ordering(manager_client, make_developer):
     make_developer(full_name="Alice Smith", department="Engineering")
-    make_developer(full_name="Bob Jones", department="Research", status=DeveloperStatus.ON_LEAVE)
+    make_developer(full_name="Bob Jones", department="Research", status=DeveloperStatus.SUSPENDED)
     make_developer(full_name="Carol Smith", department="engineering")
 
     def names(query):
         return [d["full_name"] for d in manager_client.get(f"{URL}?{query}").json()["results"]]
 
-    assert names("status=ON_LEAVE") == ["Bob Jones"]
+    assert names("status=SUSPENDED") == ["Bob Jones"]
     assert names("department=Engineering") == ["Alice Smith", "Carol Smith"]
     assert names("search=smith&ordering=-full_name") == ["Carol Smith", "Alice Smith"]
 

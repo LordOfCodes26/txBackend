@@ -50,3 +50,9 @@ class BookingNotReserved(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "BOOKING_NOT_RESERVED"
     default_detail = _("This booking is already paid.")
+
+
+class CheckedInIndoors(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "CHECKED_IN_INDOORS"
+    default_detail = _("Indoor courts are checked in at the indoor check (a card tap).")
