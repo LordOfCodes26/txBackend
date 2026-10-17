@@ -88,7 +88,7 @@ class PurchaseViewSet(
         "account_transaction",
         "presented_event__developer",
         "reader",
-    ).prefetch_related("items__good__rental")
+    ).prefetch_related("items__good__rental", "items__court_price")
     serializer_class = PurchaseSerializer
     permission_classes = [CatalogPermission]
     required_permissions = {

@@ -1,25 +1,30 @@
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import record_audit
 from apps.developers.models import Developer
 from apps.finance.models import DeveloperAccount
-from apps.goods.models import Good, GoodKind, RentalSettings
+from apps.goods.models import CourtPrice, Good, GoodKind, PricePer, RentalSettings
 from apps.purchases.models import Purchase
 from apps.sellers.models import SellerStatus
 
 from .exceptions import (
     AlreadyBookedThen,
     BookingCheckedIn,
+    BookingNotPaid,
+    BookingNotReserved,
     BookingStarted,
     InvalidSlot,
     RentalNotAvailable,
     SlotUnavailable,
 )
-from .models import Booking, CheckResult, PlaygroundCheck
+from .models import Booking, BookingStatus, CheckResult, PlaygroundCheck
 
 
 def _local(day: date, t) -> datetime:
@@ -74,7 +79,7 @@ def slots_for_day(good: Good, day: date) -> list[dict]:
     return slots
 
 
-def day_schedule(good: Good, day: date) -> dict:
+def day_schedule(good: Good, day: date, with_bookings: bool = False) -> dict:
     """One court's day as periods: consecutive slots with the same state merged, e.g.
     FREE 08:00-10:00, BOOKED 10:00-12:00, FREE 12:00-20:00. Closed days have none."""
     periods = []
@@ -84,8 +89,15 @@ def day_schedule(good: Good, day: date) -> dict:
         else:
             periods.append({"state": slot["state"], "start": slot["start"], "end": slot["end"]})
     rules = good.rental
+    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
+    day_bookings = (
+        Booking.objects.filter(good=good, start__lt=closing, end__gt=opening)
+        .select_related("developer", "good__rental", "court_price")
+        .order_by("start")
+    )
     return {
         "good": good,
+        "bookings": [booking_brief(b) for b in day_bookings] if with_bookings else [],
         "open": day.weekday() in rules.weekdays,
         "opening_time": rules.opening_time,
         "closing_time": rules.closing_time,
@@ -94,8 +106,13 @@ def day_schedule(good: Good, day: date) -> dict:
     }
 
 
-def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> datetime:
-    """Check the requested range against the rental's rules; return its end."""
+def _validate_slot(
+    rules: RentalSettings, start: datetime, slots: int, running_ok: bool = False
+) -> datetime:
+    """Check the requested range against the rental's rules; return its end. The start may
+    be any minute within opening hours; the length is whole slots (the price is per slot).
+    `running_ok`: the range may have started up to one slot ago ("play now": the start is
+    fixed when the desk opens the payment, the PIN comes a little later)."""
     local_start = timezone.localtime(start)
     day = local_start.date()
     step = timedelta(minutes=rules.slot_minutes)
@@ -104,7 +121,8 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
 
     if slots < 1:
         raise InvalidSlot(_("Book at least one slot."))
-    if start <= timezone.now():
+    now = timezone.now()
+    if start <= now and not (running_ok and start + step > now):
         raise InvalidSlot(_("This slot has already started."))
     if day > timezone.localdate() + timedelta(days=rules.max_days_ahead):
         raise InvalidSlot(
@@ -113,10 +131,13 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
         )
     if day.weekday() not in rules.weekdays:
         raise InvalidSlot(_("The rental is closed on this day."))
-    offset = (local_start - opening).total_seconds()
-    if offset < 0 or offset % step.total_seconds() or end > closing:
+    if local_start.second or local_start.microsecond or start < opening or end > closing:
         raise InvalidSlot(
-            _("Pick a start time on the slot grid within opening hours."),
+            _("Pick a time within opening hours (%(opening)s-%(closing)s).")
+            % {
+                "opening": rules.opening_time.strftime("%H:%M"),
+                "closing": rules.closing_time.strftime("%H:%M"),
+            },
             details={
                 "opening_time": rules.opening_time.isoformat(),
                 "closing_time": rules.closing_time.isoformat(),
@@ -127,8 +148,8 @@ def _validate_slot(rules: RentalSettings, start: datetime, slots: int) -> dateti
 
 
 def time_range(*, good: Good, day: date, start_time, end_time) -> tuple[datetime, int]:
-    """(start, number of slots) for a company-local date and start/end time. The times
-    must be on the rental's slot grid, e.g. 10:00-12:00 with 60-minute slots = 2 slots."""
+    """(start, number of slots) for a company-local date and start/end time. The start is
+    any minute; the length is whole slots, e.g. 10:15-12:15 with 60-minute slots = 2 slots."""
     rules = _ensure_bookable(good)
     start, end = _local(day, start_time), _local(day, end_time)
     minutes = (end - start).total_seconds() / 60
@@ -155,6 +176,9 @@ def _ensure_developer_free(developer, start, end, exclude: int | None = None) ->
                 "good": clash.good.name,
                 "start": clash.start.isoformat(),
                 "end": clash.end.isoformat(),
+                "date": timezone.localtime(clash.start).date().isoformat(),
+                "start_time": timezone.localtime(clash.start).strftime("%H:%M"),
+                "end_time": timezone.localtime(clash.end).strftime("%H:%M"),
             }
         )
 
@@ -167,15 +191,209 @@ def _constraint_error(exc: IntegrityError) -> Exception:
     return SlotUnavailable()
 
 
-def check_line(*, good: Good, start: datetime, slots: int) -> datetime:
+def pick_price(good: Good, price_id: int | None = None) -> CourtPrice | None:
+    """Which of the court's prices: `price_id`, or its first active one. None only for a
+    court without prices (then its own price, counted by `price_per`)."""
+    rows = list(CourtPrice.objects.filter(good=good, is_active=True))
+    if price_id is not None:
+        chosen = next((row for row in rows if row.pk == price_id), None)
+        if chosen is None:
+            raise InvalidSlot(_("Pick one of this court's prices."))
+        return chosen
+    return rows[0] if rows else None
+
+
+def _per(good: Good, court_price: CourtPrice | None) -> str:
+    return court_price.per if court_price is not None else good.rental.price_per
+
+
+def _unit(good: Good, court_price: CourtPrice | None) -> Decimal:
+    return court_price.price if court_price is not None else good.price
+
+
+def people_for(rules: RentalSettings, people: int | None, per: str | None = None) -> int:
+    """How many people a booking is for: 1 for a per court price; 1..max_people else."""
+    if (per or rules.price_per) != PricePer.PERSON:
+        return 1
+    people = people or 1
+    if people < 1 or people > rules.max_people:
+        raise InvalidSlot(
+            _("Between 1 and %(max)s people.") % {"max": rules.max_people},
+            details={"max_people": rules.max_people},
+        )
+    return people
+
+
+def price_of(
+    good: Good, slots: int, people: int = 1, court_price: CourtPrice | None = None
+) -> Decimal:
+    """What a booking costs: the chosen price x slots, times the people for a per person
+    price."""
+    count = people if _per(good, court_price) == PricePer.PERSON else 1
+    return _unit(good, court_price) * slots * count
+
+
+def play_start(rules: RentalSettings, now: datetime | None = None) -> datetime | None:
+    """When "play now" starts: this minute, or None when the court is closed now (or
+    closes before one slot is over)."""
+    now = (now or timezone.now()).replace(second=0, microsecond=0)
+    day = timezone.localtime(now).date()
+    if day.weekday() not in rules.weekdays:
+        return None
+    opening, closing = _local(day, rules.opening_time), _local(day, rules.closing_time)
+    if not opening <= now or now + timedelta(minutes=rules.slot_minutes) > closing:
+        return None
+    return now
+
+
+def check_line(*, good: Good, start: datetime, slots: int, running_ok: bool = False) -> datetime:
     """Early feedback while the desk prepares a booking: the rental is bookable, the range
     fits its rules and is free right now. Confirmation re-checks everything under locks.
     Returns the end of the range."""
     rules = _ensure_bookable(good)
-    end = _validate_slot(rules, start, slots)
+    end = _validate_slot(rules, start, slots, running_ok=running_ok)
     if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
         raise SlotUnavailable()
     return end
+
+
+# --- Booking for free, paid on arrival ---------------------------------------------------
+
+
+@transaction.atomic
+def reserve(
+    *,
+    actor,
+    good: Good,
+    developer: Developer,
+    day: date,
+    start_time,
+    end_time,
+    people=1,
+    price: int | None = None,
+):
+    """Book a court for free: the time is held for `developer`, who pays on arrival
+    (`start_checkout(booking=...)`). No money moves now."""
+    good = Good.all_objects.select_for_update(of=("self",)).select_related("rental").get(pk=good.pk)
+    rules = _ensure_bookable(good)
+    start, slots = time_range(good=good, day=day, start_time=start_time, end_time=end_time)
+    end = _validate_slot(rules, start, slots)
+    court_price = pick_price(good, price)
+    people = people_for(rules, people, _per(good, court_price))
+    if Booking.objects.filter(good=good, start__lt=end, end__gt=start).exists():
+        raise SlotUnavailable()
+    _ensure_developer_free(developer, start, end)
+    try:
+        with transaction.atomic():
+            booking = Booking.objects.create(
+                good=good,
+                developer=developer,
+                start=start,
+                end=end,
+                slots=slots,
+                people=people,
+                court_price=court_price,
+                status=BookingStatus.RESERVED,
+                reserved_by=actor if getattr(actor, "pk", None) else None,
+            )
+    except IntegrityError as exc:
+        raise _constraint_error(exc) from exc
+    record_audit(
+        "booking.reserved",
+        actor=actor,
+        entity=booking,
+        new_values={
+            "good": good.pk,
+            "developer": developer.pk,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "people": people,
+            "price": court_price.pk if court_price else None,
+        },
+    )
+    return booking
+
+
+@transaction.atomic
+def cancel_reservation(*, actor, booking: Booking) -> None:
+    """An unpaid booking is dropped (no money moved). Paid ones are refunded instead
+    (`purchases.services.refund_purchase`)."""
+    booking = Booking.objects.select_for_update().get(pk=booking.pk)
+    if booking.status != BookingStatus.RESERVED:
+        raise BookingNotReserved()
+    record_audit(
+        "booking.cancelled",
+        actor=actor,
+        entity=booking,
+        old_values={
+            "good": booking.good_id,
+            "developer": booking.developer_id,
+            "start": booking.start.isoformat(),
+            "end": booking.end.isoformat(),
+        },
+    )
+    booking.delete()
+
+
+@transaction.atomic
+def desk_check_in(*, actor, booking: Booking) -> Booking:
+    """The developer is at the desk: a paid booking is checked in (paying on arrival
+    checks in by itself). An unpaid one must be paid first."""
+    booking = (
+        Booking.objects.select_for_update()
+        .select_related("good__service_position")
+        .get(pk=booking.pk)
+    )
+    if booking.status != BookingStatus.PAID:
+        raise BookingNotPaid()
+    if booking.checked_in_at is None:
+        booking.checked_in_at = timezone.now()
+        booking.checked_in_at_store_id = booking.good.service_position.seller_id
+        booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
+        record_audit("booking.checked_in", actor=actor, entity=booking, new_values={"desk": True})
+    return booking
+
+
+def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) -> Booking:
+    """Called by `confirm_purchase` (in its transaction): the reserved booking this purchase
+    pays becomes PAID and is checked in (the developer is at the desk)."""
+    booking = (
+        Booking.objects.select_for_update()
+        .select_related("good__service_position")
+        .get(pk=purchase.booking_to_pay_id)
+    )
+    if booking.status != BookingStatus.RESERVED:
+        raise BookingNotReserved()
+    if (booking.good_id, booking.start, booking.slots) != (item.good_id, item.start, item.quantity):
+        raise SlotUnavailable(_("The booking changed meanwhile; start the payment again."))
+    booking.status = BookingStatus.PAID
+    booking.purchase = purchase
+    booking.people = item.people
+    booking.court_price_id = item.court_price_id
+    booking.checked_in_at = booking.checked_in_at or timezone.now()
+    booking.checked_in_at_store_id = booking.good.service_position.seller_id
+    booking.save(
+        update_fields=[
+            "status",
+            "purchase",
+            "people",
+            "court_price",
+            "checked_in_at",
+            "checked_in_at_store",
+            "updated_at",
+        ]
+    )
+    record_audit(
+        "booking.paid",
+        actor=actor,
+        entity=booking,
+        new_values={
+            "purchase": purchase.pk,
+            "developer": developer.pk,
+            "total": str(purchase.total),
+        },
+    )
+    return booking
 
 
 def book_lines(
@@ -191,12 +409,13 @@ def book_lines(
     for item in items:
         good = goods[item.good_id]
         rules = _ensure_bookable(good)
-        end = _validate_slot(rules, item.start, item.quantity)
+        end = _validate_slot(rules, item.start, item.quantity, running_ok=True)
         if Booking.objects.filter(good=good, start__lt=end, end__gt=item.start).exists():
             raise SlotUnavailable(details={"good": good.pk, "start": item.start.isoformat()})
         _ensure_developer_free(developer, item.start, end)
         try:
             with transaction.atomic():
+                playing = item.start <= timezone.now()  # "play now": at the desk already
                 booking = Booking.objects.create(
                     good=good,
                     developer=developer,
@@ -204,6 +423,11 @@ def book_lines(
                     start=item.start,
                     end=end,
                     slots=item.quantity,
+                    people=item.people,
+                    court_price_id=item.court_price_id,
+                    status=BookingStatus.PAID,
+                    checked_in_at=timezone.now() if playing else None,
+                    checked_in_at_store_id=good.service_position.seller_id if playing else None,
                 )
         except IntegrityError as exc:
             raise _constraint_error(exc) from exc
@@ -229,17 +453,58 @@ def book_lines(
 
 @transaction.atomic
 def start_checkout(
-    *, actor, good: Good, day: date, start_time, end_time, reader=None, client_ip=None
+    *,
+    actor,
+    good: Good | None = None,
+    day: date | None = None,
+    start_time=None,
+    end_time=None,
+    reader=None,
+    client_ip=None,
+    people: int = 1,
+    now_slots: int | None = None,
+    booking: Booking | None = None,
+    event=None,
+    price: int | None = None,
 ) -> Purchase:
-    """A draft BOOKING purchase holding exactly this court and time. The developer taps
-    their card on the desk's reader and enters the PIN; `confirm_purchase` then books it
-    for the card holder. The time is not held until then."""
+    """A draft BOOKING purchase for one court and time; the developer taps their card on
+    the desk's reader and enters the PIN, then `confirm_purchase` books it for the card
+    holder. The time is not held until then. Three kinds:
+
+    - a day and time (`day`, `start_time`, `end_time`);
+    - "play now" (`now_slots`): from this minute, for that many slots;
+    - a reserved booking paid on arrival (`booking`): its court, time and people.
+
+    `event`: a card tap just made on the desk's reader (e.g. at arrival) counts as the
+    card, so the developer only types the PIN."""
     from apps.purchases import services as purchases
     from apps.purchases.models import PurchaseItem, PurchaseKind
 
-    good = Good.all_objects.select_related("service_position__seller").get(pk=good.pk)
-    start, slots = time_range(good=good, day=day, start_time=start_time, end_time=end_time)
-    check_line(good=good, start=start, slots=slots)
+    if booking is not None:
+        booking = Booking.objects.select_related(
+            "good__service_position__seller", "good__rental"
+        ).get(pk=booking.pk)
+        if booking.status != BookingStatus.RESERVED:
+            raise BookingNotReserved()
+        if booking.end <= timezone.now():
+            raise BookingStarted(_("This booking is over."))
+        good, start, slots, people = booking.good, booking.start, booking.slots, booking.people
+        court_price = booking.court_price
+        _ensure_bookable(good)
+    else:
+        good = Good.all_objects.select_related("service_position__seller", "rental").get(pk=good.pk)
+        rules = _ensure_bookable(good)
+        court_price = pick_price(good, price)
+        people = people_for(rules, people, _per(good, court_price))
+        if now_slots is not None:
+            start = play_start(rules)
+            if start is None:
+                raise InvalidSlot(_("The court is closed now."))
+            slots = now_slots
+            check_line(good=good, start=start, slots=slots, running_ok=True)
+        else:
+            start, slots = time_range(good=good, day=day, start_time=start_time, end_time=end_time)
+            check_line(good=good, start=start, slots=slots)
     purchase = purchases.create_purchase(
         actor=actor,
         service_position=good.service_position,
@@ -247,8 +512,161 @@ def start_checkout(
         client_ip=client_ip,
         kind=PurchaseKind.BOOKING,
     )
-    PurchaseItem.objects.create(purchase=purchase, good=good, quantity=slots, start=start)
+    PurchaseItem.objects.create(
+        purchase=purchase,
+        good=good,
+        quantity=slots,
+        start=start,
+        people=people,
+        court_price=court_price,
+    )
+    if booking is not None:
+        purchase.booking_to_pay = booking
+        purchase.save(update_fields=["booking_to_pay", "updated_at"])
+    if event is not None:
+        purchases.present_tap(purchase, event)
+    elif purchase.reader_id is not None:
+        # Wait for the card from now on: a tap the moment the screen asks for it counts.
+        purchases.wait_for_card(purchase=purchase)
     return purchase
+
+
+# --- The desk: courts now, arrivals ------------------------------------------------------
+
+
+def booking_brief(booking: Booking) -> dict:
+    """A booking as the desk shows it on the board and at arrival."""
+    price = price_of(booking.good, booking.slots, booking.people, booking.court_price)
+    developer = booking.developer
+    return {
+        "id": booking.pk,
+        "good": booking.good_id,
+        "good_name": booking.good.name,
+        "start": booking.start,
+        "end": booking.end,
+        "start_time": f"{timezone.localtime(booking.start):%H:%M}",
+        "end_time": f"{timezone.localtime(booking.end):%H:%M}",
+        "date": timezone.localtime(booking.start).date().isoformat(),
+        "status": booking.status,
+        "people": booking.people,
+        "price": f"{price:.2f}",
+        "price_name": booking.court_price.name if booking.court_price_id else "",
+        "checked_in": booking.checked_in_at is not None,
+        "purchase": booking.purchase_id,
+        "developer": {
+            "id": developer.pk,
+            "full_name": developer.full_name,
+            "employee_number": developer.employee_number,
+        },
+    }
+
+
+def now_board(goods) -> list[dict]:
+    """Each court now: CLOSED, FREE (until the next booking or closing) or IN_USE (by
+    whom, until when, paid or not), and its next booking today."""
+    now = timezone.now()
+    today = timezone.localdate()
+    goods = list(goods.select_related("rental").prefetch_related("court_prices"))
+    bookings = (
+        Booking.objects.filter(
+            good__in=goods,
+            end__gt=now,
+            start__lt=_local(today + timedelta(days=1), datetime.min.time()),
+        )
+        .select_related("developer", "good__rental", "court_price")
+        .order_by("start")
+    )
+    by_court: dict[int, list[Booking]] = {}
+    for booking in bookings:
+        by_court.setdefault(booking.good_id, []).append(booking)
+    board = []
+    for good in goods:
+        rules = good.rental
+        running = play_start(rules, now)
+        mine = by_court.get(good.pk, [])
+        current = next((b for b in mine if b.start <= now < b.end), None)
+        upcoming = next((b for b in mine if b.start > now), None)
+        closing = _local(today, rules.closing_time)
+        if current is not None:
+            state, until = "IN_USE", current.end
+        elif running is not None:
+            state, until = "FREE", upcoming.start if upcoming else closing
+        else:
+            state, until = "CLOSED", None
+        # How many slots "play now" can still take before the next booking or closing.
+        fits = (
+            int((until - running) / timedelta(minutes=rules.slot_minutes)) if state == "FREE" else 0
+        )
+        board.append(
+            {
+                "good": good.pk,
+                "name": good.name,
+                "price": f"{good.price:.2f}",
+                "price_per": rules.price_per,
+                "prices": [
+                    {"id": p.pk, "name": p.name, "price": f"{p.price:.2f}", "per": p.per}
+                    for p in good.court_prices.all()
+                    if p.is_active
+                ],
+                "max_people": rules.max_people,
+                "slot_minutes": rules.slot_minutes,
+                "state": state,
+                "until": until,
+                "until_time": f"{timezone.localtime(until):%H:%M}" if until else None,
+                "play_slots": fits,
+                "now": booking_brief(current) if current else None,
+                "next": booking_brief(upcoming) if upcoming else None,
+            }
+        )
+    return board
+
+
+def arrival(reader, after: int | None) -> dict:
+    """The desk's arrival tap: the newest accepted tap on `reader` after `after` (an event
+    id), its developer, their booking now (or starting within the check-in minutes) and
+    their later bookings today. `cursor` is the newest tap id (for the next poll)."""
+    from apps.rfid.models import RFIDEvent
+
+    taps = RFIDEvent.objects.filter(device=reader).order_by("-pk")
+    body = {"cursor": taps.values_list("pk", flat=True).first(), "tap": None}
+    if after is None:
+        return body
+    tap = taps.filter(pk__gt=after).select_related("developer").first()
+    if tap is None:
+        return body
+    developer = tap.developer
+    entry = {
+        "event": tap.pk,
+        "uid": tap.uid,
+        "result": tap.result,
+        "developer": None,
+        "now": None,
+        "later": [],
+    }
+    if developer is not None and tap.result == "ACCEPTED":
+        now = timezone.now()
+        early = timedelta(minutes=settings.PLAYGROUND_CHECK_IN_EARLY_MINUTES)
+        mine = list(
+            Booking.objects.filter(
+                developer=developer,
+                end__gt=now,
+                start__lt=_local(timezone.localdate() + timedelta(days=1), datetime.min.time()),
+            )
+            .select_related("good__rental", "developer", "court_price")
+            .order_by("start")
+        )
+        current = next((b for b in mine if b.start <= now + early), None)
+        entry["developer"] = {
+            "id": developer.pk,
+            "full_name": developer.full_name,
+            "employee_number": developer.employee_number,
+            "department": developer.department,
+            "photo": developer.photo.url if developer.photo else None,
+        }
+        entry["now"] = booking_brief(current) if current else None
+        entry["later"] = [booking_brief(b) for b in mine if b is not current]
+    body["tap"] = entry
+    return body
 
 
 # --- Changing a paid booking -------------------------------------------------------------
@@ -283,7 +701,12 @@ def change_booking(
         finance.verify_pin(account=finance.open_account(booking.developer), pin=pin)
 
     with transaction.atomic():
-        purchase = Purchase.objects.select_for_update().get(pk=booking.purchase_id)
+        # A reserved (unpaid) booking has no purchase: it just moves, no money.
+        purchase = (
+            Purchase.objects.select_for_update().get(pk=booking.purchase_id)
+            if booking.purchase_id
+            else None
+        )
         booking = (
             Booking.objects.select_for_update(of=("self",))
             .select_related("good__rental", "developer")
@@ -295,8 +718,10 @@ def change_booking(
         if booking.start <= timezone.now() and not (rules_now and rules_now.refund_after_start):
             raise BookingStarted()
         target = good or booking.good
-        account = DeveloperAccount.objects.select_for_update().get(
-            developer_id=booking.developer_id
+        account = (
+            DeveloperAccount.objects.select_for_update()
+            .filter(developer_id=booking.developer_id)
+            .first()
         )
         courts = {
             g.pk: g
@@ -312,8 +737,18 @@ def change_booking(
         start, slots = time_range(good=target, day=day, start_time=start_time, end_time=end_time)
         end = _validate_slot(rules, start, slots)
 
-        paid = purchase.total
-        price = finance.money(target.price * slots)
+        # The same price on the same court; on another court its price of the same name
+        # (else its first one).
+        court_price = booking.court_price
+        if target.pk != booking.good_id:
+            choices = list(CourtPrice.objects.filter(good=target, is_active=True))
+            court_price = next(
+                (p for p in choices if court_price and p.name == court_price.name),
+                choices[0] if choices else None,
+            )
+        people = people_for(rules, booking.people, _per(target, court_price))
+        price = finance.money(price_of(target, slots, people, court_price))
+        paid = purchase.total if purchase is not None else price
         difference = price - paid
         if difference > 0:
             purchases.ensure_payer_present(purchase, pin)
@@ -334,6 +769,7 @@ def change_booking(
             "total": str(paid),
         }
         booking.good, booking.start, booking.end, booking.slots = target, start, end, slots
+        booking.court_price, booking.people = court_price, people
         booking.change_count += 1
         try:
             with transaction.atomic():
@@ -342,7 +778,7 @@ def change_booking(
             raise _constraint_error(exc) from exc
 
         txn = None
-        if difference:
+        if purchase is not None and difference:
             txn = finance.post_transaction(
                 account=account,
                 kind=TransactionKind.PURCHASE if difference > 0 else TransactionKind.REFUND,
@@ -354,12 +790,19 @@ def change_booking(
             )
             if difference > 0:
                 purchases.clear_presented(purchase)
-        purchase.items.update(
-            good=target, start=start, quantity=slots, unit_price=target.price, line_total=price
-        )
-        if price != paid:
-            purchase.total = price
-            purchase.save(update_fields=["total", "updated_at"])
+        if purchase is not None:
+            purchase.items.update(
+                good=target,
+                start=start,
+                quantity=slots,
+                people=people,
+                court_price=court_price,
+                unit_price=_unit(target, court_price),
+                line_total=price,
+            )
+            if price != paid:
+                purchase.total = price
+                purchase.save(update_fields=["total", "updated_at"])
 
         record_audit(
             "booking.changed",
@@ -373,7 +816,9 @@ def change_booking(
                 "slots": slots,
                 "total": str(price),
                 "difference": str(difference),
-                "balance_after": str(txn.balance_after if txn else account.balance),
+                "balance_after": str(
+                    txn.balance_after if txn else (account.balance if account else 0)
+                ),
             },
         )
     return booking
@@ -415,6 +860,8 @@ def check_in(event) -> PlaygroundCheck:
         check.booking = booking
         if booking is None:
             check.result = CheckResult.NO_BOOKING
+        elif booking.status != BookingStatus.PAID:
+            check.result = CheckResult.NOT_PAID  # pay at the desk first
         elif booking.checked_in_at is not None:
             check.result = CheckResult.ALREADY_CHECKED_IN
         else:
@@ -443,3 +890,46 @@ def checks_here(device) -> bool:
     if not device.seller.checks_bookings:
         return False
     return draft_for_reader(device.pk) is None
+
+
+def desk_people(*, search: str = "", pk: int | None = None, limit: int = 8) -> list[dict]:
+    """Who a desk booking is for: active developers by name or employee number (or one by
+    id), with what the desk shows: photo, team, building, card and wallet balance (they
+    pay on arrival). The playground is shared, so every building."""
+    from apps.developers.models import DeveloperStatus
+    from apps.rfid.models import RFIDCardAssignment
+
+    people = Developer.objects.select_related("building", "account")
+    if pk is not None:
+        people = people.filter(pk=pk)
+    else:
+        search = search.strip()
+        if not search:
+            return []
+        people = people.filter(status=DeveloperStatus.ACTIVE).filter(
+            Q(full_name__icontains=search) | Q(employee_number__icontains=search)
+        )
+    people = list(people.order_by("full_name", "id")[:limit])
+    cards = dict(
+        RFIDCardAssignment.objects.filter(
+            developer__in=people, unassigned_at__isnull=True
+        ).values_list("developer_id", "card__label")
+    )
+    rows = []
+    for person in people:
+        account = getattr(person, "account", None)
+        rows.append(
+            {
+                "id": person.pk,
+                "full_name": person.full_name,
+                "employee_number": person.employee_number,
+                "department": person.department,
+                "position_title": person.position_title,
+                "building_name": person.building.name if person.building_id else None,
+                "card_label": cards.get(person.pk) or None,
+                "status": person.status,
+                "photo": person.photo.url if person.photo else None,
+                "balance": f"{account.balance:.2f}" if account is not None else None,
+            }
+        )
+    return rows

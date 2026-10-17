@@ -404,6 +404,8 @@ def check_message(event) -> str:
     values = {"name": name, "court": booking.good.name, "time": when}
     if check.result == "ALREADY_CHECKED_IN":
         return _("%(name)s - already checked in: %(court)s %(time)s") % values
+    if check.result == "NOT_PAID":
+        return _("%(name)s - not paid yet: pay at the desk (%(court)s %(time)s)") % values
     return _("%(name)s - checked in: %(court)s %(time)s") % values
 
 

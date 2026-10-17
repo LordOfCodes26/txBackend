@@ -20,6 +20,11 @@ from .models import Purchase, PurchaseItem, PurchaseStatus
 TAKES_CARD = (PurchaseStatus.DRAFT, PurchaseStatus.CONFIRMED)
 
 
+def current_price(item) -> Decimal:
+    """A draft line's price now: the chosen court price, else the good's price."""
+    return item.court_price.price if item.court_price_id else item.good.price
+
+
 class PurchaseItemSerializer(serializers.ModelSerializer):
     good_name = serializers.CharField(source="good.name", read_only=True)
     kind = serializers.CharField(source="good.kind", read_only=True)
@@ -32,6 +37,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
     end_time = serializers.SerializerMethodField(help_text="Bookings: local end, HH:MM.")
     unit_price = serializers.SerializerMethodField()
     line_total = serializers.SerializerMethodField()
+    price_name = serializers.SerializerMethodField(help_text="Court lines: which price.")
 
     class Meta:
         model = PurchaseItem
@@ -41,6 +47,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
             "good_name",
             "kind",
             "quantity",
+            "people",
             "date",
             "start_time",
             "end_time",
@@ -48,6 +55,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
             "end",
             "unit_price",
             "line_total",
+            "price_name",
         ]
         read_only_fields = fields
 
@@ -74,13 +82,16 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
 
     # Drafts show the current price; confirmed purchases show what was charged.
     def get_unit_price(self, item) -> str:
-        price = item.unit_price if item.unit_price is not None else item.good.price
+        price = item.unit_price if item.unit_price is not None else current_price(item)
         return f"{price:.2f}"
 
     def get_line_total(self, item) -> str:
         if item.line_total is not None:
             return f"{item.line_total:.2f}"
-        return f"{item.good.price * item.quantity:.2f}"
+        return f"{current_price(item) * item.quantity * item.people:.2f}"
+
+    def get_price_name(self, item) -> str:
+        return item.court_price.name if item.court_price_id else ""
 
 
 class PresentedCardSerializer(serializers.Serializer):
@@ -192,7 +203,10 @@ class PurchaseSerializer(serializers.ModelSerializer):
     def get_total(self, purchase) -> str:
         if purchase.total is not None:
             return f"{purchase.total:.2f}"
-        total = sum((i.good.price * i.quantity for i in purchase.items.all()), Decimal("0.00"))
+        total = sum(
+            (current_price(i) * i.quantity * i.people for i in purchase.items.all()),
+            Decimal("0.00"),
+        )
         return f"{total:.2f}"
 
     def get_balance_after(self, purchase) -> str | None:

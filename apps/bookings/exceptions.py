@@ -38,3 +38,15 @@ class BookingCheckedIn(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "BOOKING_CHECKED_IN"
     default_detail = _("The developer has already checked in to this booking.")
+
+
+class BookingNotPaid(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "BOOKING_NOT_PAID"
+    default_detail = _("This booking is not paid yet. Pay at the desk first.")
+
+
+class BookingNotReserved(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "BOOKING_NOT_RESERVED"
+    default_detail = _("This booking is already paid.")

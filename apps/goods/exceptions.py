@@ -26,3 +26,9 @@ class TooManyImages(DomainError):
     status_code = status.HTTP_409_CONFLICT
     code = "TOO_MANY_IMAGES"
     default_detail = _("This good already has the maximum number of images.")
+
+
+class LastCourtPrice(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "LAST_COURT_PRICE"
+    default_detail = _("A court needs at least one price.")

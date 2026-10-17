@@ -313,6 +313,25 @@ def present_card(event) -> Purchase | None:
     return purchase
 
 
+def present_tap(purchase: Purchase, event) -> bool:
+    """A tap made on the purchase's reader moments ago (e.g. when the developer arrived at
+    the desk) counts as the card for this purchase, so they only type the PIN. Only a
+    recent, accepted tap of a known developer counts."""
+    window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+    if (
+        event is None
+        or event.result != "ACCEPTED"
+        or event.developer_id is None
+        or event.event_time < timezone.now() - window
+        or (purchase.reader_id is not None and event.device_id != purchase.reader_id)
+    ):
+        return False
+    Purchase.objects.filter(pk=purchase.pk).update(
+        presented_event=event, presented_at=timezone.now(), waiting_since=None
+    )
+    return True
+
+
 def draft_for_reader(reader_id: int, lock: bool = False):
     """The purchase waiting for a card on this reader (at most one), or None: a draft to
     pay, or a paid purchase whose change costs more."""
@@ -395,6 +414,8 @@ def confirm_purchase(
     card, developer, account = _card_holder(card_uid)
     if purchase.seller.user_id and purchase.seller.user_id == developer.user_id:
         raise SelfPurchaseForbidden()
+    if purchase.booking_to_pay_id and purchase.booking_to_pay.developer_id != developer.pk:
+        raise CardNotUsable(_("Tap the card of the developer who booked."))
     finance.verify_pin(account=account, pin=pin)
 
     with transaction.atomic():
@@ -418,7 +439,7 @@ def confirm_purchase(
         )
         _ensure_seller_active(position)
 
-        items = list(purchase.items.order_by("good_id"))
+        items = list(purchase.items.select_related("court_price").order_by("good_id"))
         if not items:
             raise PurchaseEmpty()
         locked_goods = {
@@ -433,8 +454,10 @@ def confirm_purchase(
         for item in items:
             good = locked_goods[item.good_id]
             _ensure_sellable(good, purchase, booking=item.start is not None)
-            item.unit_price = good.price
-            item.line_total = finance.money(good.price * item.quantity)
+            # A court line: the chosen court price (per person: price x slots x people;
+            # people is 1 for everything else).
+            item.unit_price = item.court_price.price if item.court_price_id else good.price
+            item.line_total = finance.money(item.unit_price * item.quantity * item.people)
             total += item.line_total
         if total <= 0:
             raise PurchaseEmpty(_("The purchase total must be greater than zero."))
@@ -480,13 +503,19 @@ def confirm_purchase(
         if booked:
             from apps.bookings import services as bookings
 
-            bookings.book_lines(
-                actor=actor,
-                purchase=purchase,
-                developer=developer,
-                items=booked,
-                goods=locked_goods,
-            )
+            if purchase.booking_to_pay_id:
+                # A booking reserved for free, paid on arrival.
+                bookings.pay_reservation(
+                    actor=actor, purchase=purchase, developer=developer, item=booked[0]
+                )
+            else:
+                bookings.book_lines(
+                    actor=actor,
+                    purchase=purchase,
+                    developer=developer,
+                    items=booked,
+                    goods=locked_goods,
+                )
 
         record_audit(
             "purchase.confirmed",

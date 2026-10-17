@@ -5,7 +5,15 @@ from rest_framework import serializers
 from apps.sellers.models import ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
 
-from .models import Good, GoodImage, GoodKind, InventoryMovement, MovementKind, RentalSettings
+from .models import (
+    CourtPrice,
+    Good,
+    GoodImage,
+    GoodKind,
+    InventoryMovement,
+    MovementKind,
+    RentalSettings,
+)
 
 
 class GoodImageSerializer(serializers.ModelSerializer):
@@ -39,6 +47,8 @@ class RentalSettingsSerializer(serializers.ModelSerializer):
             "closing_time",
             "weekdays",
             "max_days_ahead",
+            "price_per",
+            "max_people",
             "refund_after_start",
         ]
 
@@ -61,6 +71,18 @@ class PositionSummarySerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
+class CourtPriceSerializer(serializers.ModelSerializer):
+    """One of a court's prices: per slot, for the whole court or per person."""
+
+    price = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+
+    class Meta:
+        model = CourtPrice
+        fields = ["id", "name", "price", "per", "is_active", "position"]
+        read_only_fields = ["id"]
+        extra_kwargs = {"position": {"required": False}, "is_active": {"required": False}}
+
+
 class GoodSerializer(serializers.ModelSerializer):
     service_position = serializers.PrimaryKeyRelatedField(
         queryset=ServicePosition.objects.all(),
@@ -75,6 +97,9 @@ class GoodSerializer(serializers.ModelSerializer):
     kind = serializers.ChoiceField(choices=GoodKind.choices, default=GoodKind.PRODUCT)
     rental = RentalSettingsSerializer(
         required=False, allow_null=True, help_text="Required for RENTAL goods, else omit."
+    )
+    court_prices = CourtPriceSerializer(
+        many=True, read_only=True, help_text="Courts: their prices (POST /goods/{id}/prices/)."
     )
     track_stock = serializers.BooleanField(
         required=False, help_text="PRODUCT only (default true). Always false otherwise."
@@ -104,6 +129,7 @@ class GoodSerializer(serializers.ModelSerializer):
             "quantity",
             "initial_quantity",
             "rental",
+            "court_prices",
             "images",
             "created_at",
             "updated_at",

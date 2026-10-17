@@ -1,4 +1,5 @@
 from django.db.models import Q
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -31,7 +32,7 @@ from common.permissions import HasPermissions
 
 from . import services
 from .filters import BookingFilter
-from .models import Booking, PlaygroundCheck
+from .models import Booking, BookingStatus, PlaygroundCheck
 from .serializers import (
     AvailabilityQuerySerializer,
     BookingChangeSerializer,
@@ -39,9 +40,11 @@ from .serializers import (
     CheckoutCreateSerializer,
     DeskReaderSerializer,
     DeskReadersQuerySerializer,
+    PayBookingSerializer,
     PlaygroundCheckSerializer,
     PlaygroundChecksQuerySerializer,
     RentalSerializer,
+    ReserveSerializer,
     ScheduleSerializer,
     SlotSerializer,
 )
@@ -60,7 +63,7 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
             Q(service_position__seller__status=SellerStatus.ACTIVE),
         )
         .select_related("service_position__seller", "rental")
-        .prefetch_related("images")
+        .prefetch_related("images", "court_prices")
     )
     serializer_class = RentalSerializer
     permission_classes = [IsAuthenticated]
@@ -94,13 +97,15 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(parameters=[AvailabilityQuerySerializer], responses=ScheduleSerializer)
     @action(detail=False, methods=["get"])
     def schedule(self, request):
-        """One day for every court: booked and free periods, to find a blank time.
-        Narrow it with `?search=` like the list."""
+        """One day for every court: booked and free periods, to find a blank time; for the
+        desk also the bookings (who, paid or not). Narrow it with `?search=` like the list."""
         query = AvailabilityQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         day = query.validated_data["date"]
+        # Who booked is for the desk only (booking.view or a playground seller).
+        desk = request.user.has_rbac_perm("booking.view") or works_playground(request.user)
         courts = [
-            services.day_schedule(good, day)
+            services.day_schedule(good, day, with_bookings=desk)
             for good in self.filter_queryset(self.get_queryset()).order_by("name", "pk")
         ]
         return Response(ScheduleSerializer({"date": day, "courts": courts}).data)
@@ -125,6 +130,7 @@ class BookingViewSet(
         "developer",
         "purchase__account_transaction",
         "checked_in_at_store",
+        "court_price",
     )
     serializer_class = BookingSerializer
     permission_classes = [CatalogPermission]
@@ -132,8 +138,26 @@ class BookingViewSet(
         "list": ["booking.view"],
         "retrieve": ["booking.view"],
         "change": ["booking.change"],
+        "reserve": ["booking.create"],
+        "pay": ["booking.create"],
+        "cancel": ["booking.cancel"],
+        "check_in": ["booking.create"],
+        "now": ["booking.view"],
+        "arrival": ["booking.view"],
+        "people": ["booking.create"],
     }
-    seller_actions = ("list", "retrieve", "change")
+    seller_actions = (
+        "list",
+        "retrieve",
+        "change",
+        "reserve",
+        "pay",
+        "cancel",
+        "check_in",
+        "now",
+        "arrival",
+        "people",
+    )
     seller_area = PLAYGROUND
     playground_filter = Q()  # every booking: the playground is shared
     lookup_value_regex = r"\d+"
@@ -151,6 +175,116 @@ class BookingViewSet(
     @staticmethod
     def owner_position_id(obj):
         return obj.good.service_position_id
+
+    def _booking(self, booking):
+        return Response(BookingSerializer(self.queryset.get(pk=booking.pk)).data)
+
+    @extend_schema(request=ReserveSerializer, responses={201: BookingSerializer})
+    @action(detail=False, methods=["post"])
+    def reserve(self, request):
+        """Book a court for free: the time is held; the developer pays on arrival
+        (`pay`). No money moves now."""
+        serializer = ReserveSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        booking = services.reserve(
+            actor=request.user,
+            good=data["good"],
+            developer=data["developer"],
+            day=data["date"],
+            start_time=data["start_time"],
+            end_time=data["end_time"],
+            people=data["people"],
+            price=data.get("price"),
+        )
+        return Response(BookingSerializer(self.queryset.get(pk=booking.pk)).data, status=201)
+
+    @extend_schema(request=PayBookingSerializer, responses={201: PurchaseSerializer})
+    @action(detail=True, methods=["post"])
+    def pay(self, request, pk=None):
+        """Pay a reserved booking on arrival: a checkout (a purchase) for its court and time;
+        the arrival tap (`event`) counts as the card, so the developer only types the PIN
+        (`/bookings/checkout/{id}/confirm/`). Paying checks them in."""
+        booking = self.get_object()
+        serializer = PayBookingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase = services.start_checkout(
+            actor=request.user,
+            booking=booking,
+            reader=serializer.validated_data.get("reader"),
+            event=serializer.validated_data.get("event"),
+            client_ip=client_ip(request),
+        )
+        return Response(
+            PurchaseSerializer(BookingCheckoutViewSet.queryset.get(pk=purchase.pk)).data, status=201
+        )
+
+    @extend_schema(request=None, responses={204: None})
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """Cancel a booking: an unpaid one is dropped; a paid one is refunded (before it
+        starts, or later if the court allows it; never after check-in)."""
+        booking = self.get_object()
+        if booking.status == BookingStatus.RESERVED:
+            services.cancel_reservation(actor=request.user, booking=booking)
+        else:
+            purchase_services.refund_purchase(actor=request.user, purchase=booking.purchase)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(request=None, responses=BookingSerializer)
+    @action(detail=True, methods=["post"], url_path="check-in")
+    def check_in(self, request, pk=None):
+        """The developer is at the desk: a paid booking is checked in."""
+        return self._booking(services.desk_check_in(actor=request.user, booking=self.get_object()))
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def now(self, request):
+        """Every court now: FREE (until when), IN_USE (by whom, until when, paid or not) or
+        CLOSED, and its next booking today."""
+        return Response(
+            {"courts": services.now_board(RentalViewSet.queryset.order_by("name", "pk"))}
+        )
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("search", str, required=False),
+            OpenApiParameter("id", int, required=False),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=False, methods=["get"])
+    def people(self, request):
+        """Who a desk booking is for: `?search=` (name or employee number) or `?id=`."""
+        raw = request.query_params.get("id")
+        pk = int(raw) if raw and raw.isdigit() else None
+        return Response(
+            {"results": services.desk_people(search=request.query_params.get("search", ""), pk=pk)}
+        )
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("reader", str, description="The desk reader's code."),
+            OpenApiParameter("after", int, description="Only taps newer than this event id."),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=False, methods=["get"])
+    def arrival(self, request):
+        """The desk's arrival tap: `cursor` (newest tap id); with `after`, the newest tap
+        after it: who, their booking now and later today."""
+        reader = RFIDDevice.objects.filter(
+            code=request.query_params.get("reader", ""),
+            purpose__in=[DevicePurpose.TILL, DevicePurpose.ENROLL],
+            is_active=True,
+        ).first()
+        if reader is None:
+            return Response({"cursor": None, "tap": None})
+        try:
+            after = int(request.query_params["after"]) if "after" in request.query_params else None
+        except ValueError:
+            after = None
+        return Response(services.arrival(reader, after))
 
     @extend_schema(request=BookingChangeSerializer, responses=BookingSerializer)
     @action(detail=True, methods=["post"])
@@ -251,12 +385,17 @@ class BookingCheckoutViewSet(
         data = serializer.validated_data
         purchase = services.start_checkout(
             actor=request.user,
-            good=data["good"],
-            day=data["date"],
-            start_time=data["start_time"],
-            end_time=data["end_time"],
+            good=data.get("good"),
+            day=data.get("date"),
+            start_time=data.get("start_time"),
+            end_time=data.get("end_time"),
             reader=data.get("reader"),
             client_ip=client_ip(request),
+            people=data["people"],
+            now_slots=data.get("now_slots"),
+            booking=data.get("booking"),
+            event=data.get("event"),
+            price=data.get("price"),
         )
         return self._respond(purchase, status.HTTP_201_CREATED)
 

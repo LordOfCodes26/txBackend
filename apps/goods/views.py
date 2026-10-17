@@ -23,8 +23,9 @@ from apps.sellers.access import (
 
 from . import services
 from .filters import GoodFilter, InventoryMovementFilter
-from .models import Good, GoodKind, InventoryMovement
+from .models import CourtPrice, Good, GoodKind, InventoryMovement
 from .serializers import (
+    CourtPriceSerializer,
     GoodImageSerializer,
     GoodSerializer,
     GoodStatisticsQuerySerializer,
@@ -43,6 +44,8 @@ ALL_GOOD_ACTIONS = (
     "upload_image",
     "delete_image",
     "statistics",
+    "prices",
+    "price",
 )
 
 
@@ -53,7 +56,7 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     """
 
     queryset = Good.objects.select_related("service_position__seller", "rental").prefetch_related(
-        "images"
+        "images", "court_prices"
     )
     serializer_class = GoodSerializer
     permission_classes = [CatalogPermission]
@@ -67,6 +70,8 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         "upload_image": ["good.update"],
         "delete_image": ["good.update"],
         "statistics": ["good.view", "purchase.view"],
+        "prices": ["good.update"],
+        "price": ["good.update"],
     }
     seller_actions = ALL_GOOD_ACTIONS
     scope_permission = "good.view"
@@ -135,6 +140,38 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     def perform_destroy(self, instance):
         self._check_court(instance.kind)
         services.delete_good(actor=self.request.user, good=instance)
+
+    def _court(self) -> Good:
+        good = self.get_object()
+        if good.kind != GoodKind.RENTAL:
+            raise PermissionDenied(_("Only courts have a price list."))
+        self._check_court(GoodKind.RENTAL)
+        return good
+
+    @extend_schema(request=CourtPriceSerializer, responses={201: CourtPriceSerializer})
+    @action(detail=True, methods=["post"])
+    def prices(self, request, pk=None):
+        """Add a price to a court, e.g. "Per person" 5 per person per slot."""
+        good = self._court()
+        serializer = CourtPriceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = {k: v for k, v in serializer.validated_data.items() if k != "is_active"}
+        row = services.add_court_price(actor=request.user, good=good, **data)
+        return Response(CourtPriceSerializer(row).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(request=CourtPriceSerializer, responses={200: CourtPriceSerializer, 204: None})
+    @action(detail=True, methods=["patch", "delete"], url_path=r"prices/(?P<price_id>\d+)")
+    def price(self, request, pk=None, price_id=None):
+        """Change one of the court's prices, or remove it (switched off if it was used)."""
+        good = self._court()
+        row = get_object_or_404(CourtPrice, pk=price_id, good=good)
+        if request.method == "DELETE":
+            services.remove_court_price(actor=request.user, row=row)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        serializer = CourtPriceSerializer(row, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        row = services.update_court_price(actor=request.user, row=row, **serializer.validated_data)
+        return Response(CourtPriceSerializer(row).data)
 
     @extend_schema(
         parameters=[GoodStatisticsQuerySerializer],

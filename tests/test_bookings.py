@@ -246,7 +246,9 @@ def test_developer_browses_rentals_and_availability(desk, world):
 
 
 @pytest.mark.django_db
-def test_day_schedule_shows_booked_and_free_times_of_every_court(desk, world):
+def test_day_schedule_shows_booked_and_free_times_of_every_court(
+    desk, world, auth_client, make_user
+):
     tennis = Good.objects.create(
         service_position=world.position,
         name="Tennis court",
@@ -278,8 +280,15 @@ def test_day_schedule_shows_booked_and_free_times_of_every_court(desk, world):
     assert [
         (p["state"], p["start_time"], p["end_time"]) for p in courts["Tennis court"]["periods"]
     ] == [("FREE", "09:00", "12:00")]
-    # Who booked is not shown, only the times.
-    assert "developer" not in str(body)
+    # The desk sees who booked (the board and day view); others only booked / free.
+    playground = next(c for c in body["courts"] if c["name"] == "Playground")
+    assert [b["start_time"] for b in playground["bookings"]] == ["10:00", "15:00"]
+    assert playground["bookings"][0]["developer"]["full_name"] == "Ada"
+
+    # Someone without booking rights sees only booked / free times, not who.
+    manager = auth_client(make_user(Roles.MANAGER)).get(f"{RENTALS}schedule/?date={day}").json()
+    assert "developer" not in str(manager)
+    desk.force_authenticate(world.seller_user)
 
     only = desk.get(f"{RENTALS}schedule/?date={day}&search=tennis").json()["courts"]
     assert [c["name"] for c in only] == ["Tennis court"]
@@ -413,7 +422,6 @@ def test_the_desk_books_every_court(desk, world, make_user):
 @pytest.mark.parametrize(
     "start_fn",
     [
-        lambda: tomorrow_at(10, 30),  # off the slot grid
         lambda: tomorrow_at(7),  # before opening
         lambda: tomorrow_at(19, 0),  # 2 slots would end at 21:00
         lambda: tomorrow_at(10) - timedelta(days=2),  # in the past (yesterday 10:00)
@@ -424,6 +432,17 @@ def test_invalid_slots(desk, world, start_fn):
     response = book(desk, world, start_fn(), slots=2)
     assert response.json()["error"]["code"] == "INVALID_SLOT", response.json()
     assert balance(world) == Decimal("100.00")
+
+
+@pytest.mark.django_db
+def test_a_booking_starts_at_any_minute(desk, world):
+    """Off the hour is fine (10:30-12:30 is 2 slots); it still ends by closing."""
+    assert book(desk, world, tomorrow_at(10, 30), slots=2).status_code == 201
+    assert Booking.objects.get().end == tomorrow_at(12, 30)
+    assert balance(world) == Decimal("60.00")
+    # Right after it, at 12:30, is free; 12:00 overlaps.
+    assert book(desk, world, tomorrow_at(12), slots=1).json()["error"]["code"] == "SLOT_UNAVAILABLE"
+    assert book(desk, world, tomorrow_at(19, 30), slots=1).json()["error"]["code"] == "INVALID_SLOT"
 
 
 @pytest.mark.django_db
@@ -744,8 +763,10 @@ def test_booking_with_a_tapped_card(desk, world, settings):
     )
     pid, r = add_booking(desk, world, tomorrow_at(10), reader="Reader1")
     assert r.json()["reader"] == "Reader1"
-    rfid.record_scan(device=reader, uid=UID)  # before Scan card to book: not taken
-    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"] is None
+    # A booking checkout waits for the card from the start: a quick tap is taken.
+    rfid.record_scan(device=reader, uid=UID)
+    assert desk.get(f"{CHECKOUT}{pid}/").json()["presented_card"]["developer"]["full_name"] == "Ada"
+    # Scan again: that tap no longer counts.
     assert desk.post(f"{CHECKOUT}{pid}/wait/").json()["waiting_for_card"] is True
 
     r = desk.post(f"{CHECKOUT}{pid}/confirm/", {"pin": PIN}, HTTP_IDEMPOTENCY_KEY=key())
@@ -914,7 +935,7 @@ def test_change_follows_the_booking_rules(desk, world, paid):
     day = tomorrow_at(0).date().isoformat()
     r = change(desk, paid.pk, date=day, start_time="15:00", end_time="17:00")
     assert r.json()["error"]["code"] == "SLOT_UNAVAILABLE"
-    r = change(desk, paid.pk, date=day, start_time="10:30", end_time="12:30")
+    r = change(desk, paid.pk, date=day, start_time="19:30", end_time="21:30")  # past closing
     assert r.json()["error"]["code"] == "INVALID_SLOT"
     paid.refresh_from_db()
     assert (paid.start, paid.change_count) == (tomorrow_at(10), 0)

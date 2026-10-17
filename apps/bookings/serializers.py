@@ -1,13 +1,20 @@
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from apps.developers.models import Developer
 from apps.developers.serializers import DeveloperSummarySerializer
 from apps.finance.models import PIN_LENGTH
 from apps.goods.models import Good, GoodKind
-from apps.goods.serializers import GoodImageSerializer, RentalSettingsSerializer
+from apps.goods.serializers import (
+    CourtPriceSerializer,
+    GoodImageSerializer,
+    RentalSettingsSerializer,
+)
 from apps.purchases.serializers import ReaderField, TillReaderSerializer
+from apps.rfid.models import RFIDEvent
 from apps.sellers.serializers import SellerSummarySerializer
 
 from .models import Booking, PlaygroundCheck
@@ -21,6 +28,7 @@ class RentalSerializer(serializers.ModelSerializer):
     rental = RentalSettingsSerializer(read_only=True)
     images = GoodImageSerializer(many=True, read_only=True)
     currency = serializers.SerializerMethodField()
+    prices = serializers.SerializerMethodField()
 
     class Meta:
         model = Good
@@ -33,12 +41,19 @@ class RentalSerializer(serializers.ModelSerializer):
             "seller",
             "location",
             "rental",
+            "prices",
             "images",
         ]
         read_only_fields = fields
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    @extend_schema_field(CourtPriceSerializer(many=True))
+    def get_prices(self, obj) -> list:
+        """The court's prices the desk can pick from."""
+        rows = [p for p in obj.court_prices.all() if p.is_active]
+        return CourtPriceSerializer(rows, many=True).data
 
 
 class AvailabilityQuerySerializer(serializers.Serializer):
@@ -81,6 +96,9 @@ class CourtDaySerializer(serializers.Serializer):
     closing_time = serializers.TimeField()
     slot_minutes = serializers.IntegerField()
     periods = PeriodSerializer(many=True)
+    bookings = serializers.ListField(
+        child=serializers.DictField(), help_text="The day's bookings: who, when, paid or not."
+    )
 
 
 class ScheduleSerializer(serializers.Serializer):
@@ -94,13 +112,23 @@ class BookingSerializer(serializers.ModelSerializer):
     location = serializers.CharField(source="good.service_position.location", read_only=True)
     developer = DeveloperSummarySerializer(read_only=True)
     total = serializers.DecimalField(
-        source="purchase.total", max_digits=14, decimal_places=2, read_only=True
+        source="purchase.total",
+        max_digits=14,
+        decimal_places=2,
+        read_only=True,
+        default=None,
+        help_text="What was paid; null while the booking is reserved (not paid).",
     )
+    price = serializers.SerializerMethodField(
+        help_text="What it costs: the chosen price x slots (x people for a per person price)."
+    )
+    price_name = serializers.SerializerMethodField(help_text="Which of the court's prices.")
     balance_after = serializers.DecimalField(
         source="purchase.account_transaction.balance_after",
         max_digits=14,
         decimal_places=2,
         read_only=True,
+        default=None,
     )
     currency = serializers.SerializerMethodField()
     date = serializers.SerializerMethodField(help_text="Company-local day.")
@@ -128,6 +156,10 @@ class BookingSerializer(serializers.ModelSerializer):
             "start",
             "end",
             "slots",
+            "status",
+            "people",
+            "price",
+            "price_name",
             "change_count",
             "checked_in_at",
             "checked_in_at_store_name",
@@ -141,6 +173,14 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    def get_price(self, obj) -> str:
+        from .services import price_of
+
+        return f"{price_of(obj.good, obj.slots, obj.people, obj.court_price):.2f}"
+
+    def get_price_name(self, obj) -> str:
+        return obj.court_price.name if obj.court_price_id else ""
 
     def get_date(self, obj) -> str:
         return timezone.localtime(obj.start).date().isoformat()
@@ -163,7 +203,7 @@ def _own_court(context, good):
 
 
 class BookingTimeSerializer(serializers.Serializer):
-    """Company-local date and start / end time on the court's slot grid."""
+    """Company-local date and start / end time: any start minute, whole slots long."""
 
     date = serializers.DateField(help_text="YYYY-MM-DD")
     start_time = serializers.TimeField(help_text="e.g. 10:00")
@@ -177,9 +217,32 @@ class BookingTimeSerializer(serializers.Serializer):
         return attrs
 
 
-class CheckoutCreateSerializer(BookingTimeSerializer):
+class CheckoutCreateSerializer(serializers.Serializer):
+    """One of: a day and time (`date`, `start_time`, `end_time`), "play now"
+    (`now_slots`), or a reserved booking paid on arrival (`booking`)."""
+
     good = serializers.PrimaryKeyRelatedField(
-        queryset=Good.objects.filter(kind=GoodKind.RENTAL), help_text="The court."
+        queryset=Good.objects.filter(kind=GoodKind.RENTAL),
+        required=False,
+        help_text="The court (not with `booking`).",
+    )
+    date = serializers.DateField(required=False, help_text="YYYY-MM-DD")
+    start_time = serializers.TimeField(required=False, help_text="e.g. 10:00")
+    end_time = serializers.TimeField(required=False, help_text="e.g. 12:00")
+    now_slots = serializers.IntegerField(
+        min_value=1,
+        max_value=24,
+        required=False,
+        help_text='"Play now": slots from the one running now.',
+    )
+    booking = serializers.PrimaryKeyRelatedField(
+        queryset=Booking.objects.all(), required=False, help_text="A reserved booking to pay."
+    )
+    people = serializers.IntegerField(
+        min_value=1, default=1, help_text="Per person prices: how many people play."
+    )
+    price = serializers.IntegerField(
+        required=False, help_text="Which of the court's prices (id). Default: its first."
     )
     reader = ReaderField(
         required=False,
@@ -188,9 +251,57 @@ class CheckoutCreateSerializer(BookingTimeSerializer):
         "or a card assign (master) reader (see `readers`). Left out: the store's only till "
         "reader, if it has exactly one.",
     )
+    event = serializers.PrimaryKeyRelatedField(
+        queryset=RFIDEvent.objects.all(),
+        required=False,
+        help_text="A tap just made on the reader (e.g. on arrival): it counts as the card.",
+    )
 
     def validate_good(self, good):
         return _own_court(self.context, good)
+
+    def validate(self, attrs):
+        if attrs.get("booking") is not None:
+            return attrs
+        if attrs.get("good") is None:
+            raise serializers.ValidationError({"good": [_("This field is required.")]})
+        if attrs.get("now_slots") is not None:
+            return attrs
+        missing = [k for k in ("date", "start_time", "end_time") if attrs.get(k) is None]
+        if missing:
+            raise serializers.ValidationError({k: [_("This field is required.")] for k in missing})
+        if attrs["end_time"] <= attrs["start_time"]:
+            raise serializers.ValidationError(
+                {"end_time": [_("The end time must be after the start time.")]}
+            )
+        return attrs
+
+
+class ReserveSerializer(BookingTimeSerializer):
+    """Book a court for free; the developer pays on arrival."""
+
+    good = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.filter(kind=GoodKind.RENTAL), help_text="The court."
+    )
+    developer = serializers.PrimaryKeyRelatedField(
+        queryset=Developer.objects.all(), help_text="Who it is for."
+    )
+    people = serializers.IntegerField(min_value=1, default=1)
+    price = serializers.IntegerField(
+        required=False, help_text="Which of the court's prices (id). Default: its first."
+    )
+
+    def validate_good(self, good):
+        return _own_court(self.context, good)
+
+
+class PayBookingSerializer(serializers.Serializer):
+    reader = ReaderField(required=False, allow_null=True)
+    event = serializers.PrimaryKeyRelatedField(
+        queryset=RFIDEvent.objects.all(),
+        required=False,
+        help_text="The arrival tap: it counts as the card.",
+    )
 
 
 class BookingChangeSerializer(BookingTimeSerializer):

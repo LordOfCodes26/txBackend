@@ -68,6 +68,11 @@ def _all_weekdays():
     return list(range(7))
 
 
+class PricePer(models.TextChoices):
+    COURT = "COURT", "Per court"
+    PERSON = "PERSON", "Per person"
+
+
 class RentalSettings(models.Model):
     """Booking rules for a RENTAL good. Times are company-local (settings.TIME_ZONE)."""
 
@@ -85,6 +90,14 @@ class RentalSettings(models.Model):
     )
     max_days_ahead = models.PositiveSmallIntegerField(
         default=30, help_text="How many days in advance a slot can be booked."
+    )
+    # How the price is counted: per court per slot (price x slots), or per person per slot
+    # (price x people x slots; the desk says how many people, one card pays for all).
+    price_per = models.CharField(max_length=6, choices=PricePer.choices, default=PricePer.COURT)
+    max_people = models.PositiveSmallIntegerField(
+        default=20,
+        validators=[MinValueValidator(1), MaxValueValidator(500)],
+        help_text="Per person courts: at most this many people per booking.",
     )
     refund_after_start = models.BooleanField(
         default=False,
@@ -105,6 +118,30 @@ class RentalSettings(models.Model):
 
     def __str__(self):
         return f"{self.good} rental rules"
+
+
+class CourtPrice(TimeStampedModel):
+    """One of a court's prices, like a good's price: e.g. "Whole court" 20 per slot, or
+    "Per person" 5 per person per slot. The desk picks one when booking; the court's
+    `Good.price` follows its first active price (shown in lists). A price that was used
+    is switched off, not deleted (bookings and sales point to it)."""
+
+    good = models.ForeignKey(Good, on_delete=models.CASCADE, related_name="court_prices")
+    name = models.CharField(max_length=80)
+    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    # Per court: price x slots. Per person: price x people x slots (one card pays for all).
+    per = models.CharField(max_length=6, choices=PricePer.choices, default=PricePer.COURT)
+    is_active = models.BooleanField(default=True)
+    position = models.PositiveSmallIntegerField(default=0, help_text="Lowest is shown first.")
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.CheckConstraint(condition=Q(price__gte=0), name="court_price_not_negative"),
+        ]
+
+    def __str__(self):
+        return f"{self.good} · {self.name}"
 
 
 def _image_path(instance, filename):

@@ -5,8 +5,23 @@ from django.utils import timezone
 
 from apps.audit.services import diff, record_audit, snapshot
 
-from .exceptions import InsufficientStock, NoStockChange, StockNotTracked, TooManyImages
-from .models import Good, GoodImage, GoodKind, InventoryMovement, MovementKind, RentalSettings
+from .exceptions import (
+    InsufficientStock,
+    LastCourtPrice,
+    NoStockChange,
+    StockNotTracked,
+    TooManyImages,
+)
+from .models import (
+    CourtPrice,
+    Good,
+    GoodImage,
+    GoodKind,
+    InventoryMovement,
+    MovementKind,
+    PricePer,
+    RentalSettings,
+)
 
 GOOD_FIELDS = [
     "service_position",
@@ -72,6 +87,8 @@ RENTAL_FIELDS = [
     "closing_time",
     "weekdays",
     "max_days_ahead",
+    "price_per",
+    "max_people",
     "refund_after_start",
 ]
 
@@ -92,7 +109,14 @@ def create_good(*, actor, initial_quantity: int = 0, rental: dict | None = None,
         data["track_stock"] = False
     good = Good.objects.create(**data)
     if rental:
-        RentalSettings.objects.create(good=good, **rental)
+        rules = RentalSettings.objects.create(good=good, **rental)
+        # A new court starts with one price: its price, counted per court or per person.
+        CourtPrice.objects.create(
+            good=good,
+            name="Per person" if rules.price_per == PricePer.PERSON else "Whole court",
+            price=good.price,
+            per=rules.price_per,
+        )
     record_audit("good.created", actor=actor, entity=good, new_values=_good_snapshot(good))
     if initial_quantity:
         move_stock(
@@ -133,6 +157,12 @@ def update_good(*, actor, good: Good, rental: dict | None = None, **changes) -> 
         for field, value in rental.items():
             setattr(settings_row, field, value)
         settings_row.save()
+    if "price" in changes and good.kind == GoodKind.RENTAL:
+        # The court's price is its first price (a court's own page changes the others).
+        first = CourtPrice.objects.filter(good=good, is_active=True).first()
+        if first is not None and first.price != good.price:
+            first.price = good.price
+            first.save(update_fields=["price", "updated_at"])
     old, new = diff(before, _good_snapshot(good))
     if new:
         record_audit("good.updated", actor=actor, entity=good, old_values=old, new_values=new)
@@ -199,3 +229,80 @@ def stock_mismatches():
         .values("id", "name", "quantity", "ledger")
     )
     return [g for g in goods if (g["ledger"] or 0) != g["quantity"]]
+
+
+# --- A court's prices ----------------------------------------------------------------------
+
+PRICE_FIELDS = ["name", "price", "per", "is_active", "position"]
+
+
+def _follow_first_price(good: Good) -> None:
+    """The court's own price (shown in lists) is its first active price."""
+    first = CourtPrice.objects.filter(good=good, is_active=True).first()
+    if first is not None and good.price != first.price:
+        Good.objects.filter(pk=good.pk).update(price=first.price, updated_at=timezone.now())
+
+
+@transaction.atomic
+def add_court_price(*, actor, good: Good, name: str, price, per=PricePer.COURT, position=None):
+    good = Good.objects.select_for_update().get(pk=good.pk)
+    if position is None:
+        last = CourtPrice.objects.filter(good=good).order_by("-position").first()
+        position = last.position + 1 if last else 0
+    row = CourtPrice.objects.create(good=good, name=name, price=price, per=per, position=position)
+    _follow_first_price(good)
+    record_audit(
+        "court_price.created", actor=actor, entity=row, new_values=snapshot(row, PRICE_FIELDS)
+    )
+    return row
+
+
+def _ensure_one_left(row: CourtPrice) -> None:
+    if (
+        not CourtPrice.objects.filter(good_id=row.good_id, is_active=True)
+        .exclude(pk=row.pk)
+        .exists()
+    ):
+        raise LastCourtPrice()
+
+
+@transaction.atomic
+def update_court_price(*, actor, row: CourtPrice, **changes) -> CourtPrice:
+    Good.objects.select_for_update().get(pk=row.good_id)
+    row = CourtPrice.objects.select_for_update().get(pk=row.pk)
+    before = snapshot(row, PRICE_FIELDS)
+    if changes.get("is_active") is False and row.is_active:
+        _ensure_one_left(row)
+    for field, value in changes.items():
+        setattr(row, field, value)
+    row.save()
+    _follow_first_price(row.good)
+    old, new = diff(before, snapshot(row, PRICE_FIELDS))
+    if new:
+        record_audit("court_price.updated", actor=actor, entity=row, old_values=old, new_values=new)
+    return row
+
+
+@transaction.atomic
+def remove_court_price(*, actor, row: CourtPrice) -> None:
+    """Deleted if never used; else switched off (bookings and sales keep pointing to it)."""
+    from apps.bookings.models import Booking
+    from apps.purchases.models import PurchaseItem
+
+    Good.objects.select_for_update().get(pk=row.good_id)
+    row = CourtPrice.objects.select_for_update().get(pk=row.pk)
+    if row.is_active:
+        _ensure_one_left(row)
+    record_audit(
+        "court_price.deleted", actor=actor, entity=row, old_values=snapshot(row, PRICE_FIELDS)
+    )
+    used = (
+        Booking.objects.filter(court_price=row).exists()
+        or PurchaseItem.objects.filter(court_price=row).exists()
+    )
+    if used:
+        row.is_active = False
+        row.save(update_fields=["is_active", "updated_at"])
+    else:
+        row.delete()
+    _follow_first_price(row.good)

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, RangeOperators
 from django.db import models
@@ -12,6 +13,11 @@ from common.models import TimeStampedModel
 class TsTzRange(Func):
     function = "TSTZRANGE"
     output_field = DateTimeRangeField()
+
+
+class BookingStatus(models.TextChoices):
+    RESERVED = "RESERVED", "Reserved (not paid yet)"
+    PAID = "PAID", "Paid"
 
 
 class Booking(TimeStampedModel):
@@ -33,7 +39,23 @@ class Booking(TimeStampedModel):
 
     good = models.ForeignKey(Good, on_delete=models.PROTECT, related_name="bookings")
     developer = models.ForeignKey(Developer, on_delete=models.PROTECT, related_name="bookings")
-    purchase = models.ForeignKey(Purchase, on_delete=models.PROTECT, related_name="bookings")
+    # RESERVED: booked for free, paid on arrival (then PAID, linked to its purchase). PAID
+    # straight away: "play now", or a booking paid when it was made.
+    status = models.CharField(
+        max_length=10, choices=BookingStatus.choices, default=BookingStatus.PAID
+    )
+    purchase = models.ForeignKey(
+        Purchase, on_delete=models.PROTECT, related_name="bookings", null=True, blank=True
+    )
+    # Which of the court's prices (None: older bookings, the court's own price).
+    court_price = models.ForeignKey(
+        "goods.CourtPrice", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    # Per person prices: how many play (one card pays for all); 1 on per court ones.
+    people = models.PositiveSmallIntegerField(default=1)
+    reserved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
     start = models.DateTimeField()
     end = models.DateTimeField()
     slots = models.PositiveSmallIntegerField()
@@ -82,6 +104,7 @@ class CheckResult(models.TextChoices):
     CHECKED_IN = "CHECKED_IN", "Checked in"
     ALREADY_CHECKED_IN = "ALREADY_CHECKED_IN", "Already checked in"
     NO_BOOKING = "NO_BOOKING", "No booking now"
+    NOT_PAID = "NOT_PAID", "Booked, not paid yet"
     CARD_REFUSED = "CARD_REFUSED", "Card not accepted"
 
 

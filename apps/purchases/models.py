@@ -40,6 +40,14 @@ class Purchase(TimeStampedModel):
     store_number = models.PositiveIntegerField(null=True, blank=True, editable=False)
     # The seller's own name for it (e.g. "Table 3", a customer), to tell open sales apart.
     label = models.CharField(max_length=60, blank=True)
+    # A court booking reserved for free, paid by this purchase on arrival.
+    booking_to_pay = models.ForeignKey(
+        "bookings.Booking",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments",
+    )
     # SALE: goods at a till. BOOKING: one court booking (apps.bookings), paid the same way.
     kind = models.CharField(max_length=10, choices=PurchaseKind.choices, default=PurchaseKind.SALE)
     service_position = models.ForeignKey(
@@ -153,6 +161,12 @@ class PurchaseItem(models.Model):
     )
     # RENTAL lines: start of the first booked slot; `quantity` is the number of slots.
     start = models.DateTimeField(null=True, blank=True)
+    # RENTAL lines: which of the court's prices (None: the court's own price).
+    court_price = models.ForeignKey(
+        "goods.CourtPrice", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    # RENTAL lines priced per person: how many people (line total = price x slots x people).
+    people = models.PositiveSmallIntegerField(default=1)
     # Price actually charged, fixed at confirmation (drafts show the current price).
     unit_price = models.DecimalField(**MONEY, null=True, blank=True)
     line_total = models.DecimalField(**MONEY, null=True, blank=True)
