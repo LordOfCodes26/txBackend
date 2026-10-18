@@ -93,6 +93,7 @@ class RFIDCardViewSet(
         "unassign": ["card.assign"],
         "replace": ["card.assign"],
         "retire": ["card.assign"],
+        "restore": ["card.assign"],
         "block": ["card.block"],
         "unblock": ["card.block"],
     }
@@ -214,6 +215,12 @@ class RFIDCardViewSet(
     def retire(self, request, pk=None):
         """Take an unassigned card out of circulation permanently (broken, destroyed)."""
         return self._transition(request, "retire")
+
+    @extend_schema(request=CardReasonSerializer, responses=RFIDCardSerializer)
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        """Bring a retired card back into use; it comes back unassigned."""
+        return self._transition(request, "restore")
 
 
 class RFIDCardAssignmentViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):

@@ -117,11 +117,11 @@ def card_taken_on_delete(developer: Developer) -> tuple[object, str] | None:
 @transaction.atomic
 def restore_card(*, actor, developer: Developer):
     """Give the developer back their last card, if they have none now and it is still
-    free. Returns the card, or raises with why not."""
+    free (a retired one is restored first). Returns the card, or raises with why not."""
     from rest_framework.exceptions import ValidationError
 
     from apps.rfid.models import RFIDCardAssignment
-    from apps.rfid.services import assign_card
+    from apps.rfid.services import assign_card, change_card_status
 
     if RFIDCardAssignment.objects.filter(developer=developer, unassigned_at__isnull=True).exists():
         raise ValidationError({"card": [_("This developer already has a card.")]})
@@ -129,6 +129,9 @@ def restore_card(*, actor, developer: Developer):
     if old is None:
         raise ValidationError({"card": [_("This developer never had a card.")]})
     card, state = old
+    if state == "RETIRED":
+        card = change_card_status(actor=actor, card=card, transition="restore", reason="")
+        state = last_card(developer)[1]
     if state != "FREE":
         why = {
             "TAKEN": _("Their last card is held by someone else now."),
@@ -171,7 +174,7 @@ def restore_developer(*, actor, developer: Developer, with_card: bool = False) -
     if with_card:
         old = card_taken_on_delete(developer)
         if old is not None and old[1] == "FREE" and developer.status != DeveloperStatus.TERMINATED:
-            from apps.rfid.services import assign_card
+            from apps.rfid.services import assign_card, change_card_status
 
             assign_card(actor=actor, card=old[0], developer=developer)
             given = old[0]

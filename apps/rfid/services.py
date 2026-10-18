@@ -154,6 +154,8 @@ _TRANSITIONS = {
     "block": ({CardStatus.ACTIVE}, CardStatus.BLOCKED, "rfid.card_blocked"),
     "unblock": ({CardStatus.BLOCKED}, CardStatus.ACTIVE, "rfid.card_unblocked"),
     "retire": ({CardStatus.ACTIVE, CardStatus.BLOCKED}, CardStatus.RETIRED, "rfid.card_retired"),
+    # Retired by mistake (or found again): back to a usable, unassigned card.
+    "restore": ({CardStatus.RETIRED}, CardStatus.ACTIVE, "rfid.card_restored"),
 }
 
 

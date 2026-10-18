@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-17 18:10+0000\n"
+"POT-Creation-Date: 2026-10-18 13:22+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -232,23 +232,23 @@ msgstr "이 개발자는 이미 카드가 있습니다."
 msgid "This developer never had a card."
 msgstr "이 개발자는 카드를 가진적이 없습니다."
 
-#: apps/developers/services.py:134
+#: apps/developers/services.py:137
 msgid "Their last card is held by someone else now."
 msgstr "마지막 카드는 지금 다른 사람이 가지고 있습니다."
 
-#: apps/developers/services.py:135
+#: apps/developers/services.py:138
 msgid "Their last card is blocked."
 msgstr "마지막 카드는 차단되였습니다."
 
-#: apps/developers/services.py:136
+#: apps/developers/services.py:139
 msgid "Their last card is retired."
 msgstr "마지막 카드는 페기되였습니다."
 
-#: apps/developers/services.py:138
+#: apps/developers/services.py:141
 msgid "Their last card cannot be used."
 msgstr "마지막 카드를 쓸수 없습니다."
 
-#: apps/developers/services.py:157
+#: apps/developers/services.py:160
 #, python-format
 msgid "Another developer uses employee number %(number)s now."
 msgstr "다른 개발자가 지금 사원번호 %(number)s 를 쓰고 있습니다."
@@ -724,7 +724,7 @@ msgstr "어서 오십시오, %(name)s"
 msgid "At most %(max)s events per batch."
 msgstr "한번에 최대 %(max)s개의 사건만 보낼수 있습니다."
 
-#: apps/rfid/services.py:168
+#: apps/rfid/services.py:170
 msgid "Unassign or replace the card before retiring it."
 msgstr "카드를 페기하기전에 배정을 해제하거나 교체하십시오."
 
@@ -752,19 +752,19 @@ msgstr "련결이 너무 많습니다."
 msgid "Frame too large."
 msgstr "프레임이 너무 큽니다."
 
-#: apps/rfid/views.py:376
+#: apps/rfid/views.py:383
 msgid "Only attendance readers may upload buffered scans."
 msgstr "출근판독기만 보관된 판독기록을 올려보낼수 있습니다."
 
-#: apps/rfid/views.py:552
+#: apps/rfid/views.py:559
 msgid "Building managers can't create buildings."
 msgstr "건물책임자는 건물을 만들수 없습니다."
 
-#: apps/rfid/views.py:560
+#: apps/rfid/views.py:567
 msgid "Building managers can't change who manages a building."
 msgstr "건물책임자는 건물책임자를 바꿀수 없습니다."
 
-#: apps/rfid/views.py:566
+#: apps/rfid/views.py:573
 msgid "Building managers can't delete buildings."
 msgstr "건물책임자는 건물을 삭제할수 없습니다."
 

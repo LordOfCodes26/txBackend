@@ -165,6 +165,26 @@ def test_retire_requires_unassigned_card(client, make_card, make_developer):
     assert response.json()["error"]["code"] == "CARD_NOT_ACTIVE"
 
 
+def test_unassign_keeps_the_card_usable_and_a_retired_card_can_be_restored(
+    client, make_card, make_developer
+):
+    card = make_card()
+    client.post(f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN})
+    client.post(f"{CARDS}{card.pk}/unassign/")
+    body = client.get(f"{CARDS}{card.pk}/").json()
+    assert body["status"] == "ACTIVE" and body["current_assignment"] is None
+    assert client.post(f"{CARDS}{card.pk}/restore/").status_code == 409  # not retired
+    client.post(f"{CARDS}{card.pk}/retire/", {"reason": "Broken"})
+    response = client.post(f"{CARDS}{card.pk}/restore/")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ACTIVE" and response.json()["status_reason"] == ""
+    assert AuditLog.objects.filter(action="rfid.card_restored", entity_id=str(card.pk)).exists()
+    response = client.post(
+        f"{CARDS}{card.pk}/assign/", {"developer": make_developer().pk, **NEW_PIN}
+    )
+    assert response.status_code == 200
+
+
 def test_terminating_developer_ends_assignment(client, make_card, make_developer):
     card, dev = make_card(), make_developer()
     client.post(f"{CARDS}{card.pk}/assign/", {"developer": dev.pk, **NEW_PIN})

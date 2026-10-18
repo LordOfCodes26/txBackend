@@ -96,6 +96,15 @@ def test_give_back_the_last_card_after_an_unassign(auth_client, make_user):
     assert r.status_code == 200 and r.json()["label"] == "0001"
     again = admin.post(f"{DEVELOPERS}{ada.pk}/restore-card/").json()
     assert again["error"]["code"] == "VALIDATION_ERROR"  # has a card now
+    # A last card retired since is restored and given back.
+    rfid.unassign_card(actor=None, card=card)
+    rfid.change_card_status(actor=None, card=card, transition="retire")
+    assert admin.get(f"{DEVELOPERS}{ada.pk}/last-card/").json()["card"]["state"] == "RETIRED"
+    r = admin.post(f"{DEVELOPERS}{ada.pk}/restore-card/")
+    assert r.status_code == 200
+    card.refresh_from_db()
+    assert card.status == "ACTIVE"
+    assert RFIDCardAssignment.objects.get(card=card, unassigned_at__isnull=True).developer == ada
     nobody = Developer.objects.create(employee_number="E2", full_name="Bob")
     assert admin.get(f"{DEVELOPERS}{nobody.pk}/last-card/").json() == {"card": None}
 
