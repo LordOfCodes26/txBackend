@@ -1,6 +1,7 @@
 from django.urls import include, path
 
 from common.system_views import (
+    BackupBaseRunView,
     BackupFileView,
     BackupRestoreView,
     BackupRunView,
@@ -33,6 +34,7 @@ urlpatterns = [
     ),
     path("system/backups/", BackupView.as_view(), name="system-backups"),
     path("system/backups/run/", BackupRunView.as_view(), name="system-backups-run"),
+    path("system/backups/base/run/", BackupBaseRunView.as_view(), name="system-backups-base-run"),
     path("system/backups/files/<str:name>/", BackupFileView.as_view(), name="system-backup-file"),
     path("system/backups/restore/", BackupRestoreView.as_view(), name="system-backups-restore"),
     path("system/backups/upload/", BackupUploadView.as_view(), name="system-backups-upload"),

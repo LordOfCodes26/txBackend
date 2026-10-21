@@ -7,6 +7,7 @@ only the `backend` group may use). The web service keeps NoNewPrivileges: no sud
 
     backend-backup-admin status             JSON: settings, last and next run, files, log
     backend-backup-admin run                start the nightly backup now (in the background)
+    backend-backup-admin run-base           start a base backup now (point-in-time recovery)
     backend-backup-admin set KEY=VALUE ...  BACKUP_TIME, KEEP_DAILY_DAYS, KEEP_BASE_BACKUPS,
                                             OFFSITE_DIR, OFFSITE_RSYNC
     backend-backup-admin download NAME      one nightly dump, to stdout
@@ -119,10 +120,12 @@ def db_name(conf: dict) -> str:
 
 
 def busy(conf: dict) -> str | None:
-    """ "backup" or "restore" while one runs."""
-    backup, _base = units(conf)
+    """ "backup", "base backup" or "restore" while one runs."""
+    backup, base = units(conf)
     if show(f"{backup}.service", "ActiveState").get("ActiveState") in ACTIVE:
         return "backup"
+    if show(f"{base}.service", "ActiveState").get("ActiveState") in ACTIVE:
+        return "base backup"
     if show(f"{restore_unit(conf)}.service", "ActiveState").get("ActiveState") in ACTIVE:
         return "restore"
     return None
@@ -185,6 +188,31 @@ def files(folder: Path, pattern: str) -> list[dict]:
     return sorted(out, key=lambda f: f["created_at"], reverse=True)
 
 
+def wal_archive(folder: Path) -> dict:
+    """The archived WAL (every database change, for point-in-time recovery): how many files,
+    how big, the oldest and newest. Files still being written (.partial) don't count."""
+    stats = []
+    if folder.is_dir():
+        stats = [
+            path.stat()
+            for path in folder.iterdir()
+            if path.is_file() and not path.name.endswith(".partial")
+        ]
+
+    def at(seconds: float | None) -> str | None:
+        if seconds is None:
+            return None
+        return datetime.fromtimestamp(seconds, UTC).isoformat().replace("+00:00", "Z")
+
+    times = [s.st_mtime for s in stats]
+    return {
+        "files": len(stats),
+        "bytes": sum(s.st_size for s in stats),
+        "oldest_at": at(min(times, default=None)),
+        "newest_at": at(max(times, default=None)),
+    }
+
+
 def status() -> dict:
     conf = read_conf()
     backup, base = units(conf)
@@ -198,6 +226,19 @@ def status() -> dict:
     )
     time, next_run = schedule(f"{backup}.timer")
     _base_time, base_next = schedule(f"{base}.timer")
+    base_service = show(
+        f"{base}.service",
+        "ActiveState",
+        "Result",
+        "ExecMainStatus",
+        "ExecMainStartTimestamp",
+        "ExecMainExitTimestamp",
+    )
+    base_log = subprocess.run(
+        [JOURNALCTL, "-u", f"{base}.service", "-n", "30", "--no-pager", "-o", "short-iso"],
+        capture_output=True,
+        text=True,
+    ).stdout
     folder = Path(conf.get("BACKUP_DIR") or "/var/backups/backend")
     log = subprocess.run(
         [JOURNALCTL, "-u", f"{backup}.service", "-n", "40", "--no-pager", "-o", "short-iso"],
@@ -240,8 +281,17 @@ def status() -> dict:
         },
         "next_run": next_run,
         "base_next_run": base_next,
+        "base_running": base_service.get("ActiveState") in ACTIVE,
+        "base_last_run": {
+            "result": base_service.get("Result") or None,
+            "exit_status": int(base_service.get("ExecMainStatus") or 0),
+            "started_at": iso(base_service.get("ExecMainStartTimestamp")),
+            "finished_at": iso(base_service.get("ExecMainExitTimestamp")),
+        },
+        "base_log": base_log.splitlines()[-30:],
         "dumps": files(folder / "db", "*.dump"),
         "base_backups": base_dirs,
+        "wal": wal_archive(folder / "wal"),
         "log": log.splitlines()[-40:],
         "restore": {
             "running": show(f"{restore}.service", "ActiveState").get("ActiveState") in ACTIVE,
@@ -264,6 +314,17 @@ def run() -> dict:
     if running := busy(conf):
         raise Refused(f"A {running} is already running.", code=3)
     systemctl("start", "--no-block", f"{backup}.service")
+    return {"started": True}
+
+
+def run_base() -> dict:
+    """A base backup now: a full copy to replay the archived WAL onto, so the newest changes
+    can be restored to a point in time right away. It also prunes old base backups and WAL."""
+    conf = read_conf()
+    _backup, base = units(conf)
+    if running := busy(conf):
+        raise Refused(f"A {running} is already running.", code=3)
+    systemctl("start", "--no-block", f"{base}.service")
     return {"started": True}
 
 
@@ -456,6 +517,8 @@ def handle(argv: list[str], stdin=None):
             result = status()
         elif command == "run" and not args:
             result = run()
+        elif command == "run-base" and not args:
+            result = run_base()
         elif command == "set" and args:
             result = set_values(args)
         elif command == "download" and len(args) == 1:
@@ -468,7 +531,7 @@ def handle(argv: list[str], stdin=None):
             result = drop_kept(args[0])
         else:
             raise Refused(
-                "Usage: status | run | set KEY=VALUE... | download NAME | upload"
+                "Usage: status | run | run-base | set KEY=VALUE... | download NAME | upload"
                 " | restore NAME USER | drop-kept DBNAME"
             )
     except Refused as exc:

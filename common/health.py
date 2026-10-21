@@ -158,6 +158,9 @@ def backup_health() -> dict:
         with connection.cursor() as cursor:
             cursor.execute("SHOW archive_mode")
             archive_mode = cursor.fetchone()[0]
+            # Seconds: changes are archived at the latest this long after they are made.
+            cursor.execute("SELECT setting FROM pg_settings WHERE name = 'archive_timeout'")
+            archive_timeout = int(cursor.fetchone()[0])
             cursor.execute(
                 "SELECT archived_count, failed_count, last_archived_time, last_failed_time "
                 "FROM pg_stat_archiver"
@@ -168,6 +171,8 @@ def backup_health() -> dict:
             "archived_count": archived,
             "failed_count": failed,
             "last_archived_at": last_ok.isoformat() if last_ok else None,
+            "last_failed_at": last_fail.isoformat() if last_fail else None,
+            "archive_timeout_seconds": archive_timeout,
         }
         if not settings.BACKUP_REQUIRE_PITR:
             pass  # nightly dumps only: archiving is reported, not required

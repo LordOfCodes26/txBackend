@@ -161,6 +161,15 @@ def test_reports_wal_archiver_state(client, status_file):
     status_file(**healthy())
     body = client.get("/health/backup/").json()
     assert "archive_mode" in body["wal_archiver"]
+    assert set(body["wal_archiver"]) == {
+        "archive_mode",
+        "archived_count",
+        "failed_count",
+        "last_archived_at",
+        "last_failed_at",
+        "archive_timeout_seconds",
+    }
+    assert isinstance(body["wal_archiver"]["archive_timeout_seconds"], int)
     # The test database server may or may not archive; either way it is reported.
     if body["wal_archiver"]["archive_mode"] != "on":
         assert "WAL archiving is off (no point-in-time recovery)" in body["errors"]

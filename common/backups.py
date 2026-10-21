@@ -143,6 +143,10 @@ def start_backup() -> dict:
     return call("run")
 
 
+def start_base_backup() -> dict:
+    return call("run-base")
+
+
 def change_settings(values: dict) -> dict:
     pairs = [f"{SETTINGS[key]}={value}" for key, value in values.items() if key in SETTINGS]
     return call("set", *pairs) if pairs else {"saved": []}

@@ -96,6 +96,26 @@ class BackupRunView(APIView):
         return Response(result, status=202)
 
 
+class BackupBaseRunView(APIView):
+    """POST: make a base backup now (point-in-time recovery): a full copy that the archived
+    changes (WAL) are replayed onto, so everything up to now can be restored to any moment.
+    It runs in the background; GET the Backups page to see when it has finished."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"post": ["system.backup"]}
+
+    @extend_schema(request=None, responses=OpenApiTypes.OBJECT)
+    def post(self, request):
+        result = backups.start_base_backup()
+        record_audit(
+            "system.base_backup_started",
+            actor=request.user,
+            entity_type="system",
+            entity_id="backups",
+        )
+        return Response(result, status=202)
+
+
 class BackupFileView(APIView):
     """GET one nightly dump (`system.backup`). It holds personal data and PIN hashes."""
 

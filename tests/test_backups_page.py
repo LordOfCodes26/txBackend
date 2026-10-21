@@ -58,6 +58,8 @@ def box(tmp_path, monkeypatch, settings):
     state.write_text("inactive")
     restore_state = tmp_path / "restore-state"
     restore_state.write_text("inactive")
+    base_state = tmp_path / "base-state"
+    base_state.write_text("inactive")
     systemctl = tmp_path / "systemctl"
     systemctl.write_text(
         "#!/bin/bash\n"
@@ -66,6 +68,9 @@ def box(tmp_path, monkeypatch, settings):
         '  echo "TimersCalendar={ OnCalendar=*-*-* 02:30:00 ; next_elapse=@1791419400 }"\n'
         'elif [[ "$1" == show && "$2" == *restore* ]]; then\n'
         f'  echo "ActiveState=$(cat {restore_state})"\n'
+        'elif [[ "$1" == show && "$2" == *basebackup* ]]; then\n'
+        f'  echo "ActiveState=$(cat {base_state})"; echo Result=success; echo ExecMainStatus=0\n'
+        "  echo ExecMainStartTimestamp=@1791336600; echo ExecMainExitTimestamp=@1791336612\n"
         'elif [[ "$1" == show ]]; then\n'
         f'  echo "ActiveState=$(cat {state})"; echo Result=success; echo ExecMainStatus=0\n'
         "  echo ExecMainStartTimestamp=@1791333281; echo ExecMainExitTimestamp=@1791333284\n"
@@ -105,6 +110,7 @@ def box(tmp_path, monkeypatch, settings):
         calls=calls,
         state=state,
         restore_state=restore_state,
+        base_state=base_state,
         root=tmp_path,
         backups=backups,
         restore_script=restore_script,
@@ -134,6 +140,31 @@ def test_status_shows_settings_runs_files_and_health(box, admin):
     assert "errors" in body["health"]
 
 
+def test_status_summarises_the_wal_archive(box, admin):
+    assert admin.get(PAGE).json()["wal"] == {
+        "files": 0,
+        "bytes": 0,
+        "oldest_at": None,
+        "newest_at": None,
+    }
+    wal = box.backups / "wal"
+    wal.mkdir()
+    for name, size, when in (
+        ("000000010000000000000003", 16 * 1024 * 1024, 1791247000),  # plain, from an older kit
+        ("000000010000000000000004.gz", 16_500, 1791300000),
+        ("000000010000000000000005.gz", 16_400, 1791333281),
+    ):
+        (wal / name).write_bytes(b"x" * size)
+        os.utime(wal / name, (when, when))
+    (wal / "000000010000000000000006.gz.partial").write_bytes(b"x" * 100)  # being written
+    assert admin.get(PAGE).json()["wal"] == {
+        "files": 3,
+        "bytes": 16 * 1024 * 1024 + 16_500 + 16_400,
+        "oldest_at": "2026-10-06T00:36:40Z",
+        "newest_at": "2026-10-07T00:34:41Z",
+    }
+
+
 def test_run_now_starts_the_service_once(box, admin):
     r = admin.post(PAGE + "run/")
     assert r.status_code == 202
@@ -142,6 +173,37 @@ def test_run_now_starts_the_service_once(box, admin):
     box.state.write_text("active")
     r = admin.post(PAGE + "run/")
     assert r.status_code == 409 and r.json()["error"]["code"] == "BACKUP_RUNNING"
+
+
+def test_base_backup_now_starts_the_base_backup_service(box, admin):
+    r = admin.post(PAGE + "base/run/")
+    assert r.status_code == 202, r.json()
+    assert "start --no-block backend-basebackup.service" in box.calls.read_text()
+    assert AuditLog.objects.filter(action="system.base_backup_started").exists()
+    box.base_state.write_text("active")
+    body = admin.get(PAGE).json()
+    assert body["base_running"] is True
+    assert body["base_last_run"] == {
+        "result": "success",
+        "exit_status": 0,
+        "started_at": "2026-10-07T01:30:00Z",
+        "finished_at": "2026-10-07T01:30:12Z",
+    }
+    assert body["base_log"] == ["nightly.sh: Done"]  # the fake journalctl's one line
+    # One backup job at a time: no second base backup, nightly backup or restore meanwhile.
+    r = admin.post(PAGE + "base/run/")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "BACKUP_RUNNING"
+    assert admin.post(PAGE + "run/").status_code == 409
+    r = admin.post(RESTORE, {"file": DUMP, "confirm": "RESTORE"}, format="json")
+    assert r.status_code == 409
+
+
+def test_no_base_backup_while_a_backup_or_restore_runs(box, admin):
+    for state in (box.state, box.restore_state):
+        state.write_text("active")
+        assert admin.post(PAGE + "base/run/").status_code == 409
+        state.write_text("inactive")
+    assert "start --no-block backend-basebackup" not in box.calls.read_text()
 
 
 def test_settings_are_checked_and_saved(box, admin, other_disk):
@@ -213,6 +275,7 @@ def test_only_admins(box, auth_client, make_user, role):
     client = auth_client(make_user(role))
     assert client.get(PAGE).status_code == 403
     assert client.post(PAGE + "run/").status_code == 403
+    assert client.post(PAGE + "base/run/").status_code == 403
     assert client.get(f"{PAGE}files/{DUMP}/").status_code == 403
     assert "start" not in (box.calls.read_text() if box.calls.exists() else "")
 
