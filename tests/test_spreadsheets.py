@@ -228,15 +228,17 @@ def test_labels_by_employee_number_without_uids(admin):
         ("E3", "0003"),  # no card
         ("E9", "0009"),  # no such developer
         ("E1", None),  # no label
-        ("E2", "0001"),  # a label twice in the file
-        ("E1", "0001"),
+        ("E2", "0001"),  # Ada's card has this label already: labels are unique
+        ("E1", "0001"),  # a label twice in the file
     ).json()
     assert [(e["row"], e["column"]) for e in bad["errors"]] == [
         (2, "Employee no."),
         (3, "Employee no."),
         (4, "Card UID"),
+        (5, "Card label"),
         (6, "Card label"),
     ]
+    assert "0400AA" in bad["errors"][3]["message"]
 
 
 # --- Opening balances ---------------------------------------------------------------

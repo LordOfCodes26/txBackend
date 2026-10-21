@@ -356,3 +356,29 @@ def test_readers_export_follows_the_list_filters(client):
 def test_exports_need_rfid_view(auth_client, make_user):
     seller = auth_client(make_user(*SELLER_ROLES))
     assert seller.get(f"{CARDS}export/").status_code == 403
+
+
+@pytest.mark.django_db
+def test_card_labels_are_unique(auth_client, make_user):
+    from apps.rfid.models import RFIDCard
+
+    admin = auth_client(make_user("ADMIN"))
+    first = admin.post("/api/v1/rfid/cards/", {"uid": "04A1A1A1", "label": " 0031 "})
+    assert first.status_code == 201, first.json()
+    assert first.json()["label"] == "0031"
+    # The same label again (spaces and letter case ignored) names the card that has it.
+    r = admin.post("/api/v1/rfid/cards/", {"uid": "04B2B2B2", "label": "0031"})
+    assert r.status_code == 400
+    assert "04A1A1A1" in str(r.json())
+    second = admin.post("/api/v1/rfid/cards/", {"uid": "04B2B2B2", "label": "0032"}).json()
+    r = admin.patch(f"/api/v1/rfid/cards/{second['id']}/", {"label": "0031"})
+    assert r.status_code == 400
+    # Its own label, and empty labels, are fine.
+    assert admin.patch(f"/api/v1/rfid/cards/{second['id']}/", {"label": "0032"}).status_code == 200
+    assert admin.post("/api/v1/rfid/cards/", {"uid": "04C3C3C3", "label": ""}).status_code == 201
+    assert admin.post("/api/v1/rfid/cards/", {"uid": "04D4D4D4", "label": ""}).status_code == 201
+    # The database refuses too (e.g. a script).
+    from django.db import IntegrityError, transaction
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        RFIDCard.objects.create(uid="04E5E5E5", label="0031")

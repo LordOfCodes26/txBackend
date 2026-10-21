@@ -5,6 +5,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
 
 from apps.attendance.services import record_from_scan
 from apps.audit.services import diff, record_audit, snapshot
@@ -28,6 +29,7 @@ from .models import (
     RFIDDevice,
     RFIDEvent,
     ScanResult,
+    label_taken,
 )
 
 DEVICE_FIELDS = [
@@ -64,6 +66,12 @@ def _lock_cards(*cards: RFIDCard) -> list[RFIDCard]:
 
 @transaction.atomic
 def register_card(*, actor, uid: str, label: str = "", notes: str = "") -> RFIDCard:
+    label = (label or "").strip()
+    taken = label_taken(label)
+    if taken is not None:
+        raise ValidationError(
+            {"label": _("This label is already used by card %(uid)s.") % {"uid": taken.uid}}
+        )
     card = RFIDCard.objects.create(uid=uid, label=label, notes=notes)
     record_audit(
         "rfid.card_registered", actor=actor, entity=card, new_values={"uid": uid, "label": label}

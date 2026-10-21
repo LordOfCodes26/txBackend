@@ -6,12 +6,24 @@ from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import F, Q
+from django.db.models.functions import Lower, Trim
 from django.utils import timezone
 
 from apps.developers.models import Developer
 from common.models import AppendOnlyModel, TimeStampedModel
 
 uid_validator = RegexValidator(r"^[0-9A-F]{4,32}$", "UID must be 4-32 hexadecimal characters.")
+
+
+def label_taken(label: str, exclude: int | None = None) -> "RFIDCard | None":
+    """The card that already has this printed label (spaces and letter case ignored)."""
+    label = (label or "").strip()
+    if not label:
+        return None
+    cards = RFIDCard.objects.filter(label__iexact=label)
+    if exclude is not None:
+        cards = cards.exclude(pk=exclude)
+    return cards.first()
 
 
 def normalize_uid(raw: str) -> str:
@@ -38,9 +50,19 @@ class RFIDCard(TimeStampedModel):
     class Meta:
         ordering = ["uid"]
         verbose_name = "RFID card"
+        constraints = [
+            # The printed label tells cards apart: one card per label, retired ones too.
+            models.UniqueConstraint(
+                Lower(Trim("label")), condition=~Q(label=""), name="rfid_card_label_unique"
+            ),
+        ]
 
     def __str__(self):
         return self.label or self.uid
+
+    def save(self, *args, **kwargs):
+        self.label = (self.label or "").strip()
+        return super().save(*args, **kwargs)
 
     @property
     def current_assignment(self):

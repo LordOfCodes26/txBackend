@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-21 14:15+0000\n"
+"POT-Creation-Date: 2026-10-21 15:00+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -47,7 +47,7 @@ msgstr "삭제하기전에 이 역할을 가진 사용자들에게서 역할을 
 #: apps/bookings/serializers.py:280 apps/goods/serializers.py:118
 #: apps/goods/serializers.py:242 apps/goods/views.py:458
 #: apps/sellers/onboarding.py:72 apps/sellers/serializers.py:161
-#: apps/spreadsheets/imports.py:373 apps/spreadsheets/imports.py:460
+#: apps/spreadsheets/imports.py:393 apps/spreadsheets/imports.py:480
 #: common/i18n_extra.py:11
 msgid "This field is required."
 msgstr "이 항목은 반드시 입력하여야 합니다."
@@ -297,11 +297,11 @@ msgstr "암호번호가 틀립니다."
 msgid "Too many wrong PIN attempts. Try again later."
 msgstr "암호번호를 너무 여러번 틀리게 입력하였습니다. 후에 다시 하십시오."
 
-#: apps/finance/serializers.py:95
+#: apps/finance/serializers.py:105
 msgid "Amount cannot be zero."
 msgstr "금액은 0일수 없습니다."
 
-#: apps/finance/serializers.py:111 apps/finance/serializers.py:126
+#: apps/finance/serializers.py:121 apps/finance/serializers.py:136
 msgid "The PINs don't match."
 msgstr "두 암호번호가 서로 다릅니다."
 
@@ -338,7 +338,7 @@ msgstr "현재 암호번호가 틀립니다."
 msgid "Not enough stock for this change."
 msgstr "이 변경을 하기에는 재고가 부족합니다."
 
-#: apps/goods/exceptions.py:16 apps/spreadsheets/imports.py:482
+#: apps/goods/exceptions.py:16 apps/spreadsheets/imports.py:502
 msgid "This good does not track stock."
 msgstr "이 상품은 재고를 관리하지 않습니다."
 
@@ -497,23 +497,23 @@ msgstr "지불된 경기장예약은 여기서 편집할수 없습니다. 다른
 msgid "The new total is higher: the developer taps their card and enters their PIN to pay the difference."
 msgstr "새 합계가 더 많습니다. 개발자가 카드를 대고 암호번호를 넣어 차액을 지불합니다."
 
-#: apps/purchases/serializers.py:300
+#: apps/purchases/serializers.py:311
 msgid "You can only sell at your own counters."
 msgstr "자기의 매대에서만 판매할수 있습니다."
 
-#: apps/purchases/serializers.py:359
+#: apps/purchases/serializers.py:370
 msgid "Each good can only be listed once."
 msgstr "매 상품은 한번만 넣을수 있습니다."
 
-#: apps/purchases/serializers.py:463
+#: apps/purchases/serializers.py:474
 msgid "Each amount can only be used once."
 msgstr "매 금액은 한번만 쓸수 있습니다."
 
-#: apps/purchases/serializers.py:468
+#: apps/purchases/serializers.py:479
 msgid "Add at least one rule."
 msgstr "규칙을 적어도 하나 추가하십시오."
 
-#: apps/purchases/serializers.py:470
+#: apps/purchases/serializers.py:481
 msgid "Add at least one free good."
 msgstr "무료상품을 적어도 하나 추가하십시오."
 
@@ -606,137 +606,143 @@ msgstr "판매대 인식기만 판매자에게 배정됩니다."
 msgid "You can only manage data of your own building."
 msgstr "자기 건물의 자료만 관리할수 있습니다."
 
-#: apps/rfid/serializers.py:70
+#: apps/rfid/serializers.py:35 apps/rfid/services.py:73
+#: apps/spreadsheets/imports.py:85
+#, python-format
+msgid "This label is already used by card %(uid)s."
+msgstr "이 카드번호는 이미 카드 %(uid)s 에 쓰이고 있습니다."
+
+#: apps/rfid/serializers.py:82
 msgid "A card with this UID is already registered."
 msgstr "이 UID를 가진 카드가 이미 등록되였습니다."
 
-#: apps/rfid/serializers.py:164
+#: apps/rfid/serializers.py:194
 msgid "Only ATTENDANCE devices belong to a building."
 msgstr "출근(ATTENDANCE) 장치만 건물에 속할수 있습니다."
 
-#: apps/rfid/serializers.py:169
+#: apps/rfid/serializers.py:199
 msgid "Only ATTENDANCE door devices may authenticate by IP."
 msgstr "출근(ATTENDANCE) 출입문장치만 IP주소로 인증할수 있습니다."
 
-#: apps/rfid/serializers.py:174
+#: apps/rfid/serializers.py:204
 msgid "Only till readers belong to a seller."
 msgstr "판매대판독기만 판매자에게 속할수 있습니다."
 
-#: apps/rfid/serializers.py:192
+#: apps/rfid/serializers.py:222
 msgid "Another device already uses this ID."
 msgstr "다른 장치가 이미 이 ID를 쓰고 있습니다."
 
-#: apps/rfid/serializers.py:201
+#: apps/rfid/serializers.py:231
 msgid "Door units that share an ID need their own fixed IP to tell them apart."
 msgstr "ID가 같은 출입문장치들은 서로 구별하기 위하여 각각 고정IP주소가 있어야 합니다."
 
-#: apps/rfid/serializers.py:207
+#: apps/rfid/serializers.py:237
 msgid "Another unit with this ID has no fixed IP yet; give it one first."
 msgstr "이 ID를 쓰는 다른 장치에 고정IP주소가 없습니다. 먼저 그 장치에 IP주소를 지정하십시오."
 
-#: apps/rfid/serializers.py:211
+#: apps/rfid/serializers.py:241
 msgid "Another unit of this door already uses this IP."
 msgstr "이 출입문의 다른 장치가 이미 이 IP주소를 쓰고 있습니다."
 
-#: apps/rfid/serializers.py:245
+#: apps/rfid/serializers.py:275
 #, python-format
 msgid "These users don't have the %(role)s role: %(users)s"
 msgstr "다음 리용자들에게는 %(role)s 역할이 없습니다: %(users)s"
 
-#: apps/rfid/serializers.py:358
+#: apps/rfid/serializers.py:388
 msgid "Does not match the authenticated device."
 msgstr "인증된 장치와 일치하지 않습니다."
 
-#: apps/rfid/serializers.py:368
+#: apps/rfid/serializers.py:398
 msgid "Till readers send `pay`."
 msgstr "판매대판독기는 `pay`를 보내야 합니다."
 
-#: apps/rfid/serializers.py:372
+#: apps/rfid/serializers.py:402
 msgid "Card assign readers send `master`."
 msgstr "카드배정판독기는 `master`를 보내야 합니다."
 
-#: apps/rfid/serializers.py:378
+#: apps/rfid/serializers.py:408
 msgid "Only card assign readers send `master`."
 msgstr "`master`는 카드배정판독기만 보낼수 있습니다."
 
-#: apps/rfid/serializers.py:381
+#: apps/rfid/serializers.py:411
 msgid "Door devices send `in` or `out`."
 msgstr "출입문장치는 `in` 또는 `out`을 보내야 합니다."
 
-#: apps/rfid/serializers.py:389 apps/rfid/serializers.py:504
+#: apps/rfid/serializers.py:419 apps/rfid/serializers.py:534
 msgid "Event time is in the future; check the reader clock."
 msgstr "사건시간이 앞으로의 시간입니다. 판독기의 시계를 확인하십시오."
 
-#: apps/rfid/serializers.py:401
+#: apps/rfid/serializers.py:431
 #, python-format
 msgid "%(name)s - no booking now"
 msgstr "%(name)s - 지금 예약이 없습니다"
 
-#: apps/rfid/serializers.py:406
+#: apps/rfid/serializers.py:436
 #, python-format
 msgid "%(name)s - already checked in: %(court)s %(time)s"
 msgstr "%(name)s - 이미 입장확인됨: %(court)s %(time)s"
 
-#: apps/rfid/serializers.py:408
+#: apps/rfid/serializers.py:438
 #, python-format
 msgid "%(name)s - not paid yet: pay at the desk (%(court)s %(time)s)"
 msgstr "%(name)s - 미지불: 접수대에서 지불하십시오 (%(court)s %(time)s)"
 
-#: apps/rfid/serializers.py:409
+#: apps/rfid/serializers.py:439
 #, python-format
 msgid "%(name)s - checked in: %(court)s %(time)s"
 msgstr "%(name)s - 입장확인: %(court)s %(time)s"
 
-#: apps/rfid/serializers.py:413
+#: apps/rfid/serializers.py:443
 msgid "Unknown card"
 msgstr "등록되지 않은 카드"
 
-#: apps/rfid/serializers.py:414
+#: apps/rfid/serializers.py:444
 msgid "Card not assigned"
 msgstr "배정되지 않은 카드"
 
-#: apps/rfid/serializers.py:415
+#: apps/rfid/serializers.py:445
 msgid "Card blocked"
 msgstr "차단된 카드"
 
-#: apps/rfid/serializers.py:416
+#: apps/rfid/serializers.py:446
 msgid "Card no longer valid"
 msgstr "더는 쓸수 없는 카드"
 
-#: apps/rfid/serializers.py:417
+#: apps/rfid/serializers.py:447
 msgid "Not active - contact your manager"
 msgstr "비활성 - 책임자에게 문의하십시오"
 
-#: apps/rfid/serializers.py:455 apps/rfid/serializers.py:461
+#: apps/rfid/serializers.py:485 apps/rfid/serializers.py:491
 #, python-format
 msgid "%(name)s - enter PIN"
 msgstr "%(name)s - 암호번호를 입력하십시오"
 
-#: apps/rfid/serializers.py:456
+#: apps/rfid/serializers.py:486
 #, python-format
 msgid "Card read: %(uid)s"
 msgstr "카드를 읽었습니다: %(uid)s"
 
-#: apps/rfid/serializers.py:460
+#: apps/rfid/serializers.py:490
 msgid "No purchase is waiting for a card"
 msgstr "카드를 기다리는 구입이 없습니다"
 
-#: apps/rfid/serializers.py:463
+#: apps/rfid/serializers.py:493
 #, python-format
 msgid "Goodbye, %(name)s"
 msgstr "안녕히 가십시오, %(name)s"
 
-#: apps/rfid/serializers.py:464
+#: apps/rfid/serializers.py:494
 #, python-format
 msgid "Welcome, %(name)s"
 msgstr "어서 오십시오, %(name)s"
 
-#: apps/rfid/serializers.py:518
+#: apps/rfid/serializers.py:548
 #, python-format
 msgid "At most %(max)s events per batch."
 msgstr "한번에 최대 %(max)s개의 사건만 보낼수 있습니다."
 
-#: apps/rfid/services.py:170
+#: apps/rfid/services.py:178
 msgid "Unassign or replace the card before retiring it."
 msgstr "카드를 페기하기전에 배정을 해제하거나 교체하십시오."
 
@@ -833,17 +839,17 @@ msgstr "자기 판매자의 매대만 만들수 있습니다."
 msgid "This seller already has a counter with this name."
 msgstr "이 판매자에게는 이미 이 이름의 매대가 있습니다."
 
-#: apps/spreadsheets/exports.py:27 apps/spreadsheets/imports.py:36
+#: apps/spreadsheets/exports.py:27 apps/spreadsheets/imports.py:43
 msgid "Full name"
 msgstr "이름"
 
-#: apps/spreadsheets/exports.py:28 apps/spreadsheets/imports.py:33
-#: apps/spreadsheets/imports.py:51
+#: apps/spreadsheets/exports.py:28 apps/spreadsheets/imports.py:40
+#: apps/spreadsheets/imports.py:58
 msgid "Employee no."
 msgstr "직원번호"
 
 #: apps/spreadsheets/exports.py:78 apps/spreadsheets/exports.py:372
-#: apps/spreadsheets/imports.py:131
+#: apps/spreadsheets/imports.py:147
 msgid "Developers"
 msgstr "개발자"
 
@@ -861,7 +867,7 @@ msgstr "잔고"
 
 #: apps/spreadsheets/exports.py:113 apps/spreadsheets/exports.py:333
 #: apps/spreadsheets/exports.py:377 apps/spreadsheets/exports.py:638
-#: apps/spreadsheets/imports.py:42
+#: apps/spreadsheets/imports.py:49
 msgid "Building"
 msgstr "건물"
 
@@ -884,7 +890,7 @@ msgstr "시간"
 
 #: apps/spreadsheets/exports.py:134 apps/spreadsheets/exports.py:208
 #: apps/spreadsheets/exports.py:234 apps/spreadsheets/exports.py:469
-#: apps/spreadsheets/exports.py:637 apps/spreadsheets/imports.py:64
+#: apps/spreadsheets/exports.py:637 apps/spreadsheets/imports.py:71
 msgid "Kind"
 msgstr "종류"
 
@@ -892,7 +898,7 @@ msgstr "종류"
 msgid "Deposit type"
 msgstr "입금 방식"
 
-#: apps/spreadsheets/exports.py:136 apps/spreadsheets/imports.py:55
+#: apps/spreadsheets/exports.py:136 apps/spreadsheets/imports.py:62
 msgid "Amount"
 msgstr "금액"
 
@@ -900,8 +906,8 @@ msgstr "금액"
 msgid "Balance after"
 msgstr "이후 잔고"
 
-#: apps/spreadsheets/exports.py:138 apps/spreadsheets/imports.py:56
-#: apps/spreadsheets/imports.py:66
+#: apps/spreadsheets/exports.py:138 apps/spreadsheets/imports.py:63
+#: apps/spreadsheets/imports.py:73
 msgid "Description"
 msgstr "설명"
 
@@ -920,13 +926,13 @@ msgstr "판매번호"
 #: apps/spreadsheets/exports.py:161 apps/spreadsheets/exports.py:199
 #: apps/spreadsheets/exports.py:362 apps/spreadsheets/exports.py:418
 #: apps/spreadsheets/exports.py:558 apps/spreadsheets/exports.py:640
-#: apps/spreadsheets/exports.py:662 apps/spreadsheets/imports.py:60
+#: apps/spreadsheets/exports.py:662 apps/spreadsheets/imports.py:67
 msgid "Seller"
 msgstr "판매자"
 
 #: apps/spreadsheets/exports.py:162 apps/spreadsheets/exports.py:200
 #: apps/spreadsheets/exports.py:419 apps/spreadsheets/exports.py:559
-#: apps/spreadsheets/imports.py:61
+#: apps/spreadsheets/imports.py:68
 msgid "Counter"
 msgstr "매대"
 
@@ -942,27 +948,27 @@ msgstr "합계"
 
 #: apps/spreadsheets/exports.py:201 apps/spreadsheets/exports.py:491
 #: apps/spreadsheets/exports.py:556 apps/spreadsheets/exports.py:661
-#: apps/spreadsheets/imports.py:62
+#: apps/spreadsheets/imports.py:69
 msgid "Good"
 msgstr "상품"
 
-#: apps/spreadsheets/exports.py:203 apps/spreadsheets/imports.py:353
+#: apps/spreadsheets/exports.py:203 apps/spreadsheets/imports.py:373
 msgid "Goods"
 msgstr "상품"
 
-#: apps/spreadsheets/exports.py:209 apps/spreadsheets/imports.py:65
+#: apps/spreadsheets/exports.py:209 apps/spreadsheets/imports.py:72
 msgid "Price"
 msgstr "가격"
 
-#: apps/spreadsheets/exports.py:210 apps/spreadsheets/imports.py:67
+#: apps/spreadsheets/exports.py:210 apps/spreadsheets/imports.py:74
 msgid "Track stock"
 msgstr "재고 추적"
 
-#: apps/spreadsheets/exports.py:211 apps/spreadsheets/imports.py:68
+#: apps/spreadsheets/exports.py:211 apps/spreadsheets/imports.py:75
 msgid "In stock"
 msgstr "재고"
 
-#: apps/spreadsheets/exports.py:212 apps/spreadsheets/imports.py:69
+#: apps/spreadsheets/exports.py:212 apps/spreadsheets/imports.py:76
 msgid "For sale"
 msgstr "판매중"
 
@@ -1111,7 +1117,7 @@ msgid "Store no."
 msgstr "매장번호"
 
 #: apps/spreadsheets/exports.py:417 apps/spreadsheets/exports.py:600
-#: apps/spreadsheets/imports.py:45
+#: apps/spreadsheets/imports.py:52
 msgid "Status"
 msgstr "상태"
 
@@ -1211,11 +1217,11 @@ msgstr "계산 인식기"
 msgid "Card assign reader"
 msgstr "카드 배정 인식기"
 
-#: apps/spreadsheets/exports.py:596 apps/spreadsheets/imports.py:215
+#: apps/spreadsheets/exports.py:596 apps/spreadsheets/imports.py:231
 msgid "Cards"
 msgstr "카드"
 
-#: apps/spreadsheets/exports.py:598 apps/spreadsheets/imports.py:49
+#: apps/spreadsheets/exports.py:598 apps/spreadsheets/imports.py:56
 msgid "Card UID"
 msgstr "카드 UID"
 
@@ -1287,136 +1293,136 @@ msgstr "무료개수"
 msgid "Last given"
 msgstr "마지막으로 준 시간"
 
-#: apps/spreadsheets/imports.py:37
+#: apps/spreadsheets/imports.py:44
 msgid "Phone"
 msgstr "전화"
 
-#: apps/spreadsheets/imports.py:38
+#: apps/spreadsheets/imports.py:45
 msgid "Home address"
 msgstr "집 주소"
 
-#: apps/spreadsheets/imports.py:39
+#: apps/spreadsheets/imports.py:46
 msgid "Birthday"
 msgstr "생일"
 
-#: apps/spreadsheets/imports.py:40
+#: apps/spreadsheets/imports.py:47
 msgid "Department"
 msgstr "부서"
 
-#: apps/spreadsheets/imports.py:41
+#: apps/spreadsheets/imports.py:48
 msgid "Position"
 msgstr "직위"
 
-#: apps/spreadsheets/imports.py:43
+#: apps/spreadsheets/imports.py:50
 msgid "Start date"
 msgstr "시작일"
 
-#: apps/spreadsheets/imports.py:44
+#: apps/spreadsheets/imports.py:51
 msgid "Last working day"
 msgstr "마지막 근무일"
 
-#: apps/spreadsheets/imports.py:50
+#: apps/spreadsheets/imports.py:57
 msgid "Card label"
 msgstr "카드번호"
 
-#: apps/spreadsheets/imports.py:63
+#: apps/spreadsheets/imports.py:70
 msgid "SKU"
 msgstr "SKU"
 
-#: apps/spreadsheets/imports.py:113
+#: apps/spreadsheets/imports.py:129
 msgid "This value appears twice in the file."
 msgstr "이 값이 파일에 두번 있습니다."
 
-#: apps/spreadsheets/imports.py:120
+#: apps/spreadsheets/imports.py:136
 msgid "No developer with this employee number."
 msgstr "이 직원번호를 가진 개발자가 없습니다."
 
-#: apps/spreadsheets/imports.py:123 apps/spreadsheets/imports.py:166
+#: apps/spreadsheets/imports.py:139 apps/spreadsheets/imports.py:182
 msgid "This developer is not in your buildings."
 msgstr "이 개발자는 자기 건물에 속하지 않습니다."
 
-#: apps/spreadsheets/imports.py:162
+#: apps/spreadsheets/imports.py:178
 msgid "You may not do this."
 msgstr "이 작업을 할 권한이 없습니다."
 
-#: apps/spreadsheets/imports.py:169
+#: apps/spreadsheets/imports.py:185
 msgid "Choose one of your buildings."
 msgstr "자기 건물중 하나를 선택하십시오."
 
-#: apps/spreadsheets/imports.py:192
+#: apps/spreadsheets/imports.py:208
 msgid "No building with this code or name."
 msgstr "이 코드나 이름을 가진 건물이 없습니다."
 
-#: apps/spreadsheets/imports.py:202
+#: apps/spreadsheets/imports.py:218
 #, python-format
 msgid "Use one of: %(values)s."
 msgstr "다음중 하나를 쓰십시오: %(values)s."
 
-#: apps/spreadsheets/imports.py:227
+#: apps/spreadsheets/imports.py:243
 msgid "UID must be 4-32 hexadecimal characters."
 msgstr "UID는 4-32자리의 16진수여야 합니다."
 
-#: apps/spreadsheets/imports.py:264
+#: apps/spreadsheets/imports.py:283
 msgid "Enter the card UID, or the employee number and the card label."
 msgstr "카드 UID를 넣거나, 직원번호와 카드번호를 넣으십시오."
 
-#: apps/spreadsheets/imports.py:276
+#: apps/spreadsheets/imports.py:295
 msgid "This developer has no card yet: assign one first, or enter its UID."
 msgstr "이 개발자에게는 아직 카드가 없습니다. 먼저 카드를 배정하거나 카드 UID를 넣으십시오."
 
-#: apps/spreadsheets/imports.py:299
+#: apps/spreadsheets/imports.py:319
 msgid "Opening balances"
 msgstr "초기 잔고"
 
-#: apps/spreadsheets/imports.py:310
+#: apps/spreadsheets/imports.py:330
 msgid "Enter an amount, e.g. 100.00."
 msgstr "금액을 입력하십시오. 례: 100.00."
 
-#: apps/spreadsheets/imports.py:312
+#: apps/spreadsheets/imports.py:332
 msgid "The amount must be more than 0."
 msgstr "금액은 0보다 커야 합니다."
 
-#: apps/spreadsheets/imports.py:341
+#: apps/spreadsheets/imports.py:361
 msgid "Enter yes or no."
 msgstr "예 또는 아니를 넣으십시오."
 
-#: apps/spreadsheets/imports.py:369
+#: apps/spreadsheets/imports.py:389
 msgid "You can only import goods of your own store."
 msgstr "자기 매장의 상품만 가져올수 있습니다."
 
-#: apps/spreadsheets/imports.py:376
+#: apps/spreadsheets/imports.py:396
 msgid "No store with this name."
 msgstr "이 이름의 매장이 없습니다."
 
-#: apps/spreadsheets/imports.py:385
+#: apps/spreadsheets/imports.py:405
 msgid "No counter with this name in this store."
 msgstr "이 매장에 이 이름의 매대가 없습니다."
 
-#: apps/spreadsheets/imports.py:389
+#: apps/spreadsheets/imports.py:409
 msgid "Name the counter: this store has several."
 msgstr "매대를 적으십시오. 이 매장에는 매대가 여러개 있습니다."
 
-#: apps/spreadsheets/imports.py:394
+#: apps/spreadsheets/imports.py:414
 msgid "This counter is not in your buildings."
 msgstr "이 매대는 담당 건물에 있지 않습니다."
 
-#: apps/spreadsheets/imports.py:424
+#: apps/spreadsheets/imports.py:444
 msgid "Courts are added on the Playground page, not imported."
 msgstr "경기장은 가져오지 않고 운동장 페지에서 추가합니다."
 
-#: apps/spreadsheets/imports.py:449 apps/spreadsheets/imports.py:451
+#: apps/spreadsheets/imports.py:469 apps/spreadsheets/imports.py:471
 msgid "Enter a whole number, 0 or more."
 msgstr "0 이상의 옹근수를 넣으십시오."
 
-#: apps/spreadsheets/imports.py:458
+#: apps/spreadsheets/imports.py:478
 msgid "Your account cannot add goods."
 msgstr "이 계정은 상품을 추가할수 없습니다."
 
-#: apps/spreadsheets/imports.py:470
+#: apps/spreadsheets/imports.py:490
 msgid "Your account cannot change goods."
 msgstr "이 계정은 상품을 변경할수 없습니다."
 
-#: apps/spreadsheets/imports.py:520
+#: apps/spreadsheets/imports.py:540
 msgid "The file has no rows under the header."
 msgstr "파일에 머리행 아래의 행이 없습니다."
 
@@ -1741,5 +1747,3 @@ msgstr "작성중인 구입만 지불할수 있습니다."
 #: common/test_console.py:147
 msgid "This developer has no active card; send a `uid` instead."
 msgstr "이 개발자에게는 활성카드가 없습니다. 대신 `uid`를 보내십시오."
-
-

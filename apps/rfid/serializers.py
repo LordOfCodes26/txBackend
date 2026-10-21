@@ -20,9 +20,21 @@ from .models import (
     RFIDEvent,
     ScanDirection,
     TCPFrameLog,
+    label_taken,
     normalize_uid,
     uid_validator,
 )
+
+
+def validate_label(value: str, exclude: int | None = None) -> str:
+    """A card's printed label: unique (spaces and letter case ignored), or empty."""
+    value = (value or "").strip()
+    taken = label_taken(value, exclude)
+    if taken is not None:
+        raise serializers.ValidationError(
+            _("This label is already used by card %(uid)s.") % {"uid": taken.uid}
+        )
+    return value
 
 
 class UIDField(serializers.CharField):
@@ -70,11 +82,17 @@ class RFIDCardSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("A card with this UID is already registered."))
         return value
 
+    def validate_label(self, value):
+        return validate_label(value, self.instance.pk if self.instance else None)
+
 
 class RFIDCardUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = RFIDCard
         fields = ["label", "notes"]
+
+    def validate_label(self, value):
+        return validate_label(value, self.instance.pk if self.instance else None)
 
 
 class CardAssignSerializer(NewPinSerializer):
@@ -97,6 +115,18 @@ class CardReplaceSerializer(serializers.Serializer):
     new_card_uid = UIDField(help_text="Registered automatically if it is a new card.")
     new_card_label = serializers.CharField(max_length=50, required=False, allow_blank=True)
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate(self, data):
+        # The label goes on the new card; a new card already registered keeps its own.
+        if data.get("new_card_label"):
+            card = RFIDCard.objects.filter(uid=data["new_card_uid"]).first()
+            try:
+                data["new_card_label"] = validate_label(
+                    data["new_card_label"], card.pk if card else None
+                )
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"new_card_label": exc.detail}) from exc
+        return data
 
 
 class RFIDCardAssignmentSerializer(serializers.ModelSerializer):

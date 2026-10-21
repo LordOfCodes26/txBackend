@@ -22,7 +22,14 @@ from apps.goods import services as goods
 from apps.goods.models import Good, GoodKind, MovementKind
 from apps.goods.serializers import GoodSerializer
 from apps.rfid import services as rfid
-from apps.rfid.models import Building, RFIDCard, RFIDCardAssignment, normalize_uid, uid_validator
+from apps.rfid.models import (
+    Building,
+    RFIDCard,
+    RFIDCardAssignment,
+    label_taken,
+    normalize_uid,
+    uid_validator,
+)
 from apps.rfid.scope import building_scope
 from apps.sellers.access import GOODS, acting_positions, acting_seller
 from apps.sellers.models import Seller, ServicePosition
@@ -68,6 +75,15 @@ GOODS_COLUMNS = [
     Column("quantity", _("In stock"), width=10, kind="int", example=20),
     Column("is_active", _("For sale"), width=9, kind="bool", example=True),
 ]
+
+
+def _label_free(label: str, card) -> None:
+    """A card label is unique: another card with it stops the row."""
+    taken = label_taken(label, card.pk if card else None)
+    if taken is not None:
+        raise RowError(
+            _("This label is already used by card %(uid)s.") % {"uid": taken.uid}, "card_label"
+        )
 
 
 class RowError(Exception):
@@ -231,6 +247,9 @@ class CardImporter(Importer):
         outcome = "unchanged"
 
         card = RFIDCard.objects.filter(uid=uid).first()
+        if label:
+            self.once(ctx, "card_label", label)
+            _label_free(label, card)
         if card is None:
             card = rfid.register_card(actor=ctx.actor, uid=uid, label=label)
             outcome = "created"
@@ -279,6 +298,7 @@ class CardImporter(Importer):
         card = current.card
         if card.label == label:
             return "unchanged"
+        _label_free(label, card)
         old = card.label
         card.label = label
         card.save(update_fields=["label", "updated_at"])
