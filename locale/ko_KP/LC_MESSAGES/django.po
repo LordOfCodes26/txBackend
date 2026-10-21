@@ -251,7 +251,7 @@ msgstr "마지막 카드를 쓸수 없습니다."
 #: apps/developers/services.py:160
 #, python-format
 msgid "Another developer uses employee number %(number)s now."
-msgstr "다른 개발자가 지금 사원번호 %(number)s 를 쓰고 있습니다."
+msgstr "다른 개발자가 지금 개발자번호 %(number)s 를 쓰고 있습니다."
 
 #: apps/developers/views.py:40 apps/rfid/exceptions.py:13
 msgid "Only active cards can be assigned."
