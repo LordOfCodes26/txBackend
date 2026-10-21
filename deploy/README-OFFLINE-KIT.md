@@ -121,6 +121,9 @@ From a PC in the company network open `https://<server-ip>/`. The browser warns 
 certificate the first time (the installer made a temporary one, see step 7): continue, and
 sign in with the admin account.
 
+The **user guide** for staff, with screenshots of every page, is at
+`https://<server-ip>/guide/index.html` (also under the user menu → **User guide**).
+
 ## 6. The API: addresses and documentation
 
 | What | Address |
