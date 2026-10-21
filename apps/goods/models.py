@@ -125,7 +125,7 @@ class RentalSettings(models.Model):
     # How the price is counted: per court per slot (price x slots), or per person per slot
     # (price x people x slots; the desk says how many people, one card pays for all).
     price_per = models.CharField(max_length=6, choices=PricePer.choices, default=PricePer.COURT)
-    # Indoor courts are the ones the booking check (the indoor playground's gate) checks.
+    # Where the court is, for the lists (no rules depend on it).
     place = models.CharField(max_length=7, choices=CourtPlace.choices, default=CourtPlace.OUTDOOR)
     max_people = models.PositiveSmallIntegerField(
         default=20,
@@ -135,7 +135,7 @@ class RentalSettings(models.Model):
     refund_after_start = models.BooleanField(
         default=False,
         help_text="Paid bookings can still be changed, or deleted and refunded, once they have "
-        "started or ended (e.g. a no-show). Never after the developer checked in.",
+        "started or ended (e.g. a no-show).",
     )
 
     class Meta:

@@ -17,7 +17,7 @@ from apps.purchases.serializers import ReaderField, TillReaderSerializer
 from apps.rfid.models import RFIDEvent
 from apps.sellers.serializers import SellerSummarySerializer
 
-from .models import Booking, PlaygroundCheck
+from .models import Booking
 
 
 class RentalSerializer(serializers.ModelSerializer):
@@ -127,7 +127,7 @@ class BookingSerializer(serializers.ModelSerializer):
         source="good.rental.place",
         read_only=True,
         default="OUTDOOR",
-        help_text="INDOOR (checked in at the indoor check) or OUTDOOR (at the desk).",
+        help_text="INDOOR or OUTDOOR (where the court is).",
     )
     balance_after = serializers.DecimalField(
         source="purchase.account_transaction.balance_after",
@@ -140,12 +140,6 @@ class BookingSerializer(serializers.ModelSerializer):
     date = serializers.SerializerMethodField(help_text="Company-local day.")
     start_time = serializers.SerializerMethodField(help_text="Local start, HH:MM.")
     end_time = serializers.SerializerMethodField(help_text="Local end, HH:MM.")
-    checked_in_at_store_name = serializers.CharField(
-        source="checked_in_at_store.name",
-        read_only=True,
-        default=None,
-        help_text="The store whose till reader checked the developer in (e.g. the gym).",
-    )
 
     class Meta:
         model = Booking
@@ -168,8 +162,6 @@ class BookingSerializer(serializers.ModelSerializer):
             "price_name",
             "place",
             "change_count",
-            "checked_in_at",
-            "checked_in_at_store_name",
             "total",
             "currency",
             "balance_after",
@@ -341,61 +333,4 @@ class DeskReaderSerializer(TillReaderSerializer):
     kind = serializers.CharField(
         source="purpose",
         help_text="TILL: the court's store's till reader; ENROLL: a card assign (master) reader.",
-    )
-
-
-class CheckedBookingSerializer(serializers.ModelSerializer):
-    good_name = serializers.CharField(source="good.name", read_only=True)
-    date = serializers.SerializerMethodField()
-    start_time = serializers.SerializerMethodField()
-    end_time = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Booking
-        fields = ["id", "good", "good_name", "date", "start_time", "end_time", "checked_in_at"]
-
-    def get_date(self, obj) -> str:
-        return timezone.localtime(obj.start).date().isoformat()
-
-    def get_start_time(self, obj) -> str:
-        return f"{timezone.localtime(obj.start):%H:%M}"
-
-    def get_end_time(self, obj) -> str:
-        return f"{timezone.localtime(obj.end):%H:%M}"
-
-
-class PlaygroundCheckSerializer(serializers.ModelSerializer):
-    developer = DeveloperSummarySerializer(read_only=True)
-    booking = CheckedBookingSerializer(read_only=True)
-    reader = serializers.CharField(source="reader.code", read_only=True)
-    reader_name = serializers.CharField(source="reader.name", read_only=True)
-    seller_name = serializers.CharField(source="seller.name", read_only=True)
-    uid = serializers.CharField(source="event.uid", read_only=True)
-    message = serializers.SerializerMethodField(help_text="What the reader's screen showed.")
-
-    class Meta:
-        model = PlaygroundCheck
-        fields = [
-            "id",
-            "result",
-            "scan_result",
-            "message",
-            "developer",
-            "booking",
-            "reader",
-            "reader_name",
-            "seller_name",
-            "uid",
-            "created_at",
-        ]
-
-    def get_message(self, obj) -> str:
-        from apps.rfid.serializers import check_message
-
-        return str(check_message(obj.event))
-
-
-class PlaygroundChecksQuerySerializer(serializers.Serializer):
-    after = serializers.IntegerField(
-        required=False, min_value=0, help_text="Only checks newer than this id (to poll)."
     )

@@ -590,8 +590,7 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
     """Delete a paid purchase: the whole total goes back to the developer's wallet (a REFUND
     entry; the ledger itself is never changed), tracked goods go back to stock, and the
     purchase becomes REFUNDED (kept for the record). A court booking is removed too, but
-    only before it starts (any time if its court allows `refund_after_start`) and never
-    after the developer checked in.
+    only before it starts (any time if its court allows `refund_after_start`).
 
     Locks in the checkout's order: purchase → account → goods by id.
     """
@@ -601,7 +600,7 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
 
     removed = []
     if purchase.kind == PurchaseKind.BOOKING:
-        from apps.bookings.exceptions import BookingCheckedIn, BookingStarted
+        from apps.bookings.exceptions import BookingStarted
         from apps.bookings.models import Booking
 
         bookings = list(
@@ -610,8 +609,6 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
             .filter(purchase=purchase)
         )
         for booking in bookings:
-            if booking.checked_in_at is not None:
-                raise BookingCheckedIn()
             rules = getattr(booking.good, "rental", None)
             late_refund = rules is not None and rules.refund_after_start
             if booking.start <= timezone.now() and not late_refund:

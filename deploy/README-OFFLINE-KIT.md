@@ -198,8 +198,7 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    then `load_roles roles.json` here.
 3. **Logins for each role** (usernames `admin`, `boss`, …):
    `<command>` = `create_role_users`. Each password is **shown once**.
-4. **Link the accounts:** a Goods seller / Playground seller login to its store (and a
-   Playground checker to a store that checks bookings, e.g. the gym), BUILDING_OWNER / BUILDING_MANAGER
+4. **Link the accounts:** a Goods seller / Playground seller login to its store, BUILDING_OWNER / BUILDING_MANAGER
    logins to their buildings, DEVELOPER logins to developer profiles (in the web app).
 5. **Doors and tills:** see **10. Connecting the door devices** and **11. Connecting the till
    readers**.
@@ -728,8 +727,8 @@ Be careful:
 
 - **Set the clock right once, and don't move it backwards** once people use the system.
   Scans, payments, bookings and backups are stamped with it; going back makes new records
-  look older than existing ones and confuses "already checked in" and the 20-minute
-  booking check.
+  look older than existing ones and confuses the 20-minute arrival window at the
+  playground desk.
 - After a big jump, signed-in users may be logged out (their login tokens are time-based):
   they sign in again.
 

@@ -326,12 +326,6 @@ def record_scan(
     # Till readers pay; a card assign (master) reader pays too when a court booking is
     # waiting on it (otherwise its tap only fills the card assign form).
     pays = device.purpose in (DevicePurpose.TILL, DevicePurpose.ENROLL)
-    from apps.bookings.services import check_in, checks_here
-
-    if checks_here(device):
-        # E.g. the gym counter's till, with no sale waiting: the tap checks a booking.
-        check_in(event)
-        return event, True
     if pays and event.result == ScanResult.ACCEPTED:
         # Separate transaction, after the card lock is released: checkout locks the
         # purchase before the card, so locking them in the other order here could deadlock.

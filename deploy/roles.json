@@ -10,7 +10,6 @@
         "audit.view",
         "booking.cancel",
         "booking.change",
-        "booking.check",
         "booking.create",
         "booking.view",
         "building.manage",
@@ -184,15 +183,6 @@
       "name": "Playground seller",
       "description": "Every court, court booking and the playground desk (shared, no store needed)",
       "permissions": []
-    },
-    {
-      "code": "PLAYGROUND_CHECKER",
-      "name": "Playground checker",
-      "description": "Checks with a card tap that developers at the playground booked it; sees the desk",
-      "permissions": [
-        "booking.check",
-        "booking.view"
-      ]
     }
   ]
 }

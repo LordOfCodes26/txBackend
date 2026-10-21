@@ -421,24 +421,6 @@ class ScanSerializer(serializers.Serializer):
         return value
 
 
-def check_message(event) -> str:
-    """The reader's screen after a booking check tap (see apps.bookings.services.check_in)."""
-    check = event.playground_check
-    if check.result == "CARD_REFUSED":
-        return str(DISPLAY_MESSAGES.get(check.scan_result, check.scan_result))
-    name = event.developer.full_name if event.developer else ""
-    if check.result == "NO_BOOKING":
-        return _("%(name)s - no booking now") % {"name": name}
-    booking = check.booking
-    when = f"{timezone.localtime(booking.start):%H:%M}-{timezone.localtime(booking.end):%H:%M}"
-    values = {"name": name, "court": booking.good.name, "time": when}
-    if check.result == "ALREADY_CHECKED_IN":
-        return _("%(name)s - already checked in: %(court)s %(time)s") % values
-    if check.result == "NOT_PAID":
-        return _("%(name)s - not paid yet: pay at the desk (%(court)s %(time)s)") % values
-    return _("%(name)s - checked in: %(court)s %(time)s") % values
-
-
 DISPLAY_MESSAGES = {
     "UNKNOWN_CARD": _("Unknown card"),
     "UNASSIGNED_CARD": _("Card not assigned"),
@@ -478,8 +460,6 @@ class ScanResponseSerializer(serializers.ModelSerializer):
         return obj.result in ("ACCEPTED", "DUPLICATE")
 
     def get_display_message(self, obj) -> str:
-        if getattr(obj, "playground_check", None) is not None:
-            return check_message(obj)
         if obj.device.purpose == DevicePurpose.ENROLL:
             if obj.developer is not None and self.get_purchase(obj) is not None:
                 return _("%(name)s - enter PIN") % {"name": obj.developer.full_name}

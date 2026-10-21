@@ -16,17 +16,13 @@ from apps.sellers.models import SellerStatus
 
 from .exceptions import (
     AlreadyBookedThen,
-    BookingCheckedIn,
-    BookingNotPaid,
     BookingNotReserved,
     BookingStarted,
-    CardNotTheBookers,
-    CheckedInIndoors,
     InvalidSlot,
     RentalNotAvailable,
     SlotUnavailable,
 )
-from .models import Booking, BookingStatus, CheckResult, PlaygroundCheck
+from .models import Booking, BookingStatus
 
 
 def _local(day: date, t) -> datetime:
@@ -323,78 +319,9 @@ def cancel_reservation(*, actor, booking: Booking) -> None:
 
 
 @transaction.atomic
-def checked_in_at_desk(good: Good) -> bool:
-    """Outdoor courts check people in at the desk (paying checks in); indoor courts have
-    their own check (the booking check's card tap) and are checked in there."""
-    from apps.goods.models import CourtPlace
-
-    rules = getattr(good, "rental", None)
-    return rules is None or rules.place != CourtPlace.INDOOR
-
-
-def desk_check_in(*, actor, booking: Booking) -> Booking:
-    """The developer is at the desk: a paid booking on an outdoor court is checked in
-    (paying there checks in by itself). An unpaid one must be paid first; an indoor
-    court's booking is checked in at the indoor check."""
-    booking = (
-        Booking.objects.select_for_update(of=("self",))
-        .select_related("good__service_position", "good__rental")
-        .get(pk=booking.pk)
-    )
-    if booking.status != BookingStatus.PAID:
-        raise BookingNotPaid()
-    if not checked_in_at_desk(booking.good):
-        raise CheckedInIndoors()
-    if booking.checked_in_at is None:
-        booking.checked_in_at = timezone.now()
-        booking.checked_in_at_store_id = booking.good.service_position.seller_id
-        booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
-        record_audit("booking.checked_in", actor=actor, entity=booking, new_values={"desk": True})
-    return booking
-
-
-@transaction.atomic
-def indoor_check_in(*, actor, booking: Booking, check: PlaygroundCheck) -> Booking:
-    """The indoor playground's checker lets the developer in: a paid booking on an indoor
-    court is checked in (once), with the card tap that proves they are here (`check`: a
-    tap on the checker's store's reader in the last 2 minutes, by the booking's
-    developer). Unpaid ones are paid at the desk first."""
-    from apps.sellers.access import acting_seller
-
-    store = acting_seller(actor) if getattr(actor, "pk", None) else None
-    fresh = timezone.now() - timedelta(minutes=2)
-    if (
-        check.developer_id != booking.developer_id
-        or check.created_at < fresh
-        or (store is not None and check.seller_id != store.pk)
-    ):
-        raise CardNotTheBookers()
-    booking = (
-        Booking.objects.select_for_update(of=("self",))
-        .select_related("good__rental")
-        .get(pk=booking.pk)
-    )
-    if checked_in_at_desk(booking.good):
-        raise InvalidSlot(_("Outdoor courts are checked in at the playground desk."))
-    if booking.status != BookingStatus.PAID:
-        raise BookingNotPaid()
-    if booking.checked_in_at is None:
-        booking.checked_in_at = timezone.now()
-        booking.checked_in_at_store_id = check.seller_id
-        booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
-        record_audit(
-            "booking.checked_in",
-            actor=actor,
-            entity=booking,
-            new_values={"indoor": True, "tap": check.event_id},
-        )
-    return booking
-
-
 def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) -> Booking:
     """Called by `confirm_purchase` (in its transaction): the reserved booking this purchase
-    pays becomes PAID; on an outdoor court it is checked in too (the developer is at the
-    desk), an indoor court's at the indoor check."""
+    pays becomes PAID."""
     booking = (
         Booking.objects.select_for_update(of=("self",))
         .select_related("good__service_position", "good__rental")
@@ -408,20 +335,7 @@ def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) ->
     booking.purchase = purchase
     booking.people = item.people
     booking.court_price_id = item.court_price_id
-    if checked_in_at_desk(booking.good):
-        booking.checked_in_at = booking.checked_in_at or timezone.now()
-        booking.checked_in_at_store_id = booking.good.service_position.seller_id
-    booking.save(
-        update_fields=[
-            "status",
-            "purchase",
-            "people",
-            "court_price",
-            "checked_in_at",
-            "checked_in_at_store",
-            "updated_at",
-        ]
-    )
+    booking.save(update_fields=["status", "purchase", "people", "court_price", "updated_at"])
     record_audit(
         "booking.paid",
         actor=actor,
@@ -454,8 +368,6 @@ def book_lines(
         _ensure_developer_free(developer, item.start, end)
         try:
             with transaction.atomic():
-                # "Play now" on an outdoor court: at the desk already, so checked in.
-                playing = item.start <= timezone.now() and checked_in_at_desk(good)
                 booking = Booking.objects.create(
                     good=good,
                     developer=developer,
@@ -466,8 +378,6 @@ def book_lines(
                     people=item.people,
                     court_price_id=item.court_price_id,
                     status=BookingStatus.PAID,
-                    checked_in_at=timezone.now() if playing else None,
-                    checked_in_at_store_id=good.service_position.seller_id if playing else None,
                 )
         except IntegrityError as exc:
             raise _constraint_error(exc) from exc
@@ -588,12 +498,10 @@ def booking_brief(booking: Booking) -> dict:
         "end_time": f"{timezone.localtime(booking.end):%H:%M}",
         "date": timezone.localtime(booking.start).date().isoformat(),
         "status": booking.status,
-        # INDOOR courts are checked in at the indoor check, OUTDOOR ones at the desk.
         "place": getattr(getattr(booking.good, "rental", None), "place", "OUTDOOR"),
         "people": booking.people,
         "price": f"{price:.2f}",
         "price_name": booking.court_price.name if booking.court_price_id else "",
-        "checked_in": booking.checked_in_at is not None,
         "purchase": booking.purchase_id,
         "developer": {
             "id": developer.pk,
@@ -662,8 +570,9 @@ def now_board(goods) -> list[dict]:
 
 def arrival(reader, after: int | None) -> dict:
     """The desk's arrival tap: the newest accepted tap on `reader` after `after` (an event
-    id), its developer, their booking now (or starting within the check-in minutes) and
-    their later bookings today. `cursor` is the newest tap id (for the next poll)."""
+    id), its developer, their booking now (or starting within
+    PLAYGROUND_CHECK_IN_EARLY_MINUTES, to pay it on arrival) and their later bookings
+    today. `cursor` is the newest tap id (for the next poll)."""
     from apps.rfid.models import RFIDEvent
 
     taps = RFIDEvent.objects.filter(device=reader).order_by("-pk")
@@ -724,7 +633,7 @@ def change_booking(
     """Move a paid booking to another time and/or another court of the same seller.
 
     Allowed until the booking starts (later too if its court allows `refund_after_start`,
-    e.g. to rebook a no-show), never after check-in. The same rules as a new booking apply,
+    e.g. to rebook a no-show). The same rules as a new booking apply,
     ignoring the booking itself. The new time may cost more or less than what was paid: a
     cheaper one refunds the difference to the wallet, a dearer one charges it and needs the
     developer's card tap on the purchase's reader and their `pin` (as at checkout). The
@@ -751,8 +660,6 @@ def change_booking(
             .select_related("good__rental", "developer")
             .get(pk=booking.pk)
         )
-        if booking.checked_in_at is not None:
-            raise BookingCheckedIn()
         rules_now = getattr(booking.good, "rental", None)
         if booking.start <= timezone.now() and not (rules_now and rules_now.refund_after_start):
             raise BookingStarted()
@@ -864,82 +771,6 @@ def change_booking(
             },
         )
     return booking
-
-
-# --- Checking in at the playground -------------------------------------------------------
-
-
-def booking_to_check(developer, now=None) -> Booking | None:
-    """The developer's booking a check-in tap counts for: on an indoor court (the booking
-    check is the indoor playground's gate), running now or starting within
-    PLAYGROUND_CHECK_IN_EARLY_MINUTES. The earliest first."""
-    from django.conf import settings
-
-    from apps.goods.models import CourtPlace
-
-    now = now or timezone.now()
-    early = timedelta(minutes=settings.PLAYGROUND_CHECK_IN_EARLY_MINUTES)
-    return (
-        Booking.objects.select_for_update(of=("self",))
-        .filter(
-            developer=developer,
-            good__rental__place=CourtPlace.INDOOR,
-            start__lte=now + early,
-            end__gt=now,
-        )
-        .order_by("start", "id")
-        .first()
-    )
-
-
-@transaction.atomic
-def check_in(event) -> PlaygroundCheck:
-    """A card tap on the till reader of a store that checks bookings (e.g. the gym counter)
-    with no sale waiting for it: check the card holder in to their booking (see
-    `booking_to_check`) and keep what the tap found for the store's Booking check page."""
-    from apps.rfid.models import ScanResult
-
-    reader = event.device
-    check = PlaygroundCheck(
-        event=event, reader=reader, seller_id=reader.seller_id, developer=event.developer
-    )
-    if event.result not in (ScanResult.ACCEPTED, ScanResult.DUPLICATE) or event.developer is None:
-        check.result, check.scan_result = CheckResult.CARD_REFUSED, event.result
-    else:
-        booking = booking_to_check(event.developer)
-        check.booking = booking
-        if booking is None:
-            check.result = CheckResult.NO_BOOKING
-        elif booking.status != BookingStatus.PAID:
-            check.result = CheckResult.NOT_PAID  # pay at the desk first
-        elif booking.checked_in_at is not None:
-            check.result = CheckResult.ALREADY_CHECKED_IN
-        else:
-            check.result = CheckResult.CHECKED_IN
-            booking.checked_in_at = timezone.now()
-            booking.checked_in_at_store_id = reader.seller_id
-            booking.save(update_fields=["checked_in_at", "checked_in_at_store", "updated_at"])
-            record_audit(
-                "booking.checked_in",
-                actor=None,
-                entity=booking,
-                new_values={"reader": reader.code, "store": reader.seller_id},
-            )
-    check.save()
-    return check
-
-
-def checks_here(device) -> bool:
-    """Does a tap on this till reader check bookings? Its store checks bookings, and no
-    sale or booking payment there is waiting for a card on it."""
-    from apps.purchases.services import draft_for_reader
-    from apps.rfid.models import DevicePurpose
-
-    if device.purpose != DevicePurpose.TILL or device.seller_id is None:
-        return False
-    if not device.seller.checks_bookings:
-        return False
-    return draft_for_reader(device.pk) is None
 
 
 def desk_people(*, search: str = "", pk: int | None = None, limit: int = 8) -> list[dict]:

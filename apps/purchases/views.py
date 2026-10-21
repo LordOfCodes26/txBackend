@@ -351,7 +351,7 @@ class PurchaseViewSet(
     def destroy(self, request, *args, **kwargs):
         """Delete a paid purchase: the total goes back to the developer's wallet, the goods
         back to stock, and the purchase is kept as REFUNDED. A court booking can be deleted
-        until it starts (not after check-in). Drafts are cancelled instead (`cancel`)."""
+        until it starts (later if its court allows it). Drafts are cancelled instead (`cancel`)."""
         purchase = services.refund_purchase(actor=request.user, purchase=self.get_object())
         return self._respond(purchase)
 

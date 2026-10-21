@@ -234,13 +234,6 @@ def _handle_text_frame(frame: bytes, peer_ip: str, trace: _Trace) -> str:
         return CARD_NO
     trace.note = event.result
 
-    from apps.bookings.models import CheckResult, PlaygroundCheck
-
-    check = PlaygroundCheck.objects.filter(event=event).first()
-    if check is not None:  # a store that checks bookings (e.g. the gym counter)
-        if check.result in (CheckResult.CHECKED_IN, CheckResult.ALREADY_CHECKED_IN):
-            return CARD_OK
-        return CARD_DENIED if known else CARD_NO  # no booking now, or the card is refused
     if device.purpose in (DevicePurpose.ENROLL, DevicePurpose.TILL):
         from apps.purchases.models import Purchase
 

@@ -274,7 +274,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
 def _readers():
     from apps.rfid.models import DevicePurpose, RFIDDevice
 
-    # Card assign (master) readers too: court bookings may use them (checked in services).
+    # Card assign (master) readers too: court bookings may use them (see services).
     return RFIDDevice.objects.filter(
         purpose__in=[DevicePurpose.TILL, DevicePurpose.ENROLL], is_active=True
     )

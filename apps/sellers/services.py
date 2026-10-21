@@ -14,7 +14,6 @@ SELLER_FIELDS = [
     "phone",
     "status",
     "notes",
-    "checks_bookings",
 ]
 POSITION_FIELDS = ["seller", "name", "location", "building", "manager", "is_active"]
 

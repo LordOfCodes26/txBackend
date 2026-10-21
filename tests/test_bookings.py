@@ -21,7 +21,7 @@ from apps.goods.models import Good, GoodKind, RentalSettings
 from apps.purchases import services as purchases
 from apps.purchases.models import Purchase
 from apps.rfid import services as rfid
-from apps.rfid.models import RFIDCard, RFIDCardAssignment, RFIDDevice
+from apps.rfid.models import RFIDCard, RFIDCardAssignment
 from apps.sellers.models import Seller, ServicePosition
 
 GOODS = "/api/v1/goods/"
@@ -976,34 +976,28 @@ def test_deleting_a_paid_booking_refunds_it_and_frees_the_time(desk, world, paid
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("state", ["started", "checked_in"])
-def test_started_or_checked_in_bookings_cannot_be_deleted(desk, world, paid, state):
-    if state == "started":
-        Booking.objects.filter(pk=paid.pk).update(
-            start=timezone.now() - timedelta(minutes=5),
-            end=timezone.now() + timedelta(minutes=55),
-        )
-    else:
-        Booking.objects.filter(pk=paid.pk).update(checked_in_at=timezone.now())
+def test_started_bookings_cannot_be_deleted(desk, world, paid):
+    Booking.objects.filter(pk=paid.pk).update(
+        start=timezone.now() - timedelta(minutes=5),
+        end=timezone.now() + timedelta(minutes=55),
+    )
     r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
-    assert r.json()["error"]["code"] in {"BOOKING_STARTED", "BOOKING_CHECKED_IN"}
+    assert r.json()["error"]["code"] == "BOOKING_STARTED"
     assert balance(world) == Decimal("60.00")
     assert Booking.objects.exists()
 
 
 @pytest.mark.django_db
-def test_court_option_allows_refunding_a_past_booking_unless_checked_in(desk, world, paid):
+def test_court_option_allows_refunding_a_past_booking(desk, world, paid):
     from apps.goods.models import RentalSettings
 
-    RentalSettings.objects.filter(good=world.playground).update(refund_after_start=True)
     past = timezone.now() - timedelta(days=2)
-    Booking.objects.filter(pk=paid.pk).update(
-        checked_in_at=timezone.now(), start=past, end=past + timedelta(hours=2)
-    )
+    Booking.objects.filter(pk=paid.pk).update(start=past, end=past + timedelta(hours=2))
     r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
-    assert r.json()["error"]["code"] == "BOOKING_CHECKED_IN"
+    assert r.json()["error"]["code"] == "BOOKING_STARTED"
 
-    Booking.objects.filter(pk=paid.pk).update(checked_in_at=None)  # a no-show
+    # A no-show: the court allows deleting it later.
+    RentalSettings.objects.filter(good=world.playground).update(refund_after_start=True)
     r = desk.delete(f"{PURCHASES}{paid.purchase_id}/")
     assert r.status_code == 200, r.json()
     assert balance(world) == Decimal("100.00")
@@ -1022,160 +1016,3 @@ def test_only_playground_sellers_change_bookings(auth_client, make_user, world, 
     other = make_user(Roles.PLAYGROUND_SELLER)
     r = change(auth_client(other), paid.pk, date=day, start_time="14:00", end_time="16:00")
     assert r.status_code == 200, r.json()
-
-
-# --- Checking in at the playground ------------------------------------------------------
-
-CHECKS = "/api/v1/bookings/checks/"
-
-
-@pytest.fixture
-def gate(world, make_user):
-    """The gym counter: a store that checks bookings, its till reader and its login (a
-    playground checker); and `booking(start)` makes Ada a booking."""
-
-    class G:
-        pass
-
-    g = G()
-    g.checker = make_user(Roles.PLAYGROUND_CHECKER)
-    g.store = Seller.objects.create(name="Gym", user=g.checker, checks_bookings=True)
-    g.position = ServicePosition.objects.create(seller=g.store, name="Gym counter")
-    g.reader, _key = rfid.register_device(actor=None, code="Gate1", purpose="TILL", seller=g.store)
-    # The gate checks indoor courts: the playground is one here.
-    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
-
-    def booking(start):
-        purchase = Purchase.objects.create(
-            seller=world.position.seller, service_position=world.position, kind="BOOKING"
-        )
-        return Booking.objects.create(
-            good=world.playground,
-            developer=world.developer,
-            purchase=purchase,
-            start=start,
-            end=start + timedelta(hours=1),
-            slots=1,
-        )
-
-    g.booking = booking
-    return g
-
-
-@pytest.mark.django_db
-def test_the_gate_checks_indoor_courts_only(gate, world, auth_client):
-    """The booking check is the indoor playground's: an outdoor court's booking is not
-    checked in there."""
-    RentalSettings.objects.filter(good=world.playground).update(place="OUTDOOR")
-    outdoor = gate.booking(timezone.now() + timedelta(minutes=10))
-    rfid.record_scan(device=gate.reader, uid=UID)
-    outdoor.refresh_from_db()
-    assert outdoor.checked_in_at is None
-    rows = auth_client(gate.checker).get(CHECKS).json()["results"]
-    assert rows[0]["result"] == "NO_BOOKING"
-
-
-@pytest.mark.django_db
-def test_a_tap_at_the_gym_checks_the_developer_in(gate, world, auth_client, make_user):
-    later = gate.booking(timezone.now() + timedelta(minutes=80))
-    soon = gate.booking(timezone.now() + timedelta(minutes=15))
-    rfid.record_scan(device=gate.reader, uid=UID)
-    soon.refresh_from_db()
-    assert soon.checked_in_at is not None and soon.checked_in_at_store == gate.store
-    later.refresh_from_db()
-    assert later.checked_in_at is None
-    assert AuditLog.objects.filter(action="booking.checked_in").count() == 1
-
-    client = auth_client(gate.checker)
-    rows = client.get(CHECKS).json()["results"]
-    assert [(row["result"], row["booking"]["id"]) for row in rows] == [("CHECKED_IN", soon.pk)]
-    assert rows[0]["developer"]["full_name"] == "Ada" and rows[0]["seller_name"] == "Gym"
-    assert rows[0]["message"].startswith("Ada - checked in: Playground")
-
-    rfid.record_scan(device=gate.reader, uid=UID)  # again: already checked in
-    rfid.record_scan(device=gate.reader, uid="04FFFFFF")  # unknown card
-    newer = client.get(f"{CHECKS}?after={rows[0]['id']}").json()["results"]
-    assert [(row["result"], row["scan_result"]) for row in newer] == [
-        ("CARD_REFUSED", "UNKNOWN_CARD"),
-        ("ALREADY_CHECKED_IN", ""),
-    ]
-    assert [row["code"] for row in client.get(f"{CHECKS}readers/").json()] == ["Gate1"]
-    booking = desk_view = auth_client(make_user(Roles.ADMIN)).get(f"{BOOKINGS}{soon.pk}/")
-    assert desk_view.json()["checked_in_at_store_name"] == "Gym", booking
-
-    # A checker of no checking store sees nothing; others may not look.
-    other = auth_client(make_user(Roles.PLAYGROUND_CHECKER))
-    assert other.get(CHECKS).json()["count"] == 0
-    assert auth_client(make_user(Roles.PLAYGROUND_SELLER)).get(CHECKS).status_code == 403
-    assert auth_client(make_user(Roles.ADMIN)).get(CHECKS).json()["count"] == 3
-
-
-@pytest.mark.django_db
-def test_a_sale_waiting_at_the_gym_takes_the_tap(gate, world, settings):
-    """The gym may still sell: a tap goes to a waiting sale, not to the check."""
-    gate.booking(timezone.now() + timedelta(minutes=5))
-    sale = purchases.create_purchase(actor=None, service_position=gate.position)
-    purchases.wait_for_card(purchase=sale)
-    event, _ = rfid.record_scan(device=gate.reader, uid=UID)
-    sale.refresh_from_db()
-    assert sale.presented_event == event
-    assert Booking.objects.get().checked_in_at is None
-
-
-@pytest.mark.django_db
-def test_other_stores_tills_do_not_check(gate, world):
-    gate.booking(timezone.now() + timedelta(minutes=5))
-    Seller.objects.filter(pk=gate.store.pk).update(checks_bookings=False)
-    rfid.record_scan(device=RFIDDevice.objects.get(pk=gate.reader.pk), uid=UID)
-    assert Booking.objects.get().checked_in_at is None
-
-
-@pytest.mark.django_db
-def test_no_booking_now(gate, world):
-    gate.booking(timezone.now() + timedelta(minutes=25))  # more than 20 minutes away
-    event, _ = rfid.record_scan(device=gate.reader, uid=UID)
-    assert event.playground_check.result == "NO_BOOKING"
-    assert Booking.objects.get().checked_in_at is None
-
-
-@pytest.mark.django_db
-def test_a_checked_in_booking_cannot_move(gate, world, desk):
-    booking = gate.booking(tomorrow_at(10))
-    Booking.objects.filter(pk=booking.pk).update(checked_in_at=timezone.now())
-    day = tomorrow_at(0).date().isoformat()
-    r = change(desk, booking.pk, date=day, start_time="14:00", end_time="15:00")
-    assert r.json()["error"]["code"] == "BOOKING_CHECKED_IN"
-
-
-@pytest.mark.django_db
-def test_a_checker_can_be_a_stores_login(auth_client, make_user):
-    admin = auth_client(make_user(Roles.ADMIN))
-    checker = make_user(Roles.PLAYGROUND_CHECKER)
-    r = admin.post("/api/v1/sellers/", {"name": "Gym", "user": checker.pk, "checks_bookings": True})
-    assert r.status_code == 201 and r.json()["checks_bookings"] is True, r.json()
-    r = admin.post("/api/v1/sellers/", {"name": "Pool", "user": make_user(Roles.DEVELOPER).pk})
-    assert "user" in r.json()["error"]["details"]
-
-
-@pytest.mark.django_db
-def test_the_gym_reader_answers_ok_or_denied(gate, world):
-    from apps.rfid.tcp import handle_frame
-
-    frame = f"ID:Gate1,TYPE:Pay,UID={UID}".encode()
-    assert handle_frame(frame, "10.0.0.9") == "CARD_DENIED\r\n"  # no booking now
-    gate.booking(timezone.now() + timedelta(minutes=5))
-    assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"
-    assert handle_frame(frame, "10.0.0.9") == "CARD_OK\r\n"  # already checked in
-    assert handle_frame(b"ID:Gate1,TYPE:Pay,UID=04FFFFFF", "10.0.0.9") == "CARD_NO\r\n"
-
-
-@pytest.mark.django_db
-def test_a_checker_sees_the_desk_read_only(gate, world, auth_client):
-    booking = gate.booking(tomorrow_at(10))
-    client = auth_client(gate.checker)
-    assert [row["id"] for row in client.get(BOOKINGS).json()["results"]] == [booking.pk]
-    day = tomorrow_at(0).date().isoformat()
-    move = change(client, booking.pk, date=day, start_time="14:00", end_time="15:00")
-    assert move.status_code == 403
-    _, r = add_booking(client, world, tomorrow_at(15))
-    assert r.status_code == 403

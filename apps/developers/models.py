@@ -60,7 +60,7 @@ class Developer(TimeStampedModel, SoftDeleteModel):
     status = models.CharField(
         max_length=20, choices=DeveloperStatus.choices, default=DeveloperStatus.ACTIVE
     )
-    # Shown where staff check who someone is: the developer's page, checkout, booking checks.
+    # Shown where staff check who someone is: the developer's page, checkout, the desk.
     photo = models.ImageField(
         upload_to=_photo_path,
         blank=True,

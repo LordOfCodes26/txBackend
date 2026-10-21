@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from apps.bookings.models import Booking, CheckResult, PlaygroundCheck
+from apps.bookings.models import Booking
 from apps.finance.models import AccountTransaction
 from apps.goods.models import RentalSettings
 from apps.purchases.models import Purchase
@@ -92,27 +92,8 @@ def test_free_booking_then_pay_on_arrival_with_one_tap(desk, world, reader, at_1
     assert r.status_code == 201, r.json()
     booking = Booking.objects.get(pk=body["id"])
     assert (booking.status, booking.purchase_id) == ("PAID", pay["id"])
-    assert booking.checked_in_at is not None  # paying at the desk checks in
     assert balance(world) == Decimal("60.00")
     assert Booking.objects.count() == 1  # paid, not booked twice
-
-
-@pytest.mark.django_db
-def test_gate_asks_an_unpaid_booking_to_pay_first(desk, world, at_1020):  # noqa: F811
-    world.seller.checks_bookings = True
-    world.seller.save()
-    gate, _key = rfid.register_device(actor=None, code="GATE1", purpose="TILL", seller=world.seller)
-    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
-    r = reserve(desk, world, same_day(at_1020, 11))
-    assert r.status_code == 201, r.json()
-    # Running now (10:00-12:00), not paid.
-    Booking.objects.filter(pk=r.json()["id"]).update(
-        start=same_day(at_1020, 10), end=same_day(at_1020, 12)
-    )
-    event = tap(gate)
-    check = PlaygroundCheck.objects.get(event=event)
-    assert check.result == CheckResult.NOT_PAID
-    assert Booking.objects.get().checked_in_at is None
 
 
 @pytest.mark.django_db
@@ -159,7 +140,7 @@ def test_play_now_starts_this_minute(desk, world, reader, at_1020):  # noqa: F81
     assert (line["start_time"], line["end_time"], line["line_total"]) == ("10:20", "12:20", "40.00")
     assert confirm(desk, r.json()["id"]).status_code == 201
     booking = Booking.objects.get()
-    assert (booking.status, booking.checked_in_at is not None) == ("PAID", True)
+    assert booking.status == "PAID"
     # The board shows the court in use until 12:20.
     court = desk.get(f"{BOOKINGS}now/").json()["courts"][0]
     assert (court["state"], court["until_time"], court["now"]["developer"]["full_name"]) == (
@@ -204,7 +185,6 @@ def test_cancel_a_paid_booking_refunds_it(desk, world, reader):  # noqa: F811
         f"{BOOKINGS}{booking['id']}/pay/", {"reader": "DESK1", "event": tap(reader).pk}
     ).json()
     confirm(desk, pay["id"])
-    Booking.objects.filter(pk=booking["id"]).update(checked_in_at=None)  # not here yet
     assert balance(world) == Decimal("60.00")
     assert desk.post(f"{BOOKINGS}{booking['id']}/cancel/").status_code == 204
     assert balance(world) == Decimal("100.00")
@@ -220,27 +200,3 @@ def test_the_desk_finds_who_a_booking_is_for(desk, world):  # noqa: F811
     one = desk.get(f"{BOOKINGS}people/", {"id": world.developer.pk}).json()["results"]
     assert one[0]["employee_number"] == world.developer.employee_number
     assert desk.get(f"{BOOKINGS}people/", {"search": " "}).json()["results"] == []
-
-
-@pytest.mark.django_db
-def test_paying_checks_in_outdoors_only(desk, world, reader, at_1020):  # noqa: F811
-    """Outdoor: paying at the desk (on arrival, or Play now) checks in. Indoor: it stays
-    Paid until the indoor check's card tap."""
-    from apps.bookings.services import desk_check_in
-
-    RentalSettings.objects.filter(good=world.playground).update(place="INDOOR")
-    booking = reserve(desk, world, same_day(at_1020, 14)).json()
-    pay = desk.post(f"{BOOKINGS}{booking['id']}/pay/", {"reader": "DESK1", "event": tap(reader).pk})
-    assert confirm(desk, pay.json()["id"]).status_code == 201
-    indoor = Booking.objects.get(pk=booking["id"])
-    assert (indoor.status, indoor.checked_in_at) == ("PAID", None)
-    r = desk.post(f"{BOOKINGS}{indoor.pk}/check-in/")
-    assert r.json()["error"]["code"] == "CHECKED_IN_INDOORS"
-    with pytest.raises(Exception):
-        desk_check_in(actor=None, booking=indoor)
-
-    RentalSettings.objects.filter(good=world.playground).update(place="OUTDOOR")
-    later = reserve(desk, world, same_day(at_1020, 16)).json()
-    pay = desk.post(f"{BOOKINGS}{later['id']}/pay/", {"reader": "DESK1", "event": tap(reader).pk})
-    assert confirm(desk, pay.json()["id"]).status_code == 201
-    assert Booking.objects.get(pk=later["id"]).checked_in_at is not None

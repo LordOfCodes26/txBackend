@@ -1,10 +1,8 @@
 from django.db.models import Q
-from django.utils.translation import gettext_lazy as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -15,7 +13,6 @@ from apps.purchases.serializers import (
     ConfirmSerializer,
     PurchaseSerializer,
     SetReaderSerializer,
-    TillReaderSerializer,
 )
 from apps.rfid.models import DevicePurpose, RFIDDevice
 from apps.rfid.scope import BuildingScopedMixin
@@ -27,14 +24,13 @@ from apps.sellers.access import (
     acting_seller,
     works_playground,
 )
-from apps.sellers.models import Seller, SellerStatus
+from apps.sellers.models import SellerStatus
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
-from common.permissions import HasPermissions
 
 from . import services
 from .filters import BookingFilter
-from .models import Booking, BookingStatus, PlaygroundCheck
+from .models import Booking, BookingStatus
 from .serializers import (
     AvailabilityQuerySerializer,
     BookingChangeSerializer,
@@ -43,23 +39,11 @@ from .serializers import (
     DeskReaderSerializer,
     DeskReadersQuerySerializer,
     PayBookingSerializer,
-    PlaygroundCheckSerializer,
-    PlaygroundChecksQuerySerializer,
     RentalSerializer,
     ReserveSerializer,
     ScheduleSerializer,
     SlotSerializer,
 )
-
-
-def indoor_only(user) -> bool:
-    """The indoor playground's checker (may check bookings, not take them) works with
-    indoor courts only: their courts and bookings lists show nothing else."""
-    return (
-        user.has_rbac_perm("booking.check")
-        and not user.has_rbac_perm("booking.create")
-        and not user.has_rbac_perm("booking.pay")
-    )
 
 
 class RentalViewSet(viewsets.ReadOnlyModelViewSet):
@@ -88,10 +72,6 @@ class RentalViewSet(viewsets.ReadOnlyModelViewSet):
         except a store's goods-only login: its own courts, if any."""
         qs = super().get_queryset()
         user = self.request.user
-        if indoor_only(user):
-            from apps.goods.models import CourtPlace
-
-            return qs.filter(rental__place=CourtPlace.INDOOR)
         if user.has_rbac_perm("booking.view") or works_playground(user):
             return qs
         seller = acting_seller(user)
@@ -145,7 +125,6 @@ class BookingViewSet(
         "good__service_position__seller",
         "developer",
         "purchase__account_transaction",
-        "checked_in_at_store",
         "court_price",
     )
     serializer_class = BookingSerializer
@@ -157,9 +136,6 @@ class BookingViewSet(
         "reserve": ["booking.create"],
         "pay": ["booking.pay"],
         "cancel": ["booking.cancel"],
-        "check_in": ["booking.create"],
-        # The indoor playground's checker: check in a paid indoor booking.
-        "indoor_check_in": ["booking.check"],
         "now": ["booking.view"],
         "arrival": ["booking.view"],
         "people": ["booking.create"],
@@ -171,7 +147,6 @@ class BookingViewSet(
         "reserve",
         "pay",
         "cancel",
-        "check_in",
         "now",
         "arrival",
         "people",
@@ -185,17 +160,6 @@ class BookingViewSet(
     seller_lookup = "good__service_position__seller"
     filterset_class = BookingFilter
     ordering_fields = ["start", "created_at"]
-
-    def get_queryset(self):
-        """A checker (who may check bookings but not take them) works the indoor
-        playground's gate: they see indoor court bookings only."""
-        qs = super().get_queryset()
-        user = self.request.user
-        if indoor_only(user):
-            from apps.goods.models import CourtPlace
-
-            qs = qs.filter(good__rental__place=CourtPlace.INDOOR)
-        return qs
 
     @staticmethod
     def owner_seller_id(obj):
@@ -233,7 +197,7 @@ class BookingViewSet(
     def pay(self, request, pk=None):
         """Pay a reserved booking on arrival: a checkout (a purchase) for its court and time;
         the arrival tap (`event`) counts as the card, so the developer only types the PIN
-        (`/bookings/checkout/{id}/confirm/`). Paying checks them in."""
+        (`/bookings/checkout/{id}/confirm/`)."""
         booking = self.get_object()
         serializer = PayBookingSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -252,35 +216,13 @@ class BookingViewSet(
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
         """Cancel a booking: an unpaid one is dropped; a paid one is refunded (before it
-        starts, or later if the court allows it; never after check-in)."""
+        starts, or later if the court allows it)."""
         booking = self.get_object()
         if booking.status == BookingStatus.RESERVED:
             services.cancel_reservation(actor=request.user, booking=booking)
         else:
             purchase_services.refund_purchase(actor=request.user, purchase=booking.purchase)
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @extend_schema(request=None, responses=BookingSerializer)
-    @extend_schema(request=None, responses=BookingSerializer)
-    @action(detail=True, methods=["post"], url_path="indoor-check-in")
-    def indoor_check_in(self, request, pk=None):
-        """The checker lets the developer in: a paid indoor booking is checked in, with
-        `check`: their card tap on the store's reader (a booking check's id)."""
-        check_id = str(request.data.get("check", ""))
-        check = (
-            PlaygroundCheck.objects.filter(pk=int(check_id)).first() if check_id.isdigit() else None
-        )
-        if check is None:
-            raise ValidationError({"check": [_("Ask the developer to tap their card first.")]})
-        booking = services.indoor_check_in(
-            actor=request.user, booking=self.get_object(), check=check
-        )
-        return Response(BookingSerializer(self.get_queryset().get(pk=booking.pk)).data)
-
-    @action(detail=True, methods=["post"], url_path="check-in")
-    def check_in(self, request, pk=None):
-        """The developer is at the desk: a paid booking is checked in."""
-        return self._booking(services.desk_check_in(actor=request.user, booking=self.get_object()))
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
@@ -511,55 +453,3 @@ class BookingCheckoutViewSet(
     def stop_waiting(self, request, pk=None):
         """The desk closed the scan dialog: taps no longer go to this booking."""
         return self._respond(purchase_services.stop_waiting(purchase=self.get_object()))
-
-
-def checking_store(user):
-    """The active store that checks bookings whose login (or counter manager) the user is."""
-    return (
-        Seller.objects.filter(checks_bookings=True, status=SellerStatus.ACTIVE)
-        .filter(Q(user=user) | Q(positions__manager=user))
-        .distinct()
-        .first()
-    )
-
-
-class PlaygroundCheckViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    """Booking checks, newest first. A store that checks bookings (e.g. the gym counter):
-    a tap on its till reader, with no sale waiting for it, checks the developer in to the
-    booking running now (or starting within PLAYGROUND_CHECK_IN_EARLY_MINUTES). Its
-    checkers (the store's login or counter manager, with `booking.check`) see its taps;
-    users with `reader.view` see every store's. Poll with `?after=<last id>`."""
-
-    queryset = PlaygroundCheck.objects.select_related(
-        "event__developer", "developer", "booking__good", "reader", "seller"
-    )
-    serializer_class = PlaygroundCheckSerializer
-    permission_classes = [HasPermissions]
-    required_permissions = {"list": ["booking.check"], "readers": ["booking.check"]}
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        if not user.has_rbac_perm("reader.view"):
-            store = checking_store(user)
-            qs = qs.filter(seller=store) if store else qs.none()
-        query = PlaygroundChecksQuerySerializer(data=self.request.query_params)
-        query.is_valid(raise_exception=True)
-        after = query.validated_data.get("after")
-        return qs if after is None else qs.filter(pk__gt=after)
-
-    @extend_schema(parameters=[PlaygroundChecksQuerySerializer])
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
-
-    @extend_schema(responses=TillReaderSerializer(many=True))
-    @action(detail=False, methods=["get"])
-    def readers(self, request):
-        """The till readers whose taps check bookings for this user: their store's."""
-        readers = RFIDDevice.objects.filter(
-            purpose=DevicePurpose.TILL, is_active=True, seller__checks_bookings=True
-        )
-        if not request.user.has_rbac_perm("reader.view"):
-            store = checking_store(request.user)
-            readers = readers.filter(seller=store) if store else readers.none()
-        return Response(TillReaderSerializer(readers.order_by("code"), many=True).data)
