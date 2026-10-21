@@ -15,7 +15,14 @@ from apps.rfid.serializers import UIDField
 from apps.sellers.models import ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
 
-from .models import Purchase, PurchaseItem, PurchaseStatus
+from . import preferential
+from .models import (
+    PreferentialGood,
+    PreferentialSettings,
+    Purchase,
+    PurchaseItem,
+    PurchaseStatus,
+)
 
 TAKES_CARD = (PurchaseStatus.DRAFT, PurchaseStatus.CONFIRMED)
 
@@ -47,6 +54,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
             "good_name",
             "kind",
             "quantity",
+            "free_quantity",
             "people",
             "date",
             "start_time",
@@ -88,7 +96,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
     def get_line_total(self, item) -> str:
         if item.line_total is not None:
             return f"{item.line_total:.2f}"
-        return f"{current_price(item) * item.quantity * item.people:.2f}"
+        return f"{current_price(item) * preferential.charged(item) * item.people:.2f}"
 
     def get_price_name(self, item) -> str:
         return item.court_price.name if item.court_price_id else ""
@@ -101,8 +109,19 @@ class PresentedCardSerializer(serializers.Serializer):
     balance = serializers.SerializerMethodField(
         help_text="Their wallet balance now, so the seller can see whether it covers the total."
     )
+    free_items = serializers.SerializerMethodField(
+        help_text="Preferential free items the developer has before this sale (null while "
+        "the service is off)."
+    )
     presented_at = serializers.DateTimeField()
     expires_at = serializers.SerializerMethodField()
+
+    def get_free_items(self, purchase) -> int | None:
+        from .models import PreferentialSettings
+
+        if not PreferentialSettings.current().enabled:
+            return None
+        return preferential.free_left(purchase.presented_event.developer_id)
 
     def get_balance(self, purchase) -> str | None:
         from apps.finance.models import DeveloperAccount
@@ -128,7 +147,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
     )
     developer = DeveloperSummarySerializer(read_only=True)
     card_uid = serializers.CharField(source="card.uid", read_only=True, default=None)
-    items = PurchaseItemSerializer(many=True, read_only=True)
+    items = serializers.SerializerMethodField()
     booking = serializers.SerializerMethodField(
         help_text="Court bookings: the booking's id (to move it); null otherwise."
     )
@@ -200,11 +219,28 @@ class PurchaseSerializer(serializers.ModelSerializer):
         window = timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
         return purchase.waiting_since >= timezone.now() - window
 
+    def to_representation(self, purchase):
+        # A draft whose card was tapped shows the preferential free units it would get, so
+        # the seller sees the total the developer will pay (checkout decides for good).
+        if purchase.status == PurchaseStatus.DRAFT and self.get_presented_card(purchase):
+            items = list(purchase.items.all())
+            free = preferential.free_units(purchase.presented_event.developer_id, items)
+            for item in items:
+                item.free_quantity = free.get(item.good_id, 0)
+            purchase._preview_items = items
+        return super().to_representation(purchase)
+
+    @extend_schema_field(PurchaseItemSerializer(many=True))
+    def get_items(self, purchase):
+        items = getattr(purchase, "_preview_items", None) or purchase.items.all()
+        return PurchaseItemSerializer(items, many=True).data
+
     def get_total(self, purchase) -> str:
         if purchase.total is not None:
             return f"{purchase.total:.2f}"
+        items = getattr(purchase, "_preview_items", None) or purchase.items.all()
         total = sum(
-            (current_price(i) * i.quantity * i.people for i in purchase.items.all()),
+            (current_price(i) * preferential.charged(i) * i.people for i in items),
             Decimal("0.00"),
         )
         return f"{total:.2f}"
@@ -358,3 +394,120 @@ class PerformanceSerializer(serializers.Serializer):
     bookings_count = serializers.IntegerField(help_text="Paid court bookings.")
     bookings_total = serializers.DecimalField(max_digits=14, decimal_places=2)
     total = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class PreferentialGoodSerializer(serializers.ModelSerializer):
+    good_name = serializers.CharField(source="good.name", read_only=True)
+    kind = serializers.CharField(source="good.kind", read_only=True)
+    price = serializers.DecimalField(
+        source="good.price", max_digits=14, decimal_places=2, read_only=True
+    )
+    seller_name = serializers.CharField(source="good.service_position.seller.name", read_only=True)
+
+    class Meta:
+        model = PreferentialGood
+        fields = ["good", "good_name", "kind", "price", "seller_name"]
+        read_only_fields = fields
+
+
+class PreferentialLevelSerializer(serializers.Serializer):
+    threshold = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        help_text="Usage last month (purchases minus refunds) that reaches this level.",
+    )
+    items = serializers.IntegerField(
+        min_value=1, max_value=9999, help_text="Free items earned this month at this level."
+    )
+
+
+class PreferentialSettingsSerializer(serializers.ModelSerializer):
+    levels = serializers.SerializerMethodField()
+    goods = serializers.SerializerMethodField()
+    currency = serializers.SerializerMethodField()
+    updated_by_name = serializers.CharField(
+        source="updated_by.username", read_only=True, default=None
+    )
+
+    class Meta:
+        model = PreferentialSettings
+        fields = [
+            "enabled",
+            "levels",
+            "goods",
+            "currency",
+            "updated_at",
+            "updated_by_name",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(PreferentialLevelSerializer(many=True))
+    def get_levels(self, obj):
+        return PreferentialLevelSerializer(obj.levels, many=True).data
+
+    @extend_schema_field(PreferentialGoodSerializer(many=True))
+    def get_goods(self, obj):
+        rows = PreferentialGood.objects.select_related("good__service_position__seller")
+        return PreferentialGoodSerializer(rows, many=True).data
+
+    def get_currency(self, obj) -> str:
+        return settings.CURRENCY
+
+
+class PreferentialSettingsUpdateSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    levels = PreferentialLevelSerializer(
+        many=True,
+        help_text="The rules: usage last month -> free items this month. The highest level "
+        "reached counts.",
+    )
+    goods = serializers.PrimaryKeyRelatedField(
+        queryset=Good.objects.all(),
+        many=True,
+        help_text="The whole list of preferential goods (ids); a good left out is no longer one.",
+    )
+
+    def validate_levels(self, levels):
+        thresholds = [level["threshold"] for level in levels]
+        if len(thresholds) != len(set(thresholds)):
+            raise serializers.ValidationError(_("Each amount can only be used once."))
+        return levels
+
+    def validate(self, data):
+        if data["enabled"] and not data["levels"]:
+            raise serializers.ValidationError({"levels": _("Add at least one rule.")})
+        if data["enabled"] and not data["goods"]:
+            raise serializers.ValidationError({"goods": _("Add at least one free good.")})
+        return data
+
+
+class PreferentialStatusSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+    levels = PreferentialLevelSerializer(many=True)
+    usage_last_month = serializers.CharField(
+        help_text="Purchases minus refunds last calendar month."
+    )
+    eligible = serializers.BooleanField(help_text="Earned free items this month.")
+    items_this_month = serializers.IntegerField(
+        help_text="Free items earned this month (the highest level reached)."
+    )
+    earned = serializers.IntegerField(help_text="Free items earned so far, all months.")
+    used = serializers.IntegerField(help_text="Free items taken so far.")
+    left = serializers.IntegerField(
+        help_text="Free items saved up: earned minus used (0 while the service is off)."
+    )
+
+
+class PreferentialReportRowSerializer(serializers.Serializer):
+    developer = serializers.IntegerField()
+    employee_number = serializers.CharField()
+    full_name = serializers.CharField()
+    good = serializers.IntegerField()
+    good_name = serializers.CharField()
+    seller_name = serializers.CharField()
+    units = serializers.IntegerField(help_text="Free units given (on a court, slots).")
+    value = serializers.DecimalField(
+        max_digits=14, decimal_places=2, help_text="Their value at the price of the day."
+    )
+    last_at = serializers.DateTimeField(help_text="When the last of them was given.")

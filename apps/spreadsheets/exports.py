@@ -647,3 +647,35 @@ def readers_workbook(devices) -> bytes:
             )
         ]
     )
+
+
+def preferential_workbook(rows: list[dict], first: date, last: date) -> bytes:
+    """The free preferential goods given in a period, per developer and good."""
+    return workbook(
+        [
+            Sheet(
+                _("Free goods"),
+                [
+                    EMPLOYEE,
+                    Column("full_name", _("Developer"), width=24),
+                    Column("good_name", _("Good"), width=24),
+                    Column("seller_name", _("Seller"), width=20),
+                    Column("units", _("Free units"), width=10, kind="int"),
+                    Column("value", _("Value"), width=12, kind="money"),
+                    Column("last_at", _("Last given"), width=17, kind="datetime"),
+                ],
+                [
+                    [
+                        row["employee_number"],
+                        row["full_name"],
+                        row["good_name"],
+                        row["seller_name"],
+                        row["units"],
+                        row["value"],
+                        _local(row["last_at"]),
+                    ]
+                    for row in rows
+                ],
+            )
+        ]
+    )

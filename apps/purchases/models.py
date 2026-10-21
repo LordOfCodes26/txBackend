@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.developers.models import Developer
 from apps.finance.models import MONEY, AccountTransaction
@@ -116,12 +117,13 @@ class Purchase(TimeStampedModel):
                 condition=~Q(confirm_idempotency_key=""),
                 name="purchase_confirm_key_unique",
             ),
+            # A purchase made entirely of free preferential units costs 0: no ledger entry.
             models.CheckConstraint(
                 condition=~Q(status=PurchaseStatus.CONFIRMED)
                 | Q(
+                    Q(account_transaction__isnull=False) | Q(total=0),
                     developer__isnull=False,
                     total__isnull=False,
-                    account_transaction__isnull=False,
                     confirmed_at__isnull=False,
                 ),
                 name="purchase_confirmed_is_complete",
@@ -167,6 +169,10 @@ class PurchaseItem(models.Model):
     )
     # RENTAL lines priced per person: how many people (line total = price x slots x people).
     people = models.PositiveSmallIntegerField(default=1)
+    # Units given free by the preferential service, fixed at confirmation. Never lowered
+    # (used is used, even when the line shrinks or the purchase is deleted); the line is
+    # charged for max(quantity - free_quantity, 0) units.
+    free_quantity = models.PositiveIntegerField(default=0)
     # Price actually charged, fixed at confirmation (drafts show the current price).
     unit_price = models.DecimalField(**MONEY, null=True, blank=True)
     line_total = models.DecimalField(**MONEY, null=True, blank=True)
@@ -180,3 +186,63 @@ class PurchaseItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} × {self.good}"
+
+
+class PreferentialSettings(TimeStampedModel):
+    """The preferential service, set by admins. One row (pk=1); see `current()`.
+
+    `levels` are the rules: [{"threshold": "100.00", "items": 2}, ...], lowest first. Each
+    month, a developer whose usage the month before (purchases minus refunds; deposits and
+    manual adjustments don't count) reached a level's threshold earns the items of the
+    highest such level. The items are one total per developer, spent on any preferential
+    good (one item per free unit; on a court, per slot) and saved up when unused. Checkout
+    takes them automatically (see preferential.py). Every change is kept in
+    `PreferentialRule`.
+    """
+
+    enabled = models.BooleanField(default=False)
+    levels = models.JSONField(default=list)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        verbose_name_plural = "preferential settings"
+
+    def __str__(self):
+        return f"Preferential {'on' if self.enabled else 'off'}: {self.levels}"
+
+    @classmethod
+    def current(cls) -> "PreferentialSettings":
+        return cls.objects.get_or_create(pk=1)[0]
+
+
+class PreferentialGood(TimeStampedModel):
+    """A good (or court) that free preferential items can pay for."""
+
+    good = models.OneToOneField(Good, on_delete=models.CASCADE, related_name="preferential")
+
+    class Meta:
+        ordering = ["good__name", "id"]
+
+    def __str__(self):
+        return f"Preferential: {self.good}"
+
+
+class PreferentialRule(models.Model):
+    """The preferential settings as saved at `created_at` (never changed). A month's free
+    items follow the settings in force at the end of that month (now, for this month), so
+    later changes never alter what was already earned."""
+
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    enabled = models.BooleanField()
+    # [{"threshold": "100.00", "items": 2}, ...], lowest first (see PreferentialSettings).
+    levels = models.JSONField(default=list)
+    # The preferential goods' ids then, for the record.
+    goods = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"Preferential rule {self.created_at:%Y-%m-%d %H:%M}"

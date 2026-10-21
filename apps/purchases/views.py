@@ -8,6 +8,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
@@ -18,15 +19,16 @@ from apps.sellers.access import (
     SellerScopedQuerysetMixin,
     seller_purchase_kinds,
 )
-from apps.spreadsheets.exports import purchases_workbook
+from apps.spreadsheets.exports import preferential_workbook, purchases_workbook
 from apps.spreadsheets.xlsx import XLSX
 from apps.stats.views import PeriodSerializer
 from common.idempotency import HEADER, require_idempotency_key
 from common.middleware import client_ip
+from common.permissions import HasPermissions
 
-from . import services
+from . import preferential, services
 from .filters import PurchaseFilter
-from .models import Purchase, PurchaseKind, PurchaseStatus
+from .models import PreferentialSettings, Purchase, PurchaseKind, PurchaseStatus
 from .serializers import (
     ConfirmSerializer,
     ItemAddSerializer,
@@ -34,6 +36,9 @@ from .serializers import (
     LabelSerializer,
     PaidChangeSerializer,
     PerformanceSerializer,
+    PreferentialReportRowSerializer,
+    PreferentialSettingsSerializer,
+    PreferentialSettingsUpdateSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
     ReadersQuerySerializer,
@@ -354,3 +359,52 @@ class PurchaseViewSet(
     def me(self, request):
         """The caller's own purchases (as a developer)."""
         return self.list(request)
+
+
+class PreferentialSettingsView(APIView):
+    """The preferential service: free goods each month for developers whose usage last
+    month (purchases minus refunds) reached the threshold. Admins change it."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["finance.view"], "put": ["finance.preferential"]}
+
+    @extend_schema(responses=PreferentialSettingsSerializer)
+    def get(self, request):
+        return Response(PreferentialSettingsSerializer(PreferentialSettings.current()).data)
+
+    @extend_schema(
+        request=PreferentialSettingsUpdateSerializer, responses=PreferentialSettingsSerializer
+    )
+    def put(self, request):
+        serializer = PreferentialSettingsUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = preferential.save_settings(actor=request.user, **serializer.validated_data)
+        return Response(PreferentialSettingsSerializer(current).data)
+
+
+class PreferentialReportView(APIView):
+    """Free preferential goods given in a period (`date_from`, `date_to`; default the last
+    30 days), per developer and good. `export/` downloads it as Excel."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["finance.view"]}
+
+    @extend_schema(
+        parameters=[PeriodSerializer],
+        responses={
+            200: PreferentialReportRowSerializer(many=True),
+            (200, XLSX): OpenApiTypes.BINARY,
+        },
+    )
+    def get(self, request, export=False):
+        period = PeriodSerializer(data=request.query_params)
+        period.is_valid(raise_exception=True)
+        first, last = period.validated_data["date_from"], period.validated_data["date_to"]
+        rows = preferential.report(first, last)
+        if export:
+            response = HttpResponse(preferential_workbook(rows, first, last), content_type=XLSX)
+            response["Content-Disposition"] = (
+                f'attachment; filename="free-goods-{first}-to-{last}.xlsx"'
+            )
+            return response
+        return Response(PreferentialReportRowSerializer(rows, many=True).data)

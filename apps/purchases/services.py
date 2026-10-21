@@ -19,6 +19,7 @@ from apps.realtime.notify import notify_purchase
 from apps.rfid.models import CardStatus, RFIDCard, RFIDCardAssignment
 from apps.sellers.models import SellerStatus, ServicePosition
 
+from . import preferential
 from .exceptions import (
     CardNotPresented,
     CardNotUsable,
@@ -450,16 +451,22 @@ def confirm_purchase(
             .order_by("pk")
         }
 
+        # Preferential service: free units this month (the account lock above keeps two
+        # tills from handing out the same ones).
+        free = preferential.free_units(developer.pk, items)
         total = Decimal("0.00")
         for item in items:
             good = locked_goods[item.good_id]
             _ensure_sellable(good, purchase, booking=item.start is not None)
+            item.free_quantity = free.get(item.good_id, 0)
             # A court line: the chosen court price (per person: price x slots x people;
             # people is 1 for everything else).
             item.unit_price = item.court_price.price if item.court_price_id else good.price
-            item.line_total = finance.money(item.unit_price * item.quantity * item.people)
+            item.line_total = finance.money(
+                item.unit_price * preferential.charged(item) * item.people
+            )
             total += item.line_total
-        if total <= 0:
+        if total <= 0 and not free:
             raise PurchaseEmpty(_("The purchase total must be greater than zero."))
 
         reference = f"purchase:{purchase.pk}"
@@ -473,17 +480,20 @@ def confirm_purchase(
                     actor=actor,
                     reference=reference,
                 )
-        PurchaseItem.objects.bulk_update(items, ["unit_price", "line_total"])
+        PurchaseItem.objects.bulk_update(items, ["free_quantity", "unit_price", "line_total"])
 
-        txn = finance.post_transaction(
-            account=account,
-            kind=TransactionKind.PURCHASE,
-            amount=-total,
-            actor=actor,
-            description=f"Purchase at {purchase.seller.name}",
-            reference=reference,
-            allow_minus=True,
-        )
+        # All free: nothing to charge, so no ledger entry.
+        txn = None
+        if total > 0:
+            txn = finance.post_transaction(
+                account=account,
+                kind=TransactionKind.PURCHASE,
+                amount=-total,
+                actor=actor,
+                description=f"Purchase at {purchase.seller.name}",
+                reference=reference,
+                allow_minus=True,
+            )
 
         purchase.status = PurchaseStatus.CONFIRMED
         purchase.developer = developer
@@ -526,8 +536,9 @@ def confirm_purchase(
                 "card": card.uid,
                 "total": total,
                 "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
+                "free": sorted(free.items()),
                 "bookings": [[i.good_id, i.start.isoformat(), i.quantity] for i in booked],
-                "balance_after": txn.balance_after,
+                "balance_after": txn.balance_after if txn else account.balance,
             },
         )
         notify_purchase(purchase.pk, purchase.service_position_id, "purchase_confirmed")
@@ -634,14 +645,17 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
                 reference=reference,
             )
 
-    txn = finance.post_transaction(
-        account=account,
-        kind=TransactionKind.REFUND,
-        amount=purchase.total,
-        actor=actor,
-        description=f"Refund: purchase {purchase.pk} at {purchase.seller.name} deleted",
-        reference=reference,
-    )
+    # A purchase that was all free has nothing to refund (its free units stay used).
+    txn = None
+    if purchase.total > 0:
+        txn = finance.post_transaction(
+            account=account,
+            kind=TransactionKind.REFUND,
+            amount=purchase.total,
+            actor=actor,
+            description=f"Refund: purchase {purchase.pk} at {purchase.seller.name} deleted",
+            reference=reference,
+        )
 
     purchase.status = PurchaseStatus.REFUNDED
     purchase.refunded_by = actor if getattr(actor, "pk", None) else None
@@ -657,7 +671,7 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
             "refunded": purchase.total,
             "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
             "bookings": removed,
-            "balance_after": txn.balance_after,
+            "balance_after": txn.balance_after if txn else account.balance,
         },
     )
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
@@ -669,7 +683,7 @@ def change_paid_purchase(
 ) -> Purchase:
     """Change the goods of a paid till sale: `items` is the whole new list of
     {"good", "quantity"} (a line left out is removed). Lines already paid keep the price
-    charged; added goods cost their price now.
+    charged and their free preferential units; added goods and units cost their price now.
 
     The difference moves money at once: a lower total refunds it to the wallet (REFUND), a
     higher total charges it (PURCHASE), which needs the developer's card tap on the
@@ -707,8 +721,12 @@ def change_paid_purchase(
             else locked_goods[good_id].price
             for good_id in wanted
         }
-        total = sum((finance.money(price[g] * q) for g, q in wanted.items()), Decimal("0.00"))
-        if total <= 0:
+        free = {g: current[g].free_quantity if g in current else 0 for g in wanted}
+        total = sum(
+            (finance.money(price[g] * max(q - free[g], 0)) for g, q in wanted.items()),
+            Decimal("0.00"),
+        )
+        if total <= 0 and not any(free.values()):
             raise PurchaseEmpty(_("The purchase total must be greater than zero."))
         before = {g: i.quantity for g, i in current.items()}
         if before == wanted:
@@ -751,7 +769,7 @@ def change_paid_purchase(
                 item.delete()
             elif item.quantity != wanted[good_id]:
                 item.quantity = wanted[good_id]
-                item.line_total = finance.money(item.unit_price * item.quantity)
+                item.line_total = finance.money(item.unit_price * preferential.charged(item))
                 item.save(update_fields=["quantity", "line_total"])
         for good_id in set(wanted) - set(current):
             PurchaseItem.objects.create(

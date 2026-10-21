@@ -147,6 +147,9 @@ class GoodSerializer(serializers.ModelSerializer):
     track_stock = serializers.BooleanField(
         required=False, help_text="PRODUCT only (default true). Always false otherwise."
     )
+    preferential = serializers.SerializerMethodField(
+        help_text="Free preferential items can pay for it."
+    )
     initial_quantity = serializers.IntegerField(
         min_value=0,
         required=False,
@@ -173,6 +176,7 @@ class GoodSerializer(serializers.ModelSerializer):
             "track_stock",
             "quantity",
             "initial_quantity",
+            "preferential",
             "rental",
             "court_prices",
             "images",
@@ -183,6 +187,9 @@ class GoodSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    def get_preferential(self, obj) -> bool:
+        return getattr(obj, "preferential", None) is not None
 
     def validate_service_position(self, position):
         own = self.context.get("own_seller")

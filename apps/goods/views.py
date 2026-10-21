@@ -110,7 +110,7 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     """
 
     queryset = Good.objects.select_related(
-        "service_position__seller", "rental", "category"
+        "service_position__seller", "rental", "category", "preferential"
     ).prefetch_related("images", "court_prices")
     serializer_class = GoodSerializer
     permission_classes = [CatalogPermission]

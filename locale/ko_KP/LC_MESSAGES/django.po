@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-18 13:22+0000\n"
+"POT-Creation-Date: 2026-10-21 14:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: Korean (DPRK)\n"
@@ -45,7 +45,7 @@ msgstr "삭제하기전에 이 역할을 가진 사용자들에게서 역할을 
 
 #: apps/accounts/serializers.py:37 apps/bookings/serializers.py:275
 #: apps/bookings/serializers.py:280 apps/goods/serializers.py:118
-#: apps/goods/serializers.py:235 apps/goods/views.py:458
+#: apps/goods/serializers.py:242 apps/goods/views.py:458
 #: apps/sellers/onboarding.py:72 apps/sellers/serializers.py:161
 #: apps/spreadsheets/imports.py:373 apps/spreadsheets/imports.py:460
 #: common/i18n_extra.py:11
@@ -358,65 +358,65 @@ msgstr "운동장에는 가격이 적어도 하나 있어야 합니다."
 msgid "Must be after the opening time (same day)."
 msgstr "시작시간보다 뒤여야 합니다 (같은 날)."
 
-#: apps/goods/serializers.py:193
+#: apps/goods/serializers.py:200
 msgid "You can only use your own counters."
 msgstr "자기의 매대만 리용할수 있습니다."
 
-#: apps/goods/serializers.py:195
+#: apps/goods/serializers.py:202
 msgid "A good cannot move to another seller."
 msgstr "상품을 다른 판매자에게 옮길수 없습니다."
 
-#: apps/goods/serializers.py:221
+#: apps/goods/serializers.py:228
 msgid "Only allowed when creating; use the stock endpoint."
 msgstr "새로 만들 때에만 지정할수 있습니다. 재고조작을 리용하십시오."
 
-#: apps/goods/serializers.py:224
+#: apps/goods/serializers.py:231
 msgid "The kind of a good cannot be changed; create a new good."
 msgstr "상품의 종류는 바꿀수 없습니다. 새 상품을 만드십시오."
 
-#: apps/goods/serializers.py:233
+#: apps/goods/serializers.py:240
 msgid "Your store has no active counter."
 msgstr "매장에 쓸수 있는 매대가 없습니다."
 
-#: apps/goods/serializers.py:239 apps/goods/serializers.py:248
+#: apps/goods/serializers.py:246 apps/goods/serializers.py:255
 msgid "Only RENTAL goods have rental settings."
 msgstr "임대(RENTAL) 상품만 임대설정을 가질수 있습니다."
 
-#: apps/goods/serializers.py:242 apps/goods/serializers.py:246
+#: apps/goods/serializers.py:249 apps/goods/serializers.py:253
 #, python-format
 msgid "%(kind)s goods have no stock."
 msgstr "%(kind)s 상품에는 재고가 없습니다."
 
-#: apps/goods/serializers.py:250
+#: apps/goods/serializers.py:257
 msgid "Rental settings are required for RENTAL goods."
 msgstr "임대(RENTAL) 상품에는 임대설정이 있어야 합니다."
 
-#: apps/goods/serializers.py:253
+#: apps/goods/serializers.py:260
 msgid "Rentals need a price above 0 (charged per slot)."
 msgstr "임대료금은 0보다 커야 합니다 (시간대마다 받습니다)."
 
-#: apps/goods/serializers.py:260
+#: apps/goods/serializers.py:267
 msgid "Goods that don't track stock have no quantity."
 msgstr "재고를 관리하지 않는 상품에는 수량이 없습니다."
 
-#: apps/goods/serializers.py:269
+#: apps/goods/serializers.py:276
 msgid "Pick one of this store's categories."
 msgstr "이 매장의 분류 중 하나를 고르십시오."
 
-#: apps/goods/serializers.py:279
+#: apps/goods/serializers.py:286
 msgid "This seller already uses this SKU."
 msgstr "이 판매자는 이미 이 상품번호(SKU)를 리용하고있습니다."
 
-#: apps/goods/serializers.py:302
+#: apps/goods/serializers.py:309
 msgid "Required for ADJUSTMENT."
 msgstr "조정(ADJUSTMENT)에는 반드시 있어야 합니다."
 
-#: apps/goods/serializers.py:308
+#: apps/goods/serializers.py:315
 #, python-format
 msgid "Required for %(kind)s."
 msgstr "%(kind)s에는 반드시 있어야 합니다."
 
-#: apps/goods/serializers.py:313
+#: apps/goods/serializers.py:320
 #, python-format
 msgid "A reason is required for %(kind)s."
 msgstr "%(kind)s에는 리유를 입력하여야 합니다."
@@ -497,72 +497,84 @@ msgstr "지불된 경기장예약은 여기서 편집할수 없습니다. 다른
 msgid "The new total is higher: the developer taps their card and enters their PIN to pay the difference."
 msgstr "새 합계가 더 많습니다. 개발자가 카드를 대고 암호번호를 넣어 차액을 지불합니다."
 
-#: apps/purchases/serializers.py:275
+#: apps/purchases/serializers.py:300
 msgid "You can only sell at your own counters."
 msgstr "자기의 매대에서만 판매할수 있습니다."
 
-#: apps/purchases/serializers.py:334
+#: apps/purchases/serializers.py:359
 msgid "Each good can only be listed once."
 msgstr "매 상품은 한번만 넣을수 있습니다."
 
-#: apps/purchases/services.py:65 apps/purchases/services.py:213
+#: apps/purchases/serializers.py:463
+msgid "Each amount can only be used once."
+msgstr "매 금액은 한번만 쓸수 있습니다."
+
+#: apps/purchases/serializers.py:468
+msgid "Add at least one rule."
+msgstr "규칙을 적어도 하나 추가하십시오."
+
+#: apps/purchases/serializers.py:470
+msgid "Add at least one free good."
+msgstr "무료상품을 적어도 하나 추가하십시오."
+
+#: apps/purchases/services.py:66 apps/purchases/services.py:214
 msgid "Courts are booked separately, not added to a till purchase."
 msgstr "경기장은 판매대구입에 추가하지 않고 따로 예약합니다."
 
-#: apps/purchases/services.py:67
+#: apps/purchases/services.py:68
 msgid "Only courts can be booked."
 msgstr "경기장만 예약할수 있습니다."
 
-#: apps/purchases/services.py:116
+#: apps/purchases/services.py:117
 msgid "Card assign readers only take court bookings."
 msgstr "카드배정인식기는 운동장 예약만 받습니다."
 
-#: apps/purchases/services.py:117
+#: apps/purchases/services.py:118
 msgid "This till reader belongs to another seller."
 msgstr "이 판매대판독기는 다른 판매자의 것입니다."
 
-#: apps/purchases/services.py:210
+#: apps/purchases/services.py:211
 msgid "A booking checkout holds one court only."
 msgstr "예약결제에는 경기장 하나만 들어갈수 있습니다."
 
-#: apps/purchases/services.py:232
+#: apps/purchases/services.py:233
 #, python-format
 msgid "At most %(max)s per item."
 msgstr "한 상품에 최대 %(max)s개까지입니다."
 
-#: apps/purchases/services.py:365
+#: apps/purchases/services.py:366
 msgid "Unknown card."
 msgstr "등록되지 않은 카드입니다."
 
-#: apps/purchases/services.py:368
+#: apps/purchases/services.py:369
 msgid "This card is blocked."
 msgstr "이 카드는 차단되였습니다."
 
-#: apps/purchases/services.py:370
+#: apps/purchases/services.py:371
 msgid "This card is retired."
 msgstr "이 카드는 페기되였습니다."
 
-#: apps/purchases/services.py:378 apps/rfid/exceptions.py:28
+#: apps/purchases/services.py:379 apps/rfid/exceptions.py:28
 msgid "This card is not assigned to anyone."
 msgstr "이 카드는 누구에게도 배정되지 않았습니다."
 
-#: apps/purchases/services.py:418
+#: apps/purchases/services.py:419
 msgid "Tap the card of the developer who booked."
 msgstr "예약한 개발자의 카드를 대십시오."
 
-#: apps/purchases/services.py:428
+#: apps/purchases/services.py:429
 msgid "A different card was tapped meanwhile; ask for the PIN again."
 msgstr "그사이에 다른 카드가 대여졌습니다. 암호번호를 다시 요구하십시오."
 
-#: apps/purchases/services.py:434
+#: apps/purchases/services.py:435
 msgid "The card changed owner; scan it again."
 msgstr "카드소유자가 바뀌였습니다. 카드를 다시 대십시오."
 
-#: apps/purchases/services.py:463 apps/purchases/services.py:712
+#: apps/purchases/services.py:470 apps/purchases/services.py:730
 msgid "The purchase total must be greater than zero."
 msgstr "구입총액은 0보다 커야 합니다."
 
-#: apps/purchases/services.py:554
+#: apps/purchases/services.py:565
 msgid "Tap the card of the developer who paid for this purchase."
 msgstr "이 구매를 지불한 개발자의 카드를 대십시오."
 
@@ -908,7 +920,7 @@ msgstr "판매번호"
 #: apps/spreadsheets/exports.py:161 apps/spreadsheets/exports.py:199
 #: apps/spreadsheets/exports.py:362 apps/spreadsheets/exports.py:418
 #: apps/spreadsheets/exports.py:558 apps/spreadsheets/exports.py:640
-#: apps/spreadsheets/imports.py:60
+#: apps/spreadsheets/exports.py:662 apps/spreadsheets/imports.py:60
 msgid "Seller"
 msgstr "판매자"
 
@@ -929,7 +941,8 @@ msgid "Total"
 msgstr "합계"
 
 #: apps/spreadsheets/exports.py:201 apps/spreadsheets/exports.py:491
-#: apps/spreadsheets/exports.py:556 apps/spreadsheets/imports.py:62
+#: apps/spreadsheets/exports.py:556 apps/spreadsheets/exports.py:661
+#: apps/spreadsheets/imports.py:62
 msgid "Good"
 msgstr "상품"
 
@@ -973,7 +986,7 @@ msgstr "리유"
 msgid "Figure"
 msgstr "항목"
 
-#: apps/spreadsheets/exports.py:269
+#: apps/spreadsheets/exports.py:269 apps/spreadsheets/exports.py:664
 msgid "Value"
 msgstr "값"
 
@@ -1258,6 +1271,22 @@ msgstr "출입문 IP"
 msgid "Last seen"
 msgstr "마지막 신호"
 
+#: apps/spreadsheets/exports.py:657
+msgid "Free goods"
+msgstr "무료상품"
+
+#: apps/spreadsheets/exports.py:660
+msgid "Developer"
+msgstr "개발자"
+
+#: apps/spreadsheets/exports.py:663
+msgid "Free units"
+msgstr "무료개수"
+
+#: apps/spreadsheets/exports.py:665
+msgid "Last given"
+msgstr "마지막으로 준 시간"
+
 #: apps/spreadsheets/imports.py:37
 msgid "Phone"
 msgstr "전화"
@@ -1426,7 +1455,7 @@ msgstr "예비복사 도우미가 설치되지 않았거나 응답하지 않습�
 msgid "A backup is already running."
 msgstr "이미 예비복사가 진행중입니다."
 
-#: common/backups.py:154
+#: common/backups.py:158
 msgid "Not a backup file name."
 msgstr "예비복사 파일 이름이 아닙니다."
 
@@ -1693,7 +1722,7 @@ msgstr "자기 계정은 삭제할수 없습니다."
 msgid "This is the last active admin: make another admin first."
 msgstr "마지막 활성 관리자입니다. 먼저 다른 관리자를 만드십시오."
 
-#: common/system_views.py:130
+#: common/system_views.py:150
 msgid "Type RESTORE to confirm."
 msgstr "확인하려면 RESTORE를 입력하십시오."
 
@@ -1712,3 +1741,5 @@ msgstr "작성중인 구입만 지불할수 있습니다."
 #: common/test_console.py:147
 msgid "This developer has no active card; send a `uid` instead."
 msgstr "이 개발자에게는 활성카드가 없습니다. 대신 `uid`를 보내십시오."
+
+

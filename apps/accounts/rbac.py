@@ -58,6 +58,9 @@ AREAS: dict[str, dict[str, str]] = {
         "finance.freeze": "Freeze and unfreeze wallets (spending stops, deposits still work)",
         "finance.close": "Close and reopen wallets (only a zero balance can close)",
         "finance.minus_limit": "Set how far below zero purchases may take a wallet",
+        "finance.preferential": (
+            "Set the preferential service: free goods for developers who spent enough last month"
+        ),
         "finance.deposits.view": "See the deposit list and deposit totals by type",
     },
     "Purchases and till": {
@@ -177,8 +180,8 @@ ROLES: dict[str, RoleSpec] = {
     Roles.FINANCE_MANAGER: RoleSpec(
         "Finance manager",
         "Manages developer balances and deposits",
-        # The minus limit is the admins' decision.
-        (_prefixed("finance") - {"finance.minus_limit"})
+        # The minus limit and the preferential service are the admins' decision.
+        (_prefixed("finance") - {"finance.minus_limit", "finance.preferential"})
         | {"developer.view", "purchase.view", "purchase.report.view", "booking.view", "audit.view"}
         | {"excel.export", "excel.import_balances"},
     ),

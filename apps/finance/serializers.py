@@ -19,6 +19,10 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(
         source="developer.building.name", read_only=True, default=None
     )
+    free_items = serializers.SerializerMethodField(
+        help_text="Preferential free items left, on list pages (null while the service is "
+        "off; a single wallet: GET .../preferential/)."
+    )
 
     class Meta:
         model = DeveloperAccount
@@ -29,6 +33,7 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
             "building_name",
             "balance",
             "currency",
+            "free_items",
             "status",
             "status_reason",
             "has_pin",
@@ -40,6 +45,11 @@ class DeveloperAccountSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
+
+    def get_free_items(self, obj) -> int | None:
+        # Filled for a whole list page at once (DeveloperAccountViewSet.get_serializer).
+        free = self.context.get("free_items")
+        return None if free is None else free.get(obj.developer_id, 0)
 
 
 class AccountTransactionSerializer(serializers.ModelSerializer):

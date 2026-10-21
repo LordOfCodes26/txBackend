@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 
 from apps.developers.exceptions import DeveloperProfileNotFound
 from apps.developers.models import Developer
+from apps.purchases.serializers import PreferentialStatusSerializer
 from apps.rfid.scope import BuildingScopedMixin
 from common.idempotency import HEADER, require_idempotency_key
 from common.permissions import HasPermissions
@@ -56,6 +57,7 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
         "unfreeze": ["finance.freeze"],
         "close": ["finance.close"],
         "reopen": ["finance.close"],
+        "preferential": ["finance.view"],
     }
     filterset_class = DeveloperAccountFilter
     search_fields = ["developer__full_name", "developer__employee_number"]
@@ -67,6 +69,17 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
         "status",
         "updated_at",
     ]
+
+    def get_serializer(self, *args, **kwargs):
+        # A list page: the preferential free items of its developers, in a few queries.
+        if self.action == "list" and args:
+            from apps.purchases import preferential
+
+            args = (list(args[0]), *args[1:])  # a page, or every row when not paged
+            ids = [account.developer_id for account in args[0]]
+            kwargs.setdefault("context", self.get_serializer_context())
+            kwargs["context"]["free_items"] = preferential.free_left_many(ids)
+        return super().get_serializer(*args, **kwargs)
 
     @extend_schema(responses=DeveloperAccountSerializer)
     @action(detail=False, methods=["get"])
@@ -117,6 +130,16 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
         )
         account.refresh_from_db()
         return Response(DeveloperAccountSerializer(account).data)
+
+    @extend_schema(responses=PreferentialStatusSerializer)
+    @action(detail=True, methods=["get"])
+    def preferential(self, request, pk=None):
+        """Preferential service for this developer: last month's usage, whether they get the
+        free goods this month, and how many are left."""
+        from apps.purchases import preferential
+
+        status_ = preferential.developer_status(self.get_object().developer_id)
+        return Response(PreferentialStatusSerializer(status_).data)
 
     def _transition(self, request, transition):
         serializer = StatusChangeSerializer(data=request.data)

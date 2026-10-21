@@ -786,7 +786,10 @@ def change_booking(
                 choices[0] if choices else None,
             )
         people = people_for(rules, booking.people, _per(target, court_price))
-        price = finance.money(price_of(target, slots, people, court_price))
+        # Slots given free by the preferential service stay free on the new time.
+        line = purchase.items.first() if purchase is not None else None
+        free = line.free_quantity if line is not None else 0
+        price = finance.money(price_of(target, max(slots - free, 0), people, court_price))
         paid = purchase.total if purchase is not None else price
         difference = price - paid
         if difference > 0:
