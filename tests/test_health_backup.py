@@ -25,6 +25,7 @@ def healthy(**overrides):
         "last_verify_ok": "true",
         "last_base_backup_at": iso(timedelta(days=2)),
         "offsite_target": "/mnt/nas",
+        "offsite_copy_at": iso(timedelta(hours=3)),
     }
     return values | overrides
 
@@ -61,6 +62,84 @@ def test_missing_offsite_copy_is_a_warning(client, status_file):
     status_file(**healthy(offsite_target=""))
     body = client.get("/health/backup/").json()
     assert "no off-site copy configured" in body["warnings"][0]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        (
+            {"offsite_error": "NOT_MOUNTED"},
+            "off-site copy refused: the backup disk isn't mounted",
+        ),
+        ({"offsite_error": "COPY_FAILED"}, "off-site copy failed"),
+        ({"offsite_copy_at": iso(timedelta(hours=30))}, "off-site copy is missing or too old"),
+        ({"offsite_copy_at": ""}, "off-site copy is missing or too old"),
+    ],
+)
+def test_offsite_copy_not_made_is_an_error(client, status_file, settings, overrides, error):
+    settings.BACKUP_REQUIRE_PITR = False
+    status_file(**healthy(**overrides))
+    r = client.get("/health/backup/")
+    assert r.status_code == 503
+    assert r.json()["errors"] == [error]
+
+
+@pytest.fixture
+def full_disk(monkeypatch):
+    """Make every disk look `percent` full."""
+    import shutil
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+
+    def fill(percent):
+        monkeypatch.setattr(
+            shutil, "disk_usage", lambda path: usage(1000, percent * 10, 1000 - percent * 10)
+        )
+
+    return fill
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("percent", "code", "errors", "warnings"),
+    [
+        (79, 200, [], []),
+        (80, 200, [], ["backups disk is 80% full"]),
+        (89, 200, [], ["backups disk is 89% full"]),
+        (90, 503, ["backups disk is 90% full"], []),
+        (97, 503, ["backups disk is 97% full"], []),
+    ],
+)
+def test_backup_disk_space(
+    client, status_file, settings, tmp_path, full_disk, percent, code, errors, warnings
+):
+    settings.BACKUP_REQUIRE_PITR = False
+    status_file(**healthy(backup_dir=str(tmp_path), offsite_target="backup@nas:/srv/b"))
+    full_disk(percent)
+    r = client.get("/health/backup/")
+    assert r.status_code == code, r.json()
+    assert r.json()["errors"] == errors and r.json()["warnings"] == warnings
+    # Only the role is shown (the endpoint is public), not the folder.
+    assert r.json()["disks"] == [
+        {"role": "backups", "used_percent": float(percent), "free_bytes": 1000 - percent * 10}
+    ]
+    assert str(tmp_path) not in r.content.decode()
+
+
+@pytest.mark.django_db
+def test_offsite_disk_is_checked_too(client, status_file, settings, tmp_path):
+    import os
+    import tempfile
+
+    if os.stat("/dev/shm").st_dev == os.stat(str(tmp_path)).st_dev:
+        pytest.skip("needs /dev/shm on its own filesystem")
+    settings.BACKUP_REQUIRE_PITR = False
+    with tempfile.TemporaryDirectory(dir="/dev/shm") as offsite:
+        status_file(**healthy(backup_dir=str(tmp_path), offsite_target=offsite))
+        roles = [disk["role"] for disk in client.get("/health/backup/").json()["disks"]]
+    assert roles == ["backups", "off-site"]
 
 
 @pytest.mark.django_db

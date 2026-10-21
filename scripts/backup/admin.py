@@ -267,6 +267,16 @@ def run() -> dict:
     return {"started": True}
 
 
+def _same_disk(folder: str) -> bool:
+    """Whether `folder` is on this server's own disk (the backups' or /): a backup disk that
+    isn't mounted leaves its mount point there."""
+    backups = Path(read_conf().get("BACKUP_DIR") or "/var/backups/backend")
+    while not backups.exists() and backups != backups.parent:
+        backups = backups.parent
+    device = os.stat(folder).st_dev
+    return device in (os.stat(backups).st_dev, os.stat("/").st_dev)
+
+
 def _check(key: str, value: str) -> str:
     if key == "BACKUP_TIME":
         if not TIME_VALUE.match(value):
@@ -281,6 +291,10 @@ def _check(key: str, value: str) -> str:
             raise Refused("Use a full folder path, e.g. /mnt/backup-disk/backend.", key)
         if value and not Path(value).is_dir():
             raise Refused("This folder doesn't exist (is the disk mounted?).", key)
+        if value and _same_disk(value):
+            raise Refused(
+                "This folder is on this server's own disk: mount the backup disk first.", key
+            )
     elif key == "OFFSITE_RSYNC":
         if value and (not RSYNC_VALUE.match(value) or ".." in value):
             raise Refused("Use user@host:/path, e.g. backup@10.0.0.50:/srv/backups/backend.", key)

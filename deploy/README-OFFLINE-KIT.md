@@ -205,6 +205,8 @@ sudo -u backend bash -c 'set -a; . /etc/backend/backend.env; set +a; \
    readers**.
 6. **Backups to a second place:** set `OFFSITE_DIR=` or `OFFSITE_RSYNC=` in
    `/etc/backend/backup.conf` (backups are made every night into `/var/backups/backend`).
+   A backup disk that isn't mounted is refused (not copied onto the server's own disk) and
+   `/health/backup/` reports it; it also warns at 80 % disk use and reports an error at 90 %.
 
 ## 8. Developing on the server
 

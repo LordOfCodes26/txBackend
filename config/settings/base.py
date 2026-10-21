@@ -281,6 +281,11 @@ BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=8)
 # Point-in-time recovery (base backups + WAL archiving) is required; turn this off only
 # where nightly verified dumps are the whole backup.
 BACKUP_REQUIRE_PITR = env.bool("BACKUP_REQUIRE_PITR", default=True)
+# Where the backups are (the status file says, once a backup has run; this until then).
+BACKUP_DIR = env("BACKUP_DIR", default="/var/backups/backend")
+# The backup disk (and a local off-site disk): a warning from this % full, an error from that.
+BACKUP_DISK_WARN_PERCENT = env.int("BACKUP_DISK_WARN_PERCENT", default=80)
+BACKUP_DISK_ERROR_PERCENT = env.int("BACKUP_DISK_ERROR_PERCENT", default=90)
 # The Backups page talks to the root helper scripts/backup/admin.py: through its systemd
 # socket (installed by the kit), or, when BACKUP_ADMIN_COMMAND is set, by running it
 # directly (a web service that already runs as root, e.g. staging).

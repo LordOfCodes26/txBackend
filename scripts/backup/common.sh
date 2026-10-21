@@ -35,16 +35,44 @@ os.replace(tmp, path)
 PY
 }
 
+# The filesystem a path is on: its own, or its nearest existing parent's.
+fs_of() {
+    local path=$1
+    while [[ ! -e "$path" ]]; do path=$(dirname "$path"); done
+    stat -c %d "$path"
+}
+
+# The off-site copy didn't happen: say so in the status file (GET /health/backup/ reports
+# it) and fail the run. $1: NOT_MOUNTED or COPY_FAILED; $2: the reason, for the log.
+offsite_failed() {
+    echo "OFF-SITE COPY FAILED: $2" >&2
+    update_status "offsite_error=$1" "offsite_error_at=$(now_iso)"
+    return 1
+}
+
 copy_offsite() {
+    update_status "backup_dir=$BACKUP_DIR"
     if [[ -n "${OFFSITE_DIR:-}" ]]; then
+        update_status "offsite_target=$OFFSITE_DIR"
+        # A backup disk that isn't mounted leaves its folder (or the mount point) on this
+        # server's own disk: copying there would look fine and protect nothing.
+        local offsite_fs
+        offsite_fs=$(fs_of "$OFFSITE_DIR")
+        if [[ "$offsite_fs" == "$(fs_of "$BACKUP_DIR")" || "$offsite_fs" == "$(fs_of /)" ]]; then
+            offsite_failed NOT_MOUNTED "$OFFSITE_DIR is on this server's own disk: is the backup disk mounted?"
+            return
+        fi
         mkdir -p "$OFFSITE_DIR"
-        rsync -a --delete "$BACKUP_DIR"/ "$OFFSITE_DIR"/
-        update_status "offsite_copy_at=$(now_iso)" "offsite_target=$OFFSITE_DIR"
+        rsync -a --delete "$BACKUP_DIR"/ "$OFFSITE_DIR"/ \
+            || { offsite_failed COPY_FAILED "rsync to $OFFSITE_DIR failed"; return; }
+        update_status "offsite_copy_at=$(now_iso)" "offsite_error="
     elif [[ -n "${OFFSITE_RSYNC:-}" ]]; then
-        rsync -a --delete -e "ssh -o BatchMode=yes" "$BACKUP_DIR"/ "$OFFSITE_RSYNC"/
-        update_status "offsite_copy_at=$(now_iso)" "offsite_target=$OFFSITE_RSYNC"
+        update_status "offsite_target=$OFFSITE_RSYNC"
+        rsync -a --delete -e "ssh -o BatchMode=yes" "$BACKUP_DIR"/ "$OFFSITE_RSYNC"/ \
+            || { offsite_failed COPY_FAILED "rsync to $OFFSITE_RSYNC failed"; return; }
+        update_status "offsite_copy_at=$(now_iso)" "offsite_error="
     else
         echo "WARNING: no OFFSITE_DIR/OFFSITE_RSYNC set: backups exist on this disk only." >&2
-        update_status "offsite_target="
+        update_status "offsite_target=" "offsite_error="
     fi
 }

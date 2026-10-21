@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import shutil
 from datetime import UTC, datetime, timedelta
 
 import redis
@@ -57,9 +59,52 @@ def _parse(ts: str | None):
         return None
 
 
+# Why the last off-site copy didn't happen (written by scripts/backup/common.sh).
+OFFSITE_ERRORS = {
+    "NOT_MOUNTED": "off-site copy refused: the backup disk isn't mounted",
+    "COPY_FAILED": "off-site copy failed",
+}
+
+
+def _existing(path: str) -> str:
+    """The path, or its nearest existing parent (a folder not made yet is on its parent's disk)."""
+    while path and not os.path.exists(path):
+        parent = os.path.dirname(path.rstrip("/")) or "/"
+        if parent == path:
+            break
+        path = parent
+    return path or "/"
+
+
+def disk_usage(status: dict) -> list[dict]:
+    """How full the backup disk is, and a local off-site disk (once per filesystem). Only
+    the role is named, not the folder (the health endpoint is public)."""
+    places = [("backups", status.get("backup_dir") or settings.BACKUP_DIR)]
+    target = status.get("offsite_target") or ""
+    if target.startswith("/") and not status.get("offsite_error"):
+        places.append(("off-site", target))
+    disks, seen = [], set()
+    for role, path in places:
+        try:
+            path = _existing(path)
+            device = os.stat(path).st_dev
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        if device in seen:
+            continue
+        seen.add(device)
+        # As `df` counts it: what is used of what an ordinary user can have.
+        usable = usage.used + usage.free
+        percent = round(100 * usage.used / usable, 1) if usable else 0.0
+        disks.append({"role": role, "used_percent": percent, "free_bytes": usage.free})
+    return disks
+
+
 def backup_health() -> dict:
-    """Backup freshness: `status` "error" when backups are missing, stale, unverified or
-    WAL archiving fails, with `errors`; `warnings` (e.g. no off-site copy) otherwise. With
+    """Backup freshness: `status` "error" when backups are missing, stale, unverified, the
+    off-site copy failed or is old, a backup disk is 90% full or WAL archiving fails, with
+    `errors`; `warnings` (e.g. no off-site copy, a disk 80% full) otherwise. With
     BACKUP_REQUIRE_PITR off, base backups and WAL archiving aren't required."""
     errors, warnings = [], []
     try:
@@ -86,6 +131,21 @@ def backup_health() -> dict:
         errors.append("base backup for point-in-time recovery is missing or too old")
     if status and not status.get("offsite_target"):
         warnings.append("backups are only on this server's disk (no off-site copy configured)")
+    elif status.get("offsite_error"):
+        errors.append(OFFSITE_ERRORS.get(status["offsite_error"], "off-site copy failed"))
+    elif status:
+        copied_at = _parse(status.get("offsite_copy_at"))
+        if copied_at is None or now - copied_at > timedelta(
+            hours=settings.BACKUP_MAX_DUMP_AGE_HOURS
+        ):
+            errors.append("off-site copy is missing or too old")
+
+    disks = disk_usage(status)
+    for disk in disks:
+        if disk["used_percent"] >= settings.BACKUP_DISK_ERROR_PERCENT:
+            errors.append(f"{disk['role']} disk is {disk['used_percent']:g}% full")
+        elif disk["used_percent"] >= settings.BACKUP_DISK_WARN_PERCENT:
+            warnings.append(f"{disk['role']} disk is {disk['used_percent']:g}% full")
 
     archiver = {}
     try:
@@ -121,6 +181,8 @@ def backup_health() -> dict:
         "last_verify_ok": status.get("last_verify_ok") == "true",
         "last_base_backup_at": status.get("last_base_backup_at"),
         "offsite_copy_at": status.get("offsite_copy_at"),
+        "offsite_error": status.get("offsite_error") or None,
+        "disks": disks,
         "wal_archiver": archiver,
     }
     return body

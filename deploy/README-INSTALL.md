@@ -230,7 +230,11 @@ On the server, in `/opt/backend/current/docs/` (and in `~/backend-dev/docs/`):
 
 5. **Backups to a second place:** backups are made every night into
    `/var/backups/backend`, on the same disk. Set a second disk or machine in
-   `/etc/backend/backup.conf` (`OFFSITE_DIR=` or `OFFSITE_RSYNC=`).
+   `/etc/backend/backup.conf` (`OFFSITE_DIR=` or `OFFSITE_RSYNC=`). An `OFFSITE_DIR`
+   on a disk that isn't mounted is refused, not filled: `/health/backup/` then reports
+   "off-site copy refused: the backup disk isn't mounted". It also warns when the backup
+   disk is 80 % full and reports an error at 90 % (`BACKUP_DISK_WARN_PERCENT`,
+   `BACKUP_DISK_ERROR_PERCENT` in the backend's env file).
 
 6. **Firewall:** `prepare-server.sh` already opened 22, 80, 443 and 9100. To limit 9100
    to the doors later: `sudo ufw allow from <door ip> to any port 9100 proto tcp`, then

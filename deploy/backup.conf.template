@@ -9,7 +9,9 @@ MEDIA_ROOT=/var/lib/backend/media
 KEEP_DAILY_DAYS=14
 KEEP_BASE_BACKUPS=4
 # IMPORTANT: a second disk or another machine. Backups on the same disk die with it.
-# Either a mounted directory (USB disk, NAS share) ...
+# Either a mounted directory (USB disk, NAS share) ... The copy is refused (and
+# /health/backup/ reports an error) while this folder is on this server's own disk, i.e.
+# the backup disk isn't mounted: nothing is copied onto the server's disk by mistake.
 OFFSITE_DIR=
 # ... or an rsync target over SSH, e.g. backup@10.0.0.50:/srv/backups/backend
 OFFSITE_RSYNC=

@@ -21,6 +21,19 @@ DUMP = "backend-20261007-003441.dump"
 
 
 @pytest.fixture
+def other_disk():
+    """A folder on another filesystem than the backups (tmpfs), like a mounted USB disk."""
+    import shutil
+    import tempfile
+
+    if not os.path.isdir("/dev/shm") or os.stat("/dev/shm").st_dev == os.stat("/").st_dev:
+        pytest.skip("needs /dev/shm on its own filesystem")
+    folder = Path(tempfile.mkdtemp(dir="/dev/shm", prefix="offsite-"))
+    yield folder
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+@pytest.fixture
 def box(tmp_path, monkeypatch, settings):
     """backup.conf, a backup folder with two dumps, and fake systemctl / journalctl."""
     backups = tmp_path / "backups"
@@ -131,9 +144,8 @@ def test_run_now_starts_the_service_once(box, admin):
     assert r.status_code == 409 and r.json()["error"]["code"] == "BACKUP_RUNNING"
 
 
-def test_settings_are_checked_and_saved(box, admin):
-    offsite = box.root / "usb"
-    offsite.mkdir()
+def test_settings_are_checked_and_saved(box, admin, other_disk):
+    offsite = other_disk
     r = admin.patch(
         PAGE,
         {"backup_time": "03:15", "keep_daily_days": 30, "offsite_dir": str(offsite)},
@@ -168,9 +180,19 @@ def test_bad_settings_are_refused(box, admin, body, field):
     assert box.conf.read_text() == before
 
 
-def test_offsite_folder_and_rsync_not_both(box, admin):
-    offsite = box.root / "usb"
-    offsite.mkdir()
+def test_offsite_folder_on_this_servers_disk_is_refused(box, admin):
+    # The backup disk isn't mounted: its mount point is an empty folder on this disk.
+    unmounted = box.root / "usb"
+    unmounted.mkdir()
+    before = box.conf.read_text()
+    r = admin.patch(PAGE, {"offsite_dir": str(unmounted)}, format="json")
+    assert r.status_code == 400
+    assert "own disk" in r.json()["error"]["details"]["offsite_dir"][0]
+    assert box.conf.read_text() == before
+
+
+def test_offsite_folder_and_rsync_not_both(box, admin, other_disk):
+    offsite = other_disk
     body = {"offsite_dir": str(offsite), "offsite_rsync": "backup@10.0.0.5:/srv/b"}
     r = admin.patch(PAGE, body, format="json")
     assert r.status_code == 400 and "offsite_rsync" in r.json()["error"]["details"]
