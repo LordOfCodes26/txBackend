@@ -34,6 +34,7 @@ fi
 
 echo "==> Pruning dumps older than $KEEP_DAILY_DAYS days"
 find "$BACKUP_DIR/db" "$BACKUP_DIR/media" -type f -mtime "+$KEEP_DAILY_DAYS" -delete
+free_space_guard
 
 echo "==> Copying off-site"
 copy_offsite

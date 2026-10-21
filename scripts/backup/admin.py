@@ -282,7 +282,7 @@ def _check(key: str, value: str) -> str:
         if not TIME_VALUE.match(value):
             raise Refused("Use a time like 02:30.", key)
     elif key in ("KEEP_DAILY_DAYS", "KEEP_BASE_BACKUPS"):
-        top = 365 if key == "KEEP_DAILY_DAYS" else 52
+        top = 365 if key == "KEEP_DAILY_DAYS" else 90
         if not value.isdigit() or not 1 <= int(value) <= top:
             raise Refused(f"Use a whole number from 1 to {top}.", key)
         value = str(int(value))

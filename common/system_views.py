@@ -44,7 +44,7 @@ class DataResetView(APIView):
 class BackupSettingsSerializer(serializers.Serializer):
     backup_time = serializers.RegexField(r"^([01]\d|2[0-3]):[0-5]\d$", required=False)
     keep_daily_days = serializers.IntegerField(min_value=1, max_value=365, required=False)
-    keep_base_backups = serializers.IntegerField(min_value=1, max_value=52, required=False)
+    keep_base_backups = serializers.IntegerField(min_value=1, max_value=90, required=False)
     offsite_dir = serializers.CharField(allow_blank=True, max_length=255, required=False)
     offsite_rsync = serializers.CharField(allow_blank=True, max_length=255, required=False)
 

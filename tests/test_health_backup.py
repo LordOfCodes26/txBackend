@@ -48,6 +48,11 @@ def test_no_status_file_is_an_error(client, settings, tmp_path):
             {"last_base_backup_at": iso(timedelta(days=9))},
             "base backup for point-in-time recovery is missing or too old",
         ),
+        (
+            # Base backups run daily: two missed runs are an error.
+            {"last_base_backup_at": iso(timedelta(days=4))},
+            "base backup for point-in-time recovery is missing or too old",
+        ),
     ],
 )
 def test_stale_or_unverified_backups_are_errors(client, status_file, overrides, error):
@@ -62,6 +67,15 @@ def test_missing_offsite_copy_is_a_warning(client, status_file):
     status_file(**healthy(offsite_target=""))
     body = client.get("/health/backup/").json()
     assert "no off-site copy configured" in body["warnings"][0]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("days", "warned"), [(1, True), (8, False)])
+def test_old_backups_deleted_for_space_are_a_warning_for_a_week(client, status_file, days, warned):
+    status_file(**healthy(space_pruned_at=iso(timedelta(days=days))))
+    body = client.get("/health/backup/").json()
+    message = "the backup disk was nearly full: the oldest backups were deleted to make room"
+    assert (message in body["warnings"]) is warned
 
 
 @pytest.mark.django_db

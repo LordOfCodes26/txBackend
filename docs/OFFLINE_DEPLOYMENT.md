@@ -83,7 +83,7 @@ What it does (about 2–3 minutes, without internet):
    FINANCE_MANAGER, BUILDING_MANAGER, BUILDING_OWNER, SELLER, DEVELOPER;
 6. installs and starts the services: `backend-web` (API), `backend-ws` (live updates),
    `backend-tcp` (door devices, TCP 9100), `backend-worker`, nginx;
-7. enables backups (WAL archiving, nightly and weekly timers) and runs the first ones;
+7. enables backups (WAL archiving, nightly dump and daily base backup timers) and runs the first ones;
 8. writes timezone, languages and allowed hosts to `/etc/backend/backend.env`, creates the
    first admin (a Django superuser), and runs the health checks.
 

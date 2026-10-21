@@ -140,6 +140,12 @@ def backup_health() -> dict:
         ):
             errors.append("off-site copy is missing or too old")
 
+    pruned_at = _parse(status.get("space_pruned_at"))
+    if pruned_at is not None and now - pruned_at < timedelta(days=7):
+        warnings.append(
+            "the backup disk was nearly full: the oldest backups were deleted to make room"
+        )
+
     disks = disk_usage(status)
     for disk in disks:
         if disk["used_percent"] >= settings.BACKUP_DISK_ERROR_PERCENT:

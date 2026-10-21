@@ -277,7 +277,8 @@ PURCHASE_ALLOW_MANUAL_CARD_UID = env.bool("PURCHASE_ALLOW_MANUAL_CARD_UID", defa
 # Written by scripts/backup/*.sh, read by GET /health/backup/.
 BACKUP_STATUS_FILE = env("BACKUP_STATUS_FILE", default="/var/lib/backend/backup-status.json")
 BACKUP_MAX_DUMP_AGE_HOURS = env.int("BACKUP_MAX_DUMP_AGE_HOURS", default=26)
-BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=8)
+# Base backups run daily: this allows one missed run.
+BACKUP_MAX_BASE_AGE_DAYS = env.int("BACKUP_MAX_BASE_AGE_DAYS", default=3)
 # Point-in-time recovery (base backups + WAL archiving) is required; turn this off only
 # where nightly verified dumps are the whole backup.
 BACKUP_REQUIRE_PITR = env.bool("BACKUP_REQUIRE_PITR", default=True)

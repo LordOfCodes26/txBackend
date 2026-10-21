@@ -7,7 +7,8 @@ CONF=${BACKUP_CONF:-/etc/backend/backup.conf}
 . "$CONF"
 : "${BACKUP_DIR:?}" "${DB_NAME:?}" "${STATUS_FILE:?}"
 KEEP_DAILY_DAYS=${KEEP_DAILY_DAYS:-14}
-KEEP_BASE_BACKUPS=${KEEP_BASE_BACKUPS:-4}
+KEEP_BASE_BACKUPS=${KEEP_BASE_BACKUPS:-7}
+DISK_PRUNE_PERCENT=${DISK_PRUNE_PERCENT:-85}
 
 as_postgres() { runuser -u postgres -- "$@"; }
 # Server-side tools (pg_archivecleanup, pg_ctl) live in the versioned bin dir on Debian/Ubuntu.
@@ -33,6 +34,49 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, 0o644)
 os.replace(tmp, path)
 PY
+}
+
+# Delete archived WAL older than the oldest kept base backup: no restore can start before
+# it. -x .gz: the archive is gzipped (plain files from before that are matched too).
+prune_wal() {
+    local oldest first_wal
+    oldest=$(ls -1d "$BACKUP_DIR"/base/*/ 2>/dev/null | sort | head -1)
+    [[ -n "$oldest" ]] || return 0
+    first_wal=$(tar -xzOf "$oldest/base.tar.gz" backup_label 2>/dev/null \
+                | sed -n 's/^START WAL LOCATION: .* (file \(.*\))$/\1/p')
+    [[ -n "$first_wal" ]] || return 0
+    as_postgres "$PG_BIN/pg_archivecleanup" -x .gz "$BACKUP_DIR/wal" "$first_wal"
+    # pg_archivecleanup leaves the backup history files (one small file per base backup).
+    find "$BACKUP_DIR/wal" -maxdepth 1 -name '*.backup*' ! -newer "$oldest" -delete
+}
+
+disk_percent() { df --output=pcent "$1" | tail -1 | tr -dc 0-9; }
+
+# The backup disk is nearly full: give up the oldest point-in-time history, then the oldest
+# nightly dumps, rather than let the database stop when the disk is full. Always kept: the
+# newest base backup with the WAL after it, and the newest 3 dumps.
+free_space_guard() {
+    local pruned=0 bases dumps
+    while (( $(disk_percent "$BACKUP_DIR") >= DISK_PRUNE_PERCENT )); do
+        mapfile -t bases < <(ls -1d "$BACKUP_DIR"/base/*/ 2>/dev/null | sort)
+        if (( ${#bases[@]} > 1 )); then
+            echo "Disk $(disk_percent "$BACKUP_DIR")% full: deleting base backup ${bases[0]}" >&2
+            rm -rf "${bases[0]}"
+            prune_wal
+        else
+            mapfile -t dumps < <(ls -1 "$BACKUP_DIR"/db/*.dump 2>/dev/null | sort)
+            (( ${#dumps[@]} > 3 )) || break
+            echo "Disk $(disk_percent "$BACKUP_DIR")% full: deleting dump ${dumps[0]}" >&2
+            rm -f "${dumps[0]}" "${dumps[0]}.sha256"
+        fi
+        pruned=1
+    done
+    if (( pruned )); then
+        update_status "space_pruned_at=$(now_iso)"
+    fi
+    if (( $(disk_percent "$BACKUP_DIR") >= DISK_PRUNE_PERCENT )); then
+        echo "WARNING: the backup disk is still $(disk_percent "$BACKUP_DIR")% full: free space or use a bigger disk." >&2
+    fi
 }
 
 # The filesystem a path is on: its own, or its nearest existing parent's.

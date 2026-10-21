@@ -1,8 +1,8 @@
 [Unit]
-Description=Run the backend base backup every Sunday at 03:30
+Description=Run the backend base backup every day at 03:30
 
 [Timer]
-OnCalendar=Sun *-*-* 03:30:00
+OnCalendar=*-*-* 03:30:00
 Persistent=true
 
 [Install]

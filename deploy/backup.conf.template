@@ -5,9 +5,14 @@ BACKUP_DIR=/var/backups/backend
 DB_NAME=backend
 # Uploaded files (goods images) to back up.
 MEDIA_ROOT=/var/lib/backend/media
-# Keep nightly dumps this many days; base backups (and the WAL they need) this many weeks.
+# Keep nightly dumps this many days, and this many daily base backups (with the WAL after
+# the oldest one: point-in-time recovery reaches back that many days).
 KEEP_DAILY_DAYS=14
-KEEP_BASE_BACKUPS=4
+KEEP_BASE_BACKUPS=7
+# When the backup disk is this full (%), the oldest base backups with their WAL, then the
+# oldest dumps, are deleted (the newest base backup and 3 dumps are always kept): losing old
+# history is better than the database stopping on a full disk.
+DISK_PRUNE_PERCENT=85
 # IMPORTANT: a second disk or another machine. Backups on the same disk die with it.
 # Either a mounted directory (USB disk, NAS share) ... The copy is refused (and
 # /health/backup/ reports an error) while this folder is on this server's own disk, i.e.

@@ -1,5 +1,5 @@
 [Unit]
-Description=Backend weekly base backup for point-in-time recovery
+Description=Backend daily base backup for point-in-time recovery
 After=postgresql.service
 Requires=postgresql.service
 
