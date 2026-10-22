@@ -17,7 +17,7 @@ from apps.goods.models import GoodKind
 from apps.purchases import services as purchases
 from apps.purchases.models import Purchase
 from apps.rfid import services as rfid
-from apps.rfid.models import RFIDCard, RFIDCardAssignment, RFIDEvent
+from apps.rfid.models import RFIDCard, RFIDCardAssignment, RFIDEvent, label_taken
 from apps.sellers.models import Seller, ServicePosition
 from common import demo_devices
 
@@ -142,7 +142,9 @@ class Command(BaseCommand):
                 leads.setdefault(dept, dev)
                 finance.open_account(dev)
                 if i % 41 != 0:  # a few developers have no card yet
-                    card = RFIDCard.objects.create(uid=f"04DF{i:06X}", label=f"{i:04d}")
+                    # Labels are unique: one already in use (e.g. a hand-made card) is left off.
+                    label = "" if label_taken(f"{i:04d}") else f"{i:04d}"
+                    card = RFIDCard.objects.create(uid=f"04DF{i:06X}", label=label)
                     RFIDCardAssignment.objects.create(card=card, developer=dev)
         for dev in Developer.objects.filter(employee_number__gte=f"DEMO-{start:04d}"):
             finance.deposit(

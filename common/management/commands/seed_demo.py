@@ -123,8 +123,10 @@ class Command(BaseCommand):
             transition="block",
             reason="Reported lost",
         )
+        # Spare cards, not given out yet. Labels are unique, and seed_more labels its cards
+        # after the employee numbers (0031, ...), so the spares have their own.
         for i in range(28, 33):
-            rfid.register_card(actor=None, uid=f"04DE{i:06X}", label=f"{i:04d}")
+            rfid.register_card(actor=None, uid=f"04DE{i:06X}", label=f"S{i:03d}")
 
     def _scans(self, developers):
         """In at a way-in unit, out at a way-out unit of the developer's own building."""
