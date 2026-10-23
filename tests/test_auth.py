@@ -21,6 +21,7 @@ def test_login_refresh_logout_flow(api_client, make_user):
     me = api_client.get("/api/v1/auth/me/").json()
     assert me["id"] == user.id
     assert me["permissions"] == []
+    assert me["time_zone"] == "UTC"
 
     rotated = api_client.post("/api/v1/auth/token/refresh/", {"refresh": tokens["refresh"]})
     assert rotated.status_code == 200
@@ -126,3 +127,11 @@ def test_logout_works_after_access_token_expired(api_client, make_user):
 def test_logout_rejects_invalid_refresh_token(api_client):
     response = api_client.post("/api/v1/auth/logout/", {"refresh": "not-a-token"})
     assert response.status_code == 400
+
+
+def test_me_gives_the_company_time_zone(api_client, make_user, settings):
+    settings.TIME_ZONE = "Asia/Pyongyang"
+    make_user(username="dev")
+    tokens = login(api_client, "dev").json()
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+    assert api_client.get("/api/v1/auth/me/").json()["time_zone"] == "Asia/Pyongyang"

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
@@ -53,13 +54,19 @@ class UserSerializer(serializers.ModelSerializer):
 
 class MeSerializer(UserSerializer):
     permissions = serializers.SerializerMethodField()
+    time_zone = serializers.SerializerMethodField(
+        help_text="The company time zone (IANA name): the one days and times are counted in."
+    )
 
     class Meta(UserSerializer.Meta):
-        fields = [*UserSerializer.Meta.fields, "permissions"]
+        fields = [*UserSerializer.Meta.fields, "permissions", "time_zone"]
         read_only_fields = fields
 
     def get_permissions(self, user) -> list[str]:
         return sorted(user.rbac_permissions)
+
+    def get_time_zone(self, user) -> str:
+        return settings.TIME_ZONE
 
 
 def _unique_username(value: str, user: User | None = None) -> str:
