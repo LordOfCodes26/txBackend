@@ -10,6 +10,11 @@ router.register("attendance/daily", views.DailyAttendanceViewSet, basename="atte
 urlpatterns = [
     path("attendance/occupancy/", views.OccupancyView.as_view(), name="attendance-occupancy"),
     path(
+        "attendance/statistics/",
+        views.AttendanceStatisticsView.as_view(),
+        name="attendance-statistics",
+    ),
+    path(
         "attendance/occupancy/people/",
         views.OccupancyPeopleView.as_view(),
         name="attendance-occupancy-people",

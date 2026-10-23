@@ -315,3 +315,90 @@ def test_rebuild_backfills_missing_records_and_moves_days(reader, card, develope
     assert result["records_moved"] == 1
     assert day_summary(developer, 22).record_count == 1
     assert not DailyAttendance.objects.filter(work_date="2026-09-21").exists()
+
+
+# --- Statistics ----------------------------------------------------------------
+
+STATISTICS = "/api/v1/attendance/statistics/"
+
+
+@pytest.fixture
+def campus(make_user, settings):
+    """Two buildings: Ada (Dev) works in B1 on two days, Bob (no department) in B2 on one,
+    and Ada also scans once at B2."""
+    from apps.rfid.models import Building
+
+    settings.ATTENDANCE_DIRECTION_RULE = "device"
+    b1 = Building.objects.create(code="B1", name="Building 1")
+    b2 = Building.objects.create(code="B2", name="Building 2")
+    ada = Developer.objects.create(employee_number="E1", full_name="Ada", building=b1)
+    ada.department = "Dev"
+    ada.save(update_fields=["department"])
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob", building=b2)
+    for uid, who in (("04A1", ada), ("04B2", bob)):
+        RFIDCardAssignment.objects.create(card=RFIDCard.objects.create(uid=uid), developer=who)
+    door1 = rfid.register_device(actor=None, code="Door1", building=b1)[0]
+    door2 = rfid.register_device(actor=None, code="Door2", building=b2)[0]
+    for device, uid, moment, direction in (
+        (door1, "04A1", at(21, 9), "IN"),
+        (door1, "04A1", at(21, 17), "OUT"),
+        (door1, "04A1", at(22, 9), "IN"),
+        (door2, "04A1", at(22, 12), "IN"),
+        (door2, "04B2", at(22, 10), "IN"),
+    ):
+        rfid.record_scan(device=device, uid=uid, event_time=moment, direction=direction)
+
+    class Campus:
+        pass
+
+    c = Campus()
+    c.__dict__.update(locals())
+    return c
+
+
+def test_statistics_are_counted_by_the_database(auth_client, admin, campus):
+    client = auth_client(admin)
+    body = client.get(STATISTICS, {"date_from": "2026-09-21", "date_to": "2026-09-22"}).json()
+    assert (body["developers"], body["ins"], body["outs"], body["weekly"]) == (2, 4, 1, False)
+    assert body["by_period"] == [
+        {"name": "2026-09-21", "people": 1},
+        {"name": "2026-09-22", "people": 2},
+    ]
+    assert [(r["name"], r["people"], r["ins"], r["outs"]) for r in body["by_building"]] == [
+        ("Building 1", 1, 2, 1),
+        ("Building 2", 2, 2, 0),
+    ]
+    assert body["by_department"] == [{"name": "", "people": 1}, {"name": "Dev", "people": 1}]
+
+    # One building: its door scans, and only the developers who made them.
+    one = client.get(
+        STATISTICS,
+        {"date_from": "2026-09-21", "date_to": "2026-09-22", "building": campus.b1.pk},
+    ).json()
+    assert (one["developers"], one["ins"], one["outs"]) == (1, 2, 1)
+    assert len(one["by_building"]) == 2  # the building chart is never narrowed
+
+    weeks = client.get(STATISTICS, {"date_from": "2026-08-01", "date_to": "2026-09-30"}).json()
+    assert weeks["weekly"] is True
+    assert weeks["by_period"] == [{"name": "2026-09-21", "people": 2}]
+
+
+def test_statistics_are_narrowed_to_a_managers_buildings(auth_client, make_user, campus):
+    manager = make_user(Roles.BUILDING_MANAGER, email="bm@x.com")
+    campus.b1.managers.add(manager)
+    body = (
+        auth_client(manager)
+        .get(STATISTICS, {"date_from": "2026-09-21", "date_to": "2026-09-22"})
+        .json()
+    )
+    assert body["developers"] == 1  # Ada only: Bob is B2's
+    assert body["ins"] == 3
+
+
+def test_statistics_need_a_valid_range(auth_client, admin):
+    client = auth_client(admin)
+    assert (
+        client.get(STATISTICS, {"date_from": "2026-09-22", "date_to": "2026-09-21"}).status_code
+        == 400
+    )
+    assert client.get(STATISTICS).status_code == 400

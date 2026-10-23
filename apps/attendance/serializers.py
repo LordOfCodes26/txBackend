@@ -168,3 +168,45 @@ class AttendanceRecordSummarySerializer(serializers.Serializer):
     manual = serializers.IntegerField(help_text="Added by hand.")
     void = serializers.IntegerField()
     developers = serializers.IntegerField(help_text="Different developers.")
+
+
+class AttendanceStatisticsQuerySerializer(serializers.Serializer):
+    date_from = serializers.DateField()
+    date_to = serializers.DateField()
+    building = serializers.RegexField(
+        r"^(\d+|none)$",
+        required=False,
+        help_text="Only scans at this building's doors (an id), or at no building (none).",
+    )
+
+    def validate(self, attrs):
+        if attrs["date_to"] < attrs["date_from"]:
+            raise serializers.ValidationError(
+                {"date_from": [_("The start date must not be after the end date.")]}
+            )
+        return attrs
+
+
+class StatisticsBuildingSerializer(serializers.Serializer):
+    building = serializers.IntegerField(allow_null=True, help_text="Null: no building.")
+    name = serializers.CharField(allow_null=True)
+    people = serializers.IntegerField()
+    ins = serializers.IntegerField()
+    outs = serializers.IntegerField()
+
+
+class StatisticsPeopleSerializer(serializers.Serializer):
+    name = serializers.CharField(help_text="A day, a week's Monday, or a department.")
+    people = serializers.IntegerField()
+
+
+class AttendanceStatisticsSerializer(serializers.Serializer):
+    developers = serializers.IntegerField(help_text="Different developers in the range.")
+    ins = serializers.IntegerField(help_text="In scans (not void).")
+    outs = serializers.IntegerField(help_text="Out scans (not void).")
+    weekly = serializers.BooleanField(help_text="by_period is by week (ranges over 31 days).")
+    by_period = StatisticsPeopleSerializer(many=True)
+    by_building = StatisticsBuildingSerializer(
+        many=True, help_text="Every building scanned at in the range (not narrowed by building)."
+    )
+    by_department = StatisticsPeopleSerializer(many=True, help_text='"": no department.')

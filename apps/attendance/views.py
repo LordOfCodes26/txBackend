@@ -1,4 +1,5 @@
-from django.db.models import Count, OuterRef, Q
+from django.db.models import Count, F, OuterRef, Q
+from django.db.models.functions import TruncWeek
 from drf_spectacular.utils import extend_schema
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -16,6 +17,8 @@ from .models import AttendanceRecord, DailyAttendance, EventType, RecordSource
 from .serializers import (
     AttendanceRecordSerializer,
     AttendanceRecordSummarySerializer,
+    AttendanceStatisticsQuerySerializer,
+    AttendanceStatisticsSerializer,
     DailyAttendanceSerializer,
     ManualRecordSerializer,
     OccupancySerializer,
@@ -200,3 +203,85 @@ class OccupancyPeopleView(generics.ListAPIView):
                 developer__employee_number__icontains=term
             )
         return qs
+
+
+class AttendanceStatisticsView(APIView):
+    """The attendance statistics page's figures for `date_from`..`date_to`, counted by the
+    database however many scans the range has. Narrowed like the lists (a building
+    manager: the developers of their buildings). `building` keeps the scans at that
+    building's doors (or `none`: at no building) and the developers who made them."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["attendance.view"]}
+
+    @extend_schema(
+        parameters=[AttendanceStatisticsQuerySerializer],
+        responses=AttendanceStatisticsSerializer,
+    )
+    def get(self, request):
+        query = AttendanceStatisticsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        first, last = query.validated_data["date_from"], query.validated_data["date_to"]
+        building = query.validated_data.get("building")
+
+        scans = AttendanceRecord.objects.filter(
+            work_date__range=(first, last), is_void=False
+        ).order_by()
+        days = DailyAttendance.objects.filter(work_date__range=(first, last)).order_by()
+        scope = building_scope(request.user, "attendance.view")
+        if scope is not None:
+            scans = scans.filter(developer__building__in=scope)
+            days = days.filter(developer__building__in=scope)
+
+        by_building = [
+            {
+                "building": row["device__building"],
+                "name": row["device__building__name"],
+                "people": row["people"],
+                "ins": row["ins"],
+                "outs": row["outs"],
+            }
+            for row in scans.values("device__building", "device__building__name")
+            .annotate(
+                people=Count("developer", distinct=True),
+                ins=Count("pk", filter=Q(event_type=EventType.IN)),
+                outs=Count("pk", filter=Q(event_type=EventType.OUT)),
+            )
+            .order_by("device__building__name", "device__building")
+        ]
+        if building == "none":
+            scans = scans.filter(device__building__isnull=True)
+        elif building:
+            scans = scans.filter(device__building=int(building))
+        if building:
+            days = days.filter(developer__in=scans.values("developer"))
+
+        weekly = (last - first).days + 1 > 31
+        periods = (
+            days.annotate(period=TruncWeek("work_date"))
+            if weekly
+            else days.annotate(period=F("work_date"))
+        )
+        counts = scans.aggregate(
+            ins=Count("pk", filter=Q(event_type=EventType.IN)),
+            outs=Count("pk", filter=Q(event_type=EventType.OUT)),
+        )
+        data = {
+            "developers": days.aggregate(n=Count("developer", distinct=True))["n"],
+            **counts,
+            "weekly": weekly,
+            "by_period": [
+                {"name": row["period"].isoformat(), "people": row["people"]}
+                for row in periods.values("period")
+                .annotate(people=Count("developer", distinct=True))
+                .order_by("period")
+            ],
+            "by_building": by_building,
+            "by_department": [
+                {"name": row["developer__department"], "people": row["people"]}
+                for row in days.values("developer__department")
+                .annotate(people=Count("developer", distinct=True))
+                .order_by("-people", "developer__department")
+            ],
+        }
+        return Response(AttendanceStatisticsSerializer(data).data)
