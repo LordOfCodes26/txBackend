@@ -1,6 +1,8 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
@@ -41,6 +43,7 @@ from .serializers import (
     PreferentialSettingsUpdateSerializer,
     PurchaseCreateSerializer,
     PurchaseSerializer,
+    PurchaseSummarySerializer,
     ReadersQuerySerializer,
     SetReaderSerializer,
     TillReaderSerializer,
@@ -51,6 +54,7 @@ PERFORMANCE_FIGURES = ("sales_count", "sales_total", "bookings_count", "bookings
 
 SELLER_ACTIONS = (
     "list",
+    "summary",
     "performance",
     "export",
     "retrieve",
@@ -98,6 +102,7 @@ class PurchaseViewSet(
     permission_classes = [CatalogPermission]
     required_permissions = {
         "list": ["purchase.view"],
+        "summary": ["purchase.view"],
         "retrieve": ["purchase.view"],
         "performance": ["purchase.view"],
         "export": ["purchase.view", "excel.export"],
@@ -162,6 +167,57 @@ class PurchaseViewSet(
             actor=request.user, client_ip=client_ip(request), **serializer.validated_data
         )
         return self._respond(purchase, status.HTTP_201_CREATED)
+
+    @extend_schema(responses=PurchaseSummarySerializer)
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Totals of what the list gives with the same filters and narrowing (e.g.
+        `?when_after=...&when_before=...`), however many purchases that is: purchases per
+        status, the money refunded, and of the paid ones the count, money, buyers, and money
+        by seller, by till reader and by company day."""
+        purchases = self.filter_queryset(self.get_queryset()).order_by()
+        paid = purchases.filter(status=PurchaseStatus.CONFIRMED)
+        totals = paid.aggregate(
+            count=Count("pk"),
+            money=Sum("total", default=ZERO),
+            buyers=Count("developer", distinct=True),
+        )
+
+        def ranked(*fields):
+            rows = paid.values(*fields).annotate(count=Count("pk"), money=Sum("total"))
+            return sorted(
+                (
+                    {
+                        "name": next((r[f] for f in fields if r[f]), None),
+                        "count": r["count"],
+                        "money": r["money"],
+                    }
+                    for r in rows
+                ),
+                key=lambda r: (-r["money"], r["name"] or ""),
+            )
+
+        days = (
+            paid.annotate(day=TruncDate("confirmed_at"))
+            .values("day")
+            .annotate(count=Count("pk"), money=Sum("total"))
+            .order_by("day")
+        )
+        refunded = purchases.filter(status=PurchaseStatus.REFUNDED).aggregate(
+            money=Sum("total", default=ZERO)
+        )
+        data = {
+            "statuses": dict(purchases.values_list("status").annotate(n=Count("pk"))),
+            "paid_count": totals["count"],
+            "paid_total": totals["money"],
+            "refunded_total": refunded["money"],
+            "buyers": totals["buyers"],
+            "currency": settings.CURRENCY,
+            "by_seller": ranked("seller__name"),
+            "by_reader": ranked("reader__name", "reader__code"),
+            "by_day": list(days),
+        }
+        return Response(PurchaseSummarySerializer(data).data)
 
     @extend_schema(responses=PerformanceSerializer(many=True))
     @action(detail=False, methods=["get"])

@@ -893,3 +893,44 @@ def test_free_items_cover_whole_units_of_a_decimal_line(world, cheese):
 
     item = PurchaseItem(good=cheese, quantity=Decimal("2.5"), free_quantity=2)
     assert preferential.charged(item) == Decimal("0.5")
+
+
+# --- Range filter and summary ------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_when_filter_and_summary_count_paid_sales_on_the_day_paid(till, world):
+    """Opened yesterday and paid today counts today; a refund stays on its paid day; an open
+    sale counts on the day it was opened."""
+    today = timezone.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    yesterday = today - timedelta(days=1)
+    paid = new_purchase(till, world, (world.tea, 2))
+    assert confirm(till, paid).status_code == 201
+    refunded = new_purchase(till, world, (world.cake, 1))
+    assert confirm(till, refunded).status_code == 201
+    services.refund_purchase(actor=world.seller_user, purchase=Purchase.objects.get(pk=refunded))
+    draft = new_purchase(till, world, (world.tea, 1))
+    Purchase.objects.filter(pk__in=[paid, refunded]).update(
+        created_at=yesterday, confirmed_at=today
+    )
+    Purchase.objects.filter(pk=draft).update(created_at=yesterday)
+
+    def ids(start, end):
+        query = {"when_after": start.isoformat(), "when_before": end.isoformat()}
+        return {row["id"] for row in till.get(PURCHASES, query).json()["results"]}
+
+    day = timedelta(days=1)
+    assert ids(today - timedelta(hours=12), today + day) == {paid, refunded}
+    assert ids(yesterday - timedelta(hours=12), today - timedelta(hours=12)) == {draft}
+
+    summary = till.get(
+        f"{PURCHASES}summary/",
+        {"when_after": (today - timedelta(hours=12)).isoformat(), "when_before": today + day},
+    ).json()
+    assert summary["statuses"] == {"CONFIRMED": 1, "REFUNDED": 1}
+    assert (summary["paid_count"], summary["paid_total"], summary["buyers"]) == (1, "5.00", 1)
+    assert summary["refunded_total"] == "4.00"
+    assert summary["by_seller"] == [{"name": "Cafe", "count": 1, "money": "5.00"}]
+    assert summary["by_day"] == [
+        {"day": timezone.localdate(today).isoformat(), "count": 1, "money": "5.00"}
+    ]

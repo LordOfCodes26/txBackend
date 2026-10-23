@@ -389,6 +389,32 @@ class ConfirmSerializer(serializers.Serializer):
     )
 
 
+class SummaryRowSerializer(serializers.Serializer):
+    name = serializers.CharField(allow_null=True, help_text="Null: no seller / no reader.")
+    count = serializers.IntegerField()
+    money = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class SummaryDaySerializer(serializers.Serializer):
+    day = serializers.DateField(help_text="Company-local day the sales were paid.")
+    count = serializers.IntegerField()
+    money = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class PurchaseSummarySerializer(serializers.Serializer):
+    statuses = serializers.DictField(
+        child=serializers.IntegerField(), help_text="Purchases per status."
+    )
+    paid_count = serializers.IntegerField()
+    paid_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    refunded_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    buyers = serializers.IntegerField(help_text="Different developers who paid.")
+    currency = serializers.CharField()
+    by_seller = SummaryRowSerializer(many=True, help_text="Paid sales, the most money first.")
+    by_reader = SummaryRowSerializer(many=True, help_text="Paid sales, the most money first.")
+    by_day = SummaryDaySerializer(many=True, help_text="Paid sales, in day order.")
+
+
 class PerformanceSerializer(serializers.Serializer):
     service_position = serializers.IntegerField()
     service_position_name = serializers.CharField()

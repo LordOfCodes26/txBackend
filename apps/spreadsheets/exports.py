@@ -401,14 +401,15 @@ PURCHASE_KIND = {"SALE": _("Sale"), "BOOKING": _("Booking")}
 
 def purchases_workbook(purchases, first: date, last: date) -> bytes:
     """The purchases page as a workbook: one row per purchase and one per item. Paid
-    purchases count on the day they were paid, drafts and cancelled ones on the day they
-    were started (as on the page). `purchases`: already narrowed to what the user may see."""
+    purchases (refunded ones too) count on the day they were paid, drafts and cancelled
+    ones on the day they were started (as on the page). `purchases`: already narrowed to
+    what the user may see."""
+    from apps.purchases.filters import with_moment
+
     start, end = _local_bounds(first, last)
     purchases = (
-        purchases.filter(
-            Q(status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end)
-            | (~Q(status=PurchaseStatus.CONFIRMED) & Q(created_at__gte=start, created_at__lt=end))
-        )
+        with_moment(purchases)
+        .filter(moment__gte=start, moment__lt=end)
         .select_related("seller", "service_position", "developer", "reader")
         .prefetch_related("items__good")
         .order_by("created_at", "id")
@@ -423,7 +424,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
     buyer = Column("buyer", _("Buyer"), width=22)
     heads, lines = [], []
     for p in purchases:
-        time = _local(p.confirmed_at if p.status == PurchaseStatus.CONFIRMED else p.created_at)
+        time = _local(p.moment)
         who = [p.developer.employee_number, p.developer.full_name] if p.developer else [None, None]
         items = list(p.items.all())
         heads.append(
