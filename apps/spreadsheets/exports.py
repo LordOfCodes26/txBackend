@@ -596,7 +596,7 @@ def cards_workbook(cards) -> bytes:
                 _("Cards"),
                 [
                     Column("uid", _("Card UID"), width=16),
-                    Column("label", _("Label"), width=16),
+                    Column("label", _("Card number"), width=16),
                     Column("status", _("Status"), width=10),
                     Column("reason", _("Reason"), width=24),
                     EMPLOYEE,

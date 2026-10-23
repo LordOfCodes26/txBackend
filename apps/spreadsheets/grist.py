@@ -121,12 +121,12 @@ DEVELOPERS = [
     Col("Last_working_day", _("Last working day"), "Date"),
     Col("Status", _("Status")),
     Col("Card_UID", _("Card UID")),
-    Col("Card_label", _("Card label")),
+    Col("Card_label", _("Card number")),
     Col("Balance", _("Balance"), "Numeric"),
 ]
 CARDS = [
     Col("UID", _("Card UID")),
-    Col("Label", _("Card label")),
+    Col("Label", _("Card number")),
     Col("Status", _("Status")),
     Col("Employee_no", _("Employee no.")),
     Col("Full_name", _("Full name")),

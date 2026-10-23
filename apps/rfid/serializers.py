@@ -32,7 +32,7 @@ def validate_label(value: str, exclude: int | None = None) -> str:
     taken = label_taken(value, exclude)
     if taken is not None:
         raise serializers.ValidationError(
-            _("This label is already used by card %(uid)s.") % {"uid": taken.uid}
+            _("This card number is already used by card %(uid)s.") % {"uid": taken.uid}
         )
     return value
 

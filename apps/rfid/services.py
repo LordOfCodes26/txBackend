@@ -70,7 +70,7 @@ def register_card(*, actor, uid: str, label: str = "", notes: str = "") -> RFIDC
     taken = label_taken(label)
     if taken is not None:
         raise ValidationError(
-            {"label": _("This label is already used by card %(uid)s.") % {"uid": taken.uid}}
+            {"label": _("This card number is already used by card %(uid)s.") % {"uid": taken.uid}}
         )
     card = RFIDCard.objects.create(uid=uid, label=label, notes=notes)
     record_audit(

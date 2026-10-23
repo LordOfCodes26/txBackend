@@ -34,7 +34,7 @@ AREAS: dict[str, dict[str, str]] = {
     },
     "Cards": {
         "card.view": "See RFID cards and who held them",
-        "card.register": "Register new cards and change their labels",
+        "card.register": "Register new cards and change their card numbers",
         "card.assign": "Assign, replace, unassign and retire cards",
         "card.block": "Block and unblock cards",
     },

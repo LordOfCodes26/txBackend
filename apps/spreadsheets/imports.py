@@ -55,7 +55,7 @@ DEVELOPER_COLUMNS = [
 CARD_COLUMNS = [
     # Optional: without it, the row labels the card the developer holds now.
     Column("card_uid", _("Card UID"), width=14, example="04DE00AB12"),
-    Column("card_label", _("Card label"), width=12, example="0001"),
+    Column("card_label", _("Card number"), width=12, example="0001"),
     Column("employee_number", _("Employee no."), width=14, example="E1001"),
 ]
 RENUMBER_COLUMNS = [
@@ -87,7 +87,8 @@ def _label_free(label: str, card) -> None:
     taken = label_taken(label, card.pk if card else None)
     if taken is not None:
         raise RowError(
-            _("This label is already used by card %(uid)s.") % {"uid": taken.uid}, "card_label"
+            _("This card number is already used by card %(uid)s.") % {"uid": taken.uid},
+            "card_label",
         )
 
 
@@ -353,7 +354,7 @@ class CardImporter(Importer):
         label = text(row.get("card_label"))
         if not employee or not label:
             raise RowError(
-                _("Enter the card UID, or the employee number and the card label."), "card_uid"
+                _("Enter the card UID, or the employee number and the card number."), "card_uid"
             )
         self.once(ctx, "employee_number", employee)
         self.once(ctx, "card_label", label)

@@ -609,7 +609,7 @@ msgstr "자기 건물의 자료만 관리할수 있습니다."
 #: apps/rfid/serializers.py:35 apps/rfid/services.py:73
 #: apps/spreadsheets/imports.py:85
 #, python-format
-msgid "This label is already used by card %(uid)s."
+msgid "This card number is already used by card %(uid)s."
 msgstr "이 카드번호는 이미 카드 %(uid)s 에 쓰이고 있습니다."
 
 #: apps/rfid/serializers.py:82
@@ -1363,7 +1363,7 @@ msgid "UID must be 4-32 hexadecimal characters."
 msgstr "UID는 4-32자리의 16진수여야 합니다."
 
 #: apps/spreadsheets/imports.py:283
-msgid "Enter the card UID, or the employee number and the card label."
+msgid "Enter the card UID, or the employee number and the card number."
 msgstr "카드 UID를 넣거나, 직원번호와 카드번호를 넣으십시오."
 
 #: apps/spreadsheets/imports.py:295
@@ -1831,3 +1831,7 @@ msgstr "운동장"
 #: apps/spreadsheets/grist.py
 msgid "Copied from the app: change it there, or add a column of your own."
 msgstr "프로그람에서 복사한 렬입니다. 프로그람에서 바꾸거나 자기 렬을 추가하십시오."
+
+#: apps/spreadsheets/imports.py apps/spreadsheets/exports.py apps/spreadsheets/grist.py
+msgid "Card number"
+msgstr "카드번호"

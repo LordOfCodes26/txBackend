@@ -154,7 +154,7 @@ def test_export_round_trips_into_import(admin, b1):
     rows = sheets["Developers"]
     assert rows[0][:2] == ("Employee no.", "Full name") and rows[0][-2:] == (
         "Card UID",
-        "Card label",
+        "Card number",
     )
     assert rows[1][0] == "E1" and rows[1][7] == "B1" and rows[1][-2:] == ("04AABBCC", "0001")
     # The same file imports back without changes (developers) and as cards.
@@ -312,8 +312,8 @@ def test_labels_by_employee_number_without_uids(admin):
         (2, "Employee no."),
         (3, "Employee no."),
         (4, "Card UID"),
-        (5, "Card label"),
-        (6, "Card label"),
+        (5, "Card number"),
+        (6, "Card number"),
     ]
     assert "0400AA" in bad["errors"][3]["message"]
 
