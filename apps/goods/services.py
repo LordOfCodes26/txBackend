@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import ValidationError
 
 from apps.audit.services import diff, record_audit, snapshot
 
@@ -22,6 +24,7 @@ from .models import (
     MovementKind,
     PricePer,
     RentalSettings,
+    is_whole,
 )
 
 GOOD_FIELDS = [
@@ -34,6 +37,7 @@ GOOD_FIELDS = [
     "price",
     "is_active",
     "track_stock",
+    "decimal_quantity",
 ]
 # Manual kinds are audited; SALE/RETURN are recorded by the purchase flow itself.
 MANUAL_KINDS = {
@@ -44,8 +48,16 @@ MANUAL_KINDS = {
 }
 
 
+def check_quantity(good: Good, quantity, field: str = "quantity") -> None:
+    """Whole units only, unless the good is sold in fractions (`decimal_quantity`)."""
+    if not good.decimal_quantity and not is_whole(quantity):
+        raise ValidationError(
+            {field: [_("%(good)s is counted in whole units.") % {"good": good.name}]}
+        )
+
+
 def move_stock(
-    *, good: Good, kind: str, delta: int, actor=None, reason: str = "", reference: str = ""
+    *, good: Good, kind: str, delta, actor=None, reason: str = "", reference: str = ""
 ) -> InventoryMovement:
     """The only way stock changes. Must run inside a transaction.
 
@@ -56,6 +68,7 @@ def move_stock(
     good = Good.all_objects.select_for_update().get(pk=good.pk)
     if not good.track_stock:
         raise StockNotTracked()
+    check_quantity(good, delta)
     new_quantity = good.quantity + delta
     if new_quantity < 0:
         raise InsufficientStock(details={"available": good.quantity, "requested": -delta})
@@ -105,7 +118,7 @@ def _good_snapshot(good: Good) -> dict:
 
 
 @transaction.atomic
-def create_good(*, actor, initial_quantity: int = 0, rental: dict | None = None, **data) -> Good:
+def create_good(*, actor, initial_quantity=0, rental: dict | None = None, **data) -> Good:
     if data.get("service_position") is None and data.get("kind") == GoodKind.RENTAL:
         data["service_position"] = playground_position(actor)
     if data.get("kind", GoodKind.PRODUCT) != GoodKind.PRODUCT:
@@ -187,12 +200,16 @@ def adjust_stock(
     actor,
     good: Good,
     kind: str,
-    quantity: int | None = None,
-    counted_quantity: int | None = None,
+    quantity=None,
+    counted_quantity=None,
     reason: str = "",
 ) -> InventoryMovement:
     """Manual stock change from the API: RESTOCK (+quantity), DAMAGE (-quantity) or
     ADJUSTMENT (set stock to a physical count)."""
+    if kind == MovementKind.ADJUSTMENT:
+        check_quantity(good, counted_quantity, "counted_quantity")
+    else:
+        check_quantity(good, quantity)
     if kind == MovementKind.RESTOCK:
         delta = quantity
     elif kind == MovementKind.DAMAGE:

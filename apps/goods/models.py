@@ -44,6 +44,19 @@ class GoodCategory(TimeStampedModel):
         return self.name
 
 
+# Stock and sale quantities: whole units, or hundredths for goods with `decimal_quantity`.
+QUANTITY = {"max_digits": 12, "decimal_places": 2}
+
+
+def is_whole(value) -> bool:
+    return value == int(value)
+
+
+def show_quantity(value) -> str:
+    """A quantity without trailing zeros: 3, 2.5, 0.25."""
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
 class Good(TimeStampedModel, SoftDeleteModel):
     """Something a seller sells at a service position.
 
@@ -68,7 +81,9 @@ class Good(TimeStampedModel, SoftDeleteModel):
     )
     is_active = models.BooleanField(default=True, help_text="Available for sale.")
     track_stock = models.BooleanField(default=True)
-    quantity = models.PositiveIntegerField(default=0)
+    # Sold and counted in fractions (kg, litres): quantities with up to 2 decimals.
+    decimal_quantity = models.BooleanField(default=False)
+    quantity = models.DecimalField(**QUANTITY, default=0)
 
     class Meta:
         ordering = ["name", "id"]
@@ -213,8 +228,8 @@ class InventoryMovement(AppendOnlyModel):
 
     good = models.ForeignKey(Good, on_delete=models.PROTECT, related_name="movements")
     kind = models.CharField(max_length=15, choices=MovementKind.choices)
-    quantity_delta = models.IntegerField()
-    quantity_after = models.PositiveIntegerField()
+    quantity_delta = models.DecimalField(**QUANTITY)
+    quantity_after = models.DecimalField(**QUANTITY)
     reason = models.CharField(max_length=255, blank=True)
     reference = models.CharField(
         max_length=100, blank=True, help_text="e.g. purchase item id for SALE/RETURN."
@@ -228,8 +243,11 @@ class InventoryMovement(AppendOnlyModel):
         ordering = ["-created_at", "-id"]
         constraints = [
             models.CheckConstraint(condition=~Q(quantity_delta=0), name="movement_delta_not_zero"),
+            models.CheckConstraint(
+                condition=Q(quantity_after__gte=0), name="movement_after_not_negative"
+            ),
         ]
         indexes = [models.Index(fields=["good", "created_at"])]
 
     def __str__(self):
-        return f"{self.good} {self.kind} {self.quantity_delta:+d}"
+        return f"{self.good} {self.kind} {self.quantity_delta:+}"

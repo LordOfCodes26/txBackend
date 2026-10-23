@@ -4,12 +4,14 @@ Best effort: events are sent after the database transaction commits, and a failu
 reach Redis is logged, never raised. Clients should still refetch on reconnect.
 """
 
+import json
 import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.utils.encoders import JSONEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,8 @@ def _group_send(group: str, payload: dict) -> None:
     if layer is None:
         return
     try:
+        # Plain JSON, as the API sends it (decimals such as quantities become numbers).
+        payload = json.loads(json.dumps(payload, cls=JSONEncoder))
         async_to_sync(layer.group_send)(group, {"type": "push.event", "payload": payload})
     except Exception:
         logger.warning(

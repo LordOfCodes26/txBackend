@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
@@ -6,7 +8,7 @@ from django.utils import timezone
 
 from apps.developers.models import Developer
 from apps.finance.models import MONEY, AccountTransaction
-from apps.goods.models import Good
+from apps.goods.models import QUANTITY, Good, show_quantity
 from apps.rfid.models import RFIDCard
 from apps.sellers.models import Seller, ServicePosition
 from common.models import TimeStampedModel
@@ -158,8 +160,9 @@ class Purchase(TimeStampedModel):
 class PurchaseItem(models.Model):
     purchase = models.ForeignKey(Purchase, on_delete=models.CASCADE, related_name="items")
     good = models.ForeignKey(Good, on_delete=models.PROTECT, related_name="purchase_items")
-    quantity = models.PositiveIntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(999)]
+    # Whole units, or hundredths for a good with `decimal_quantity`.
+    quantity = models.DecimalField(
+        **QUANTITY, validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(999)]
     )
     # RENTAL lines: start of the first booked slot; `quantity` is the number of slots.
     start = models.DateTimeField(null=True, blank=True)
@@ -169,9 +172,10 @@ class PurchaseItem(models.Model):
     )
     # RENTAL lines priced per person: how many people (line total = price x slots x people).
     people = models.PositiveSmallIntegerField(default=1)
-    # Units given free by the preferential service, fixed at confirmation. Never lowered
-    # (used is used, even when the line shrinks or the purchase is deleted); the line is
-    # charged for max(quantity - free_quantity, 0) units.
+    # Units given free by the preferential service, fixed at confirmation: whole units only
+    # (2.5 kg with 3 items left: 2 free). Never lowered (used is used, even when the line
+    # shrinks or the purchase is deleted); the line is charged for
+    # max(quantity - free_quantity, 0) units.
     free_quantity = models.PositiveIntegerField(default=0)
     # Price actually charged, fixed at confirmation (drafts show the current price).
     unit_price = models.DecimalField(**MONEY, null=True, blank=True)
@@ -181,11 +185,11 @@ class PurchaseItem(models.Model):
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(fields=["purchase", "good"], name="purchase_item_good_unique"),
-            models.CheckConstraint(condition=Q(quantity__gte=1), name="purchase_item_quantity_min"),
+            models.CheckConstraint(condition=Q(quantity__gt=0), name="purchase_item_quantity_min"),
         ]
 
     def __str__(self):
-        return f"{self.quantity} × {self.good}"
+        return f"{show_quantity(self.quantity)} × {self.good}"
 
 
 class PreferentialSettings(TimeStampedModel):

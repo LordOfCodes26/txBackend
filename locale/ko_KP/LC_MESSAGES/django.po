@@ -1835,3 +1835,32 @@ msgstr "프로그람에서 복사한 렬입니다. 프로그람에서 바꾸거�
 #: apps/spreadsheets/imports.py apps/spreadsheets/exports.py apps/spreadsheets/grist.py
 msgid "Card number"
 msgstr "카드번호"
+
+#: apps/goods/services.py
+#, python-format
+msgid "%(good)s is counted in whole units."
+msgstr "%(good)s은(는) 옹근수로 셉니다."
+
+#: apps/goods/serializers.py
+msgid "Enter a whole number, or allow decimal quantities."
+msgstr "옹근수를 넣거나 소수 수량을 허용하십시오."
+
+#: apps/goods/serializers.py
+msgid "The stock is not a whole number; count it first."
+msgstr "재고가 옹근수가 아닙니다. 먼저 재고 조사를 하십시오."
+
+#: apps/goods/serializers.py
+msgid "Courts are booked in whole slots."
+msgstr "경기장은 옹근 시간대로 예약합니다."
+
+#: apps/spreadsheets/imports.py apps/spreadsheets/exports.py apps/spreadsheets/grist.py
+msgid "Decimal quantities"
+msgstr "소수 수량"
+
+#: apps/spreadsheets/imports.py
+msgid "Enter a number, 0 or more."
+msgstr "0 이상의 수를 넣으십시오."
+
+#: apps/spreadsheets/imports.py
+msgid "Enter a number, 0 or more, with at most 2 decimals."
+msgstr "0 이상의 수를 소수점아래 2자리까지 넣으십시오."

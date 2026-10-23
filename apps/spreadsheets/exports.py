@@ -15,7 +15,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.developers.filters import DeveloperFilter
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
-from apps.goods.models import Good, InventoryMovement
+from apps.goods.models import Good, InventoryMovement, show_quantity
 from apps.purchases.models import Purchase, PurchaseItem, PurchaseStatus
 from apps.rfid.models import RFIDCardAssignment
 from apps.rfid.scope import building_scope
@@ -173,7 +173,7 @@ def money_workbook(user, first: date, last: date) -> bytes:
                 p.service_position.name,
                 p.developer.employee_number if p.developer else None,
                 p.developer.full_name if p.developer else None,
-                ", ".join(f"{i.good.name} ×{i.quantity}" for i in p.items.all()),
+                ", ".join(f"{i.good.name} ×{show_quantity(i.quantity)}" for i in p.items.all()),
                 p.total,
             ]
             for p in purchases
@@ -208,7 +208,8 @@ def goods_workbook(user, first: date, last: date) -> bytes:
             Column("kind", _("Kind"), width=10),
             Column("price", _("Price"), width=10, kind="money"),
             Column("track_stock", _("Track stock"), width=11),
-            Column("quantity", _("In stock"), width=10, kind="int"),
+            Column("decimal_quantity", _("Decimal quantities"), width=11),
+            Column("quantity", _("In stock"), width=10, kind="quantity"),
             Column("is_active", _("For sale"), width=9),
         ],
         [
@@ -219,6 +220,7 @@ def goods_workbook(user, first: date, last: date) -> bytes:
                 g.kind,
                 g.price,
                 g.track_stock,
+                g.decimal_quantity,
                 g.quantity if g.track_stock else None,
                 g.is_active,
             ]
@@ -232,8 +234,8 @@ def goods_workbook(user, first: date, last: date) -> bytes:
             seller,
             good,
             Column("kind", _("Kind"), width=14),
-            Column("change", _("Change"), width=9, kind="int"),
-            Column("after", _("Stock after"), width=11, kind="int"),
+            Column("change", _("Change"), width=9, kind="quantity"),
+            Column("after", _("Stock after"), width=11, kind="quantity"),
             Column("reason", _("Reason"), width=30),
             Column("reference", _("Reference"), width=16),
         ],
@@ -472,7 +474,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                     buyer_no,
                     buyer,
                     Column("reader", _("Reader"), width=12),
-                    Column("quantity", _("Items"), width=8, kind="int"),
+                    Column("quantity", _("Items"), width=8, kind="quantity"),
                     money("total", _("Total")),
                 ],
                 heads,
@@ -489,7 +491,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                     buyer_no,
                     buyer,
                     Column("good", _("Good"), width=24),
-                    Column("quantity", _("Quantity"), width=9, kind="int"),
+                    Column("quantity", _("Quantity"), width=9, kind="quantity"),
                     money("unit_price", _("Unit price")),
                     money("line_total", _("Line total")),
                     Column("start", _("Booked from"), width=17, kind="datetime"),
@@ -545,7 +547,7 @@ def sales_report_workbook(goods, rows: list[dict], after, before, first: date, l
                 [
                     Column("what", _("What"), width=18),
                     Column("day", _("Day"), width=12),
-                    Column("count", _("Count"), width=10, kind="int"),
+                    Column("count", _("Count"), width=10, kind="quantity"),
                     Column("money", _("Money"), width=14, kind="money"),
                 ],
                 summary,
@@ -557,11 +559,11 @@ def sales_report_workbook(goods, rows: list[dict], after, before, first: date, l
                     Column("category", _("Category"), width=14),
                     Column("seller", _("Seller"), width=18),
                     Column("counter", _("Counter"), width=16),
-                    Column("sold", _("Quantity sold"), width=12, kind="int"),
+                    Column("sold", _("Quantity sold"), width=12, kind="quantity"),
                     Column("sales", _("Number of sales"), width=14, kind="int"),
                     Column("money", _("Money taken"), width=14, kind="money"),
                     Column("share", _("Share %"), width=9),
-                    Column("stock", _("Stock left"), width=10, kind="int"),
+                    Column("stock", _("Stock left"), width=10, kind="quantity"),
                 ],
                 goods_rows,
             ),

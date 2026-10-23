@@ -75,6 +75,9 @@ def _money(value):
     return float(value) if value is not None else None
 
 
+_quantity = _money  # whole or decimal (goods with decimal quantities)
+
+
 # Statuses and kinds as words in GRIST_LANGUAGE (the app's codes otherwise).
 LABELS = {
     "ACTIVE": _("Active"),
@@ -139,7 +142,8 @@ GOODS = [
     Col("Kind", _("Kind")),
     Col("Price", _("Price"), "Numeric"),
     Col("Track_stock", _("Track stock"), "Bool"),
-    Col("In_stock", _("In stock"), "Int"),
+    Col("Decimal_quantities", _("Decimal quantities"), "Bool"),
+    Col("In_stock", _("In stock"), "Numeric"),
     Col("For_sale", _("For sale"), "Bool"),
 ]
 
@@ -180,7 +184,7 @@ def _item_columns():
         Col("Time", _("Time"), _datetime_type()),
         Col("Seller", _("Seller")),
         Col("Good", _("Good")),
-        Col("Quantity", _("Quantity"), "Int"),
+        Col("Quantity", _("Quantity"), "Numeric"),
         Col("Free_quantity", _("Free quantity"), "Int"),
         Col("Unit_price", _("Unit price"), "Numeric"),
         Col("Line_total", _("Line total"), "Numeric"),
@@ -245,7 +249,8 @@ def good_rows() -> dict[int, dict]:
             "Kind": _label(g.kind),
             "Price": _money(g.price),
             "Track_stock": g.track_stock,
-            "In_stock": g.quantity,
+            "Decimal_quantities": g.decimal_quantity,
+            "In_stock": _quantity(g.quantity),
             "For_sale": g.is_active,
         }
         for g in Good.objects.select_related("service_position__seller")
@@ -289,7 +294,7 @@ def item_row(p, i) -> dict:
         "Time": _moment(p.confirmed_at),
         "Seller": p.seller.name,
         "Good": i.good.name,
-        "Quantity": i.quantity,
+        "Quantity": _quantity(i.quantity),
         "Free_quantity": i.free_quantity,
         "Unit_price": _money(i.unit_price),
         "Line_total": _money(i.line_total),
@@ -370,6 +375,14 @@ class Sync:
             missing = [c for c in wanted if c["id"] not in have]
             if missing:
                 self.api("POST", f"/tables/{table}/columns", {"columns": missing})
+            # A column whose type the app changed (In stock: Int to Numeric).
+            retype = [
+                {"id": c["id"], "fields": {"type": c["fields"]["type"]}}
+                for c in wanted
+                if c["id"] in have and have[c["id"]]["fields"].get("type") != c["fields"]["type"]
+            ]
+            if retype:
+                self.api("PATCH", f"/tables/{table}/columns", {"columns": retype})
         if APP_ID not in have:
             self.hide_app_id(table)
         # Untied, a label renamed in Grist keeps the id the sync writes to.

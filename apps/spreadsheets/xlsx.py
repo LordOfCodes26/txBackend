@@ -90,6 +90,8 @@ def _cell(value, kind: str):
         return None
     if kind == "money":
         return Decimal(str(value))
+    if kind == "quantity":  # whole or decimal: shown as 3 or 2.5
+        return float(value)
     if kind == "datetime" and isinstance(value, datetime):
         return value.replace(tzinfo=None)
     return value

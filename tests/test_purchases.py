@@ -802,3 +802,94 @@ def test_seller_labels_open_sales(till, world, auth_client, make_user):
     other = make_user(*SELLER_ROLES)
     Seller.objects.create(name="Other", user=other)
     assert auth_client(other).post(f"{PURCHASES}{pid}/label/", {"label": "mine"}).status_code == 404
+
+
+# --- Decimal quantities ------------------------------------------------------------
+
+
+@pytest.fixture
+def cheese(world):
+    """Sold by weight: 2.5 kg in stock at 12.00 per kg."""
+    good = Good.objects.create(
+        service_position=world.position, name="Cheese", price="12.00", decimal_quantity=True
+    )
+    with transaction.atomic():
+        goods.move_stock(good=good, kind="INITIAL_STOCK", delta=Decimal("2.5"))
+    return good
+
+
+@pytest.mark.django_db
+def test_decimal_good_sells_a_fraction(till, world, cheese):
+    pid = new_purchase(till, world, (cheese, "0.35"))
+    body = till.get(f"{PURCHASES}{pid}/").json()
+    assert [(i["quantity"], i["decimal_quantity"]) for i in body["items"]] == [(0.35, True)]
+    assert body["total"] == "4.20"
+
+    response = confirm(till, pid)
+    assert response.status_code == 201, response.json()
+    assert balance(world) == Decimal("45.80")
+    assert stock(cheese) == Decimal("2.15")
+    movement = InventoryMovement.objects.filter(good=cheese, kind="SALE").get()
+    assert (movement.quantity_delta, movement.quantity_after) == (Decimal("-0.35"), Decimal("2.15"))
+    assert_books_balanced()
+
+
+@pytest.mark.django_db
+def test_whole_unit_good_refuses_a_fraction(till, world):
+    purchase = till.post(PURCHASES, {"service_position": world.position.pk}).json()
+    response = till.post(
+        f"{PURCHASES}{purchase['id']}/items/", {"good": world.tea.pk, "quantity": "1.5"}
+    )
+    assert response.status_code == 400
+    assert "quantity" in response.json()["error"]["details"]
+    response = till.post(
+        f"{PURCHASES}{purchase['id']}/items/", {"good": world.tea.pk, "quantity": "0.001"}
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_decimal_stock_changes(auth_client, admin, world, cheese):
+    client = auth_client(admin)
+    restock = client.post(
+        f"/api/v1/goods/{cheese.pk}/stock/", {"kind": "RESTOCK", "quantity": "1.25"}
+    )
+    assert restock.status_code == 201, restock.json()
+    assert restock.json()["quantity_after"] == 3.75
+    count = client.post(
+        f"/api/v1/goods/{cheese.pk}/stock/",
+        {"kind": "ADJUSTMENT", "counted_quantity": "3.5", "reason": "weighed"},
+    )
+    assert count.status_code == 201, count.json()
+    assert client.get(f"/api/v1/goods/{cheese.pk}/").json()["quantity"] == 3.5
+
+    whole = client.post(
+        f"/api/v1/goods/{world.tea.pk}/stock/", {"kind": "RESTOCK", "quantity": "0.5"}
+    )
+    assert whole.status_code == 400
+    assert stock(world.tea) == 10
+    assert_books_balanced()
+
+
+@pytest.mark.django_db
+def test_decimal_switch_needs_a_whole_stock_to_turn_off(auth_client, admin, cheese):
+    client = auth_client(admin)
+    response = client.patch(f"/api/v1/goods/{cheese.pk}/", {"decimal_quantity": False})
+    assert response.status_code == 400
+    assert "decimal_quantity" in response.json()["error"]["details"]
+    client.post(
+        f"/api/v1/goods/{cheese.pk}/stock/",
+        {"kind": "ADJUSTMENT", "counted_quantity": "3", "reason": "rounded"},
+    )
+    response = client.patch(f"/api/v1/goods/{cheese.pk}/", {"decimal_quantity": False})
+    assert response.status_code == 200, response.json()
+    assert response.json()["quantity"] == 3
+
+
+@pytest.mark.django_db
+def test_free_items_cover_whole_units_of_a_decimal_line(world, cheese):
+    from apps.purchases import preferential
+    from apps.purchases.models import PurchaseItem
+
+    item = PurchaseItem(good=cheese, quantity=Decimal("2.5"), free_quantity=2)
+    assert preferential.charged(item) == Decimal("0.5")

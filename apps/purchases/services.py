@@ -217,12 +217,13 @@ def _ensure_sale(purchase: Purchase, good: Good | None = None) -> None:
 
 
 @transaction.atomic
-def add_item(*, purchase: Purchase, good: Good, quantity: int = 1) -> PurchaseItem:
+def add_item(*, purchase: Purchase, good: Good, quantity=1) -> PurchaseItem:
     """Add a good, or increase its quantity if it is already in the bucket."""
     purchase = _lock_draft(purchase)
     good = Good.all_objects.select_related("service_position").get(pk=good.pk)
     _ensure_sale(purchase, good)
     _ensure_sellable(good, purchase)
+    goods.check_quantity(good, quantity)
     item, created = PurchaseItem.objects.get_or_create(
         purchase=purchase, good=good, defaults={"quantity": quantity}
     )
@@ -239,9 +240,10 @@ def add_item(*, purchase: Purchase, good: Good, quantity: int = 1) -> PurchaseIt
 
 
 @transaction.atomic
-def update_item(*, purchase: Purchase, item: PurchaseItem, quantity: int) -> PurchaseItem:
+def update_item(*, purchase: Purchase, item: PurchaseItem, quantity) -> PurchaseItem:
     purchase = _lock_draft(purchase)
     _ensure_sale(purchase)
+    goods.check_quantity(item.good, quantity)
     _check_stock_hint(item.good, quantity)
     item.quantity = quantity
     item.save(update_fields=["quantity"])
@@ -257,7 +259,7 @@ def remove_item(*, purchase: Purchase, item: PurchaseItem) -> None:
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
 
 
-def _check_stock_hint(good: Good, quantity: int) -> None:
+def _check_stock_hint(good: Good, quantity) -> None:
     """Early feedback while building the bucket; confirmation re-checks under lock."""
     if good.track_stock and quantity > good.quantity:
         raise InsufficientStock(
@@ -706,6 +708,8 @@ def change_paid_purchase(
             raise PurchaseEmpty()
         current = {i.good_id: i for i in purchase.items.all()}
         locked_goods = _lock_goods(set(wanted) | set(current))
+        for good_id, quantity in wanted.items():
+            goods.check_quantity(locked_goods[good_id], quantity)
         for good_id in set(wanted) - set(current):
             good = locked_goods[good_id]
             _ensure_sale(purchase, good)

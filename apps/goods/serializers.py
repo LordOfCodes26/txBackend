@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
@@ -14,7 +16,16 @@ from .models import (
     InventoryMovement,
     MovementKind,
     RentalSettings,
+    is_whole,
 )
+
+
+class QuantityField(serializers.DecimalField):
+    """A stock or sale quantity: a JSON number with up to 2 decimals (whole numbers unless
+    the good has `decimal_quantity`; the services check that)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(max_digits=12, decimal_places=2, coerce_to_string=False, **kwargs)
 
 
 class RelativeImageField(serializers.ImageField):
@@ -150,12 +161,13 @@ class GoodSerializer(serializers.ModelSerializer):
     preferential = serializers.SerializerMethodField(
         help_text="Free preferential items can pay for it."
     )
-    initial_quantity = serializers.IntegerField(
+    initial_quantity = QuantityField(
         min_value=0,
         required=False,
         write_only=True,
         help_text="Starting stock (create only; later changes go through /stock/).",
     )
+    quantity = QuantityField(read_only=True)
 
     class Meta:
         model = Good
@@ -174,6 +186,7 @@ class GoodSerializer(serializers.ModelSerializer):
             "currency",
             "is_active",
             "track_stock",
+            "decimal_quantity",
             "quantity",
             "initial_quantity",
             "preferential",
@@ -247,6 +260,8 @@ class GoodSerializer(serializers.ModelSerializer):
         else:
             if attrs.get("track_stock"):
                 errors["track_stock"] = [_("%(kind)s goods have no stock.") % {"kind": kind}]
+            if kind == GoodKind.RENTAL and attrs.get("decimal_quantity"):
+                errors["decimal_quantity"] = [_("Courts are booked in whole slots.")]
             if self.instance is None:
                 attrs["track_stock"] = False
             if attrs.get("initial_quantity"):
@@ -265,6 +280,22 @@ class GoodSerializer(serializers.ModelSerializer):
         if attrs.get("initial_quantity") and not track:
             raise serializers.ValidationError(
                 {"initial_quantity": [_("Goods that don't track stock have no quantity.")]}
+            )
+        decimal = attrs.get(
+            "decimal_quantity", self.instance.decimal_quantity if self.instance else False
+        )
+        if not decimal and not is_whole(attrs.get("initial_quantity") or 0):
+            raise serializers.ValidationError(
+                {"initial_quantity": [_("Enter a whole number, or allow decimal quantities.")]}
+            )
+        if (
+            self.instance is not None
+            and not decimal
+            and self.instance.track_stock
+            and not is_whole(self.instance.quantity)
+        ):
+            raise serializers.ValidationError(
+                {"decimal_quantity": [_("The stock is not a whole number; count it first.")]}
             )
         category = attrs.get("category")
         if category is not None:
@@ -293,10 +324,10 @@ class StockChangeSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(
         choices=[MovementKind.RESTOCK, MovementKind.DAMAGE, MovementKind.ADJUSTMENT]
     )
-    quantity = serializers.IntegerField(
-        min_value=1, required=False, help_text="RESTOCK / DAMAGE: how many units."
+    quantity = QuantityField(
+        min_value=Decimal("0.01"), required=False, help_text="RESTOCK / DAMAGE: how many units."
     )
-    counted_quantity = serializers.IntegerField(
+    counted_quantity = QuantityField(
         min_value=0, required=False, help_text="ADJUSTMENT: the physically counted stock."
     )
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
@@ -324,6 +355,8 @@ class StockChangeSerializer(serializers.Serializer):
 
 class InventoryMovementSerializer(serializers.ModelSerializer):
     good_name = serializers.CharField(source="good.name", read_only=True)
+    quantity_delta = QuantityField(read_only=True)
+    quantity_after = QuantityField(read_only=True)
 
     class Meta:
         model = InventoryMovement
@@ -361,10 +394,10 @@ class GoodStatisticsSerializer(serializers.Serializer):
     seller_name = serializers.CharField()
     service_position_name = serializers.CharField()
     price = serializers.DecimalField(max_digits=12, decimal_places=2)
-    sold = serializers.IntegerField(help_text="Units sold.")
+    sold = QuantityField(help_text="Units sold.")
     sales = serializers.IntegerField(help_text="Paid purchases it was in.")
     money = serializers.DecimalField(max_digits=14, decimal_places=2, help_text="Money taken.")
-    stock = serializers.IntegerField(
+    stock = QuantityField(
         allow_null=True, help_text="Units in stock now; null when stock is not tracked."
     )
     currency = serializers.CharField()

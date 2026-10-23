@@ -77,7 +77,8 @@ GOODS_COLUMNS = [
     Column("price", _("Price"), width=10, kind="money", example="2.50"),
     Column("description", _("Description"), width=30),
     Column("track_stock", _("Track stock"), width=11, kind="bool", example=True),
-    Column("quantity", _("In stock"), width=10, kind="int", example=20),
+    Column("decimal_quantity", _("Decimal quantities"), width=11, kind="bool", example=False),
+    Column("quantity", _("In stock"), width=10, kind="quantity", example=20),
     Column("is_active", _("For sale"), width=9, kind="bool", example=True),
 ]
 
@@ -530,19 +531,21 @@ class GoodsImporter(Importer):
         description = text(row.get("description"))
         if description:
             data["description"] = description
-        for key in ("track_stock", "is_active"):
+        for key in ("track_stock", "decimal_quantity", "is_active"):
             value = yes_no(row.get(key), key)
             if value is not None:
                 data[key] = value
         stock = text(row.get("quantity"))
         quantity = None
         if stock:
+            # Whole units unless the good allows decimals (the serializer and
+            # move_stock check that); at most 2 decimals.
             try:
-                quantity = int(Decimal(stock))
+                quantity = Decimal(stock)
             except (InvalidOperation, ValueError) as exc:
-                raise RowError(_("Enter a whole number, 0 or more."), "quantity") from exc
-            if quantity < 0 or Decimal(stock) != quantity:
-                raise RowError(_("Enter a whole number, 0 or more."), "quantity")
+                raise RowError(_("Enter a number, 0 or more."), "quantity") from exc
+            if quantity < 0 or quantity != quantity.quantize(Decimal("0.01")):
+                raise RowError(_("Enter a number, 0 or more, with at most 2 decimals."), "quantity")
 
         if good is None:
             if (

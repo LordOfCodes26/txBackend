@@ -329,7 +329,11 @@ def pay_reservation(*, actor, purchase: Purchase, developer: Developer, item) ->
     )
     if booking.status != BookingStatus.RESERVED:
         raise BookingNotReserved()
-    if (booking.good_id, booking.start, booking.slots) != (item.good_id, item.start, item.quantity):
+    if (booking.good_id, booking.start, booking.slots) != (
+        item.good_id,
+        item.start,
+        int(item.quantity),
+    ):
         raise SlotUnavailable(_("The booking changed meanwhile; start the payment again."))
     booking.status = BookingStatus.PAID
     booking.purchase = purchase
@@ -362,7 +366,7 @@ def book_lines(
     for item in items:
         good = goods[item.good_id]
         rules = _ensure_bookable(good)
-        end = _validate_slot(rules, item.start, item.quantity, running_ok=True)
+        end = _validate_slot(rules, item.start, int(item.quantity), running_ok=True)
         if Booking.objects.filter(good=good, start__lt=end, end__gt=item.start).exists():
             raise SlotUnavailable(details={"good": good.pk, "start": item.start.isoformat()})
         _ensure_developer_free(developer, item.start, end)
@@ -374,7 +378,7 @@ def book_lines(
                     purchase=purchase,
                     start=item.start,
                     end=end,
-                    slots=item.quantity,
+                    slots=int(item.quantity),
                     people=item.people,
                     court_price_id=item.court_price_id,
                     status=BookingStatus.PAID,

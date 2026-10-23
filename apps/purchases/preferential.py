@@ -200,8 +200,11 @@ def free_units(developer_id: int, items, now: datetime | None = None) -> dict[in
     for item in sorted(lines, key=lambda i: (-_unit_value(i), i.good_id)):
         if left <= 0:
             break
-        free[item.good_id] = min(item.quantity, left)
-        left -= free[item.good_id]
+        # Whole units only: 2.5 kg with 3 items left takes 2.
+        taken = min(int(item.quantity), left)
+        if taken:
+            free[item.good_id] = taken
+            left -= taken
     return free
 
 
@@ -211,7 +214,7 @@ def _unit_value(item) -> Decimal:
     return price * item.people
 
 
-def charged(item) -> int:
+def charged(item) -> Decimal:
     """Units of a line that cost money."""
     return max(item.quantity - item.free_quantity, 0)
 

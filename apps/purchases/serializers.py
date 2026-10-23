@@ -10,7 +10,9 @@ from rest_framework import serializers
 
 from apps.developers.serializers import DeveloperSummarySerializer
 from apps.finance.models import PIN_LENGTH
+from apps.finance.services import money
 from apps.goods.models import Good
+from apps.goods.serializers import QuantityField
 from apps.rfid.serializers import UIDField
 from apps.sellers.models import ServicePosition
 from apps.sellers.serializers import SellerSummarySerializer
@@ -35,6 +37,10 @@ def current_price(item) -> Decimal:
 class PurchaseItemSerializer(serializers.ModelSerializer):
     good_name = serializers.CharField(source="good.name", read_only=True)
     kind = serializers.CharField(source="good.kind", read_only=True)
+    quantity = QuantityField(read_only=True)
+    decimal_quantity = serializers.BooleanField(
+        source="good.decimal_quantity", read_only=True, help_text="Quantity may have decimals."
+    )
     start = serializers.DateTimeField(
         read_only=True, help_text="Bookings: start of the first slot; null for goods."
     )
@@ -54,6 +60,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
             "good_name",
             "kind",
             "quantity",
+            "decimal_quantity",
             "free_quantity",
             "people",
             "date",
@@ -72,7 +79,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         rental = getattr(item.good, "rental", None)
         if item.start is None or rental is None:
             return None
-        return item.start + timedelta(minutes=rental.slot_minutes * item.quantity)
+        return item.start + timedelta(minutes=rental.slot_minutes * int(item.quantity))
 
     def get_end(self, item) -> str | None:
         end = self._end(item)
@@ -96,7 +103,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
     def get_line_total(self, item) -> str:
         if item.line_total is not None:
             return f"{item.line_total:.2f}"
-        return f"{current_price(item) * preferential.charged(item) * item.people:.2f}"
+        return f"{money(current_price(item) * preferential.charged(item) * item.people):.2f}"
 
     def get_price_name(self, item) -> str:
         return item.court_price.name if item.court_price_id else ""
@@ -337,17 +344,17 @@ class ReadersQuerySerializer(PurchaseCreateSerializer):
 
 class ItemAddSerializer(serializers.Serializer):
     good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
-    quantity = serializers.IntegerField(min_value=1, max_value=999, default=1)
+    quantity = QuantityField(min_value=Decimal("0.01"), max_value=999, default=1)
 
 
 class ItemUpdateSerializer(serializers.Serializer):
-    quantity = serializers.IntegerField(min_value=1, max_value=999)
+    quantity = QuantityField(min_value=Decimal("0.01"), max_value=999)
 
 
 class PaidLineSerializer(serializers.Serializer):
     # Deleted or deactivated goods too: a line already paid keeps its good.
     good = serializers.PrimaryKeyRelatedField(queryset=Good.all_objects.all())
-    quantity = serializers.IntegerField(min_value=1, max_value=999)
+    quantity = QuantityField(min_value=Decimal("0.01"), max_value=999)
 
 
 class PaidChangeSerializer(serializers.Serializer):

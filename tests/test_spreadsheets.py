@@ -420,7 +420,7 @@ def test_money_and_goods_exports(admin, make_user, b1, auth_client):
     # Kind, deposit type (none: made without one), amount.
     assert money["Transactions"][1][3:6] == ("DEPOSIT", None, 50)
     stock = read(admin.get(EXPORT.format("goods")))
-    assert stock["Goods"][1][:3] == ("Cafe", "Counter", "Tea") and stock["Goods"][1][6] == 10
+    assert stock["Goods"][1][:3] == ("Cafe", "Counter", "Tea") and stock["Goods"][1][7] == 10
     assert stock["Stock movements"][1][3:5] == ("INITIAL_STOCK", 10)
 
     r = admin.get(EXPORT.format("money") + "?date_from=2026-10-05&date_to=2026-10-01")
