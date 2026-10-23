@@ -4,6 +4,9 @@
 #
 #   scripts/build_full_kit.sh VERSION [FRONTEND_PACKAGE]
 #
+# GRIST_KIT (default: /root/grist-offline-kit.tar.gz) is the Grist offline kit; when it is
+# there it goes into the kit too, for install-grist.sh (optional, after install-all.sh).
+#
 # FRONTEND_PACKAGE is the frontend's offline package, made in the frontend project with
 # scripts/package-offline.sh (default: /root/frontend/dist/management-app-offline.tar.gz):
 # the repository with .git and node_modules, plus the Node.js runtime.
@@ -14,11 +17,13 @@
 #   install-all.sh       one installer for everything      prepare-server.sh  fresh Ubuntu prep
 #   install-backend.sh   backend only (used by install-all) setup-dev.sh       backend dev copy
 #   README.md            the step-by-step guide
+#   install-grist.sh + grist-offline-kit.tar.gz (+ .sha256)   Grist, optional
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 VERSION="${1:?usage: scripts/build_full_kit.sh VERSION [FRONTEND_PACKAGE]}"
 FRONTEND_PKG="${2:-/root/frontend/dist/management-app-offline.tar.gz}"
+GRIST_KIT="${GRIST_KIT:-/root/grist-offline-kit.tar.gz}"
 KIT="dist/offline-kit-${VERSION}"
 
 [[ -f "$FRONTEND_PKG" ]] || {
@@ -53,7 +58,16 @@ mv "dist/backend-${VERSION}.tar.gz" "dist/backend-${VERSION}.tar.gz.sha256" "$KI
 cp "$FRONTEND_PKG" "$KIT/management-app-offline.tar.gz"
 (cd "$KIT" && sha256sum management-app-offline.tar.gz > management-app-offline.tar.gz.sha256)
 install -m 0755 deploy/install-all.sh deploy/install-backend.sh deploy/prepare-server.sh \
-    deploy/setup-dev.sh "$KIT/"
+    deploy/setup-dev.sh deploy/install-grist.sh "$KIT/"
+if [[ -f "$GRIST_KIT" ]]; then
+    echo "==> Adding the Grist kit ($GRIST_KIT)"
+    tar -xzOf "$GRIST_KIT" grist-offline-kit/install.sh >/dev/null \
+        || { echo "Not a Grist offline kit: $GRIST_KIT" >&2; exit 1; }
+    cp "$GRIST_KIT" "$KIT/grist-offline-kit.tar.gz"
+    (cd "$KIT" && sha256sum grist-offline-kit.tar.gz > grist-offline-kit.tar.gz.sha256)
+else
+    echo "    (no Grist kit at $GRIST_KIT: install-grist.sh will need one)"
+fi
 install -m 0644 deploy/README-OFFLINE-KIT.md "$KIT/README.md"
 rm -f dist/install-backend.sh dist/prepare-server.sh dist/setup-dev.sh dist/README-INSTALL.md
 echo

@@ -12,6 +12,7 @@ every package they need, the runtimes, and one installer.
 | `backend-<version>.tar.gz` (+ `.sha256`) | Backend: source, git history, Python and Ubuntu packages |
 | `management-app-offline.tar.gz` (+ `.sha256`) | Frontend: source, git history, all npm packages, Node.js |
 | `install-backend.sh`, `setup-dev.sh` | Parts used by `install-all.sh` (can also run alone) |
+| `install-grist.sh`, `grist-offline-kit.tar.gz` (+ `.sha256`) | Optional: Grist, with the app's data copied into it (see **7a**) |
 
 What you get after installing:
 
@@ -669,6 +670,55 @@ internet machine                      USB stick                    offline serve
 - **Don't rewrite history** (`git rebase`, `git push --force`) of commits that already
   travelled: the other side can't match them up anymore.
 
+## 7a. Grist: the data in a spreadsheet (optional)
+
+Grist is a spreadsheet in the browser. With it, the app copies its data into one Grist
+document, **"Management data"**, every 10 minutes: tables Developers (with card and balance),
+Cards, Goods, Transactions, Purchases and Purchase items. People add their own columns,
+tables, formulas and charts there. The copied columns are **locked** (Grist access rules:
+only the app's login `app-sync` changes them, and synced rows can't be deleted); change that
+data in the app. Columns, tables and rows people add are theirs, and labels can be renamed.
+Statuses and kinds are words in the app's language (`GRIST_LANGUAGE` in backend.env, default
+`LANGUAGE_CODE`); the App ID column the sync matches rows by is on the Raw Data page only.
+
+Install it after `install-all.sh`, from the kit folder:
+
+```bash
+sudo bash install-grist.sh            # asks for a password for the Grist user "admin"
+```
+
+It installs Docker and Grist (from `grist-offline-kit.tar.gz`), opens Grist at
+**`https://<server-ip>:8444`** (`--port` for another; same certificate as the app), makes the
+Grist login `app-sync` the app uses, writes `GRIST_*` into `/etc/backend/backend.env`, runs
+the first sync and makes the first Grist backup.
+
+- **People's Grist logins** are separate from the app's: the Grist `admin` adds them at
+  `https://<server-ip>:8444/manage-users/` (editor: changes data, viewer: only looks,
+  owner: also people and settings). Everyone in Grist sees all the copied data (all
+  buildings), so give Grist logins only to people who may see it.
+- **In the app:** Excel page → **Data in Grist**: last sync, what it changed, **Sync now**
+  and **Open in Grist** (permission *See the Grist sync of all data and run it now*; Admin
+  has it).
+- **The schedule:** `systemctl list-timers backend-grist-sync.timer`; a run by hand:
+  `sudo systemctl start backend-grist-sync`; its log: `sudo journalctl -u backend-grist-sync -n 50`.
+  It compares everything in full once a day.
+- **Grist itself:** `cd /opt/grist && sudo docker compose ps` (logs: `... logs -f`). Its
+  folder `/opt/grist` holds the documents, logins and passwords.
+- **Backup:** the nightly backup archives `/opt/grist` too, into
+  `/var/backups/backend/grist/` (Grist pauses for a few seconds; every database in the
+  archive is checked), kept and copied off-site like the other backups. A failed or missing
+  Grist backup shows on the Backups page. By hand: `sudo /opt/backend/current/scripts/backup/grist_backup.sh`.
+- **Restore Grist** from such an archive:
+
+  ```bash
+  cd /opt/grist && sudo docker compose down
+  sudo mv /opt/grist /opt/grist.before-restore
+  sudo mkdir /opt/grist && sudo tar -C /opt/grist -xzf /var/backups/backend/grist/grist-<date>.tar.gz
+  cd /opt/grist && sudo docker compose up -d
+  ```
+
+  Then delete `/opt/grist.before-restore` once Grist looks right.
+
 ## 13. Ports and services
 
 | Port | Who listens | Reachable from |
@@ -680,6 +730,8 @@ internet machine                      USB stick                    offline serve
 | 5432 / 5433 | PostgreSQL: installed system / development copies | this server only |
 | 8000, 3000 | development servers, when you run them | this server only |
 | 9101 | development door listener (`run_rfid_tcp`), when you run it | this server; a test PC only if you open it |
+| 8444 (`install-grist.sh --port`) | nginx: Grist, when installed (**7a**) | the company network |
+| 8484 | Grist's login gate (Docker) | this server only |
 
 Services: `frontend`, `backend-web`, `backend-ws`, `backend-tcp`, `backend-worker`, `nginx`,
 `postgresql`, `redis-server`. Logs: `sudo journalctl -u frontend -n 100` (or the service named).
@@ -745,6 +797,7 @@ Be careful:
 | Frontend settings | `/etc/systemd/system/frontend.service` (`API_URL`, `PORT`) |
 | Certificate | `/etc/backend/tls/cert.pem`, `key.pem` |
 | Backups | `/var/backups/backend` (settings: `/etc/backend/backup.conf`) |
+| Grist (when installed) | `/opt/grist` (documents, logins; settings `.env`) |
 | Development copies | `~/backend-dev` (settings `.env`), `~/frontend-dev` (settings `.env.local`) |
 
 ## 15. Without development copies

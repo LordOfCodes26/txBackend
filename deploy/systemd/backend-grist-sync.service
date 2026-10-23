@@ -1,0 +1,15 @@
+[Unit]
+Description=Copy the app's data into Grist (manage.py sync_grist; nothing until Grist is set up)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=backend
+Group=backend
+WorkingDirectory=/opt/backend/current
+EnvironmentFile=/etc/backend/backend.env
+ExecStart=/opt/backend/current/.venv/bin/python manage.py sync_grist
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

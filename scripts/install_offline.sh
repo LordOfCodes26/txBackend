@@ -135,7 +135,8 @@ install -m 644 "${RELEASE}/deploy/systemd/backend-web.service" /etc/systemd/syst
 install -m 644 "${RELEASE}/deploy/systemd/backend-worker.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-ws.service" /etc/systemd/system/
 install -m 644 "${RELEASE}/deploy/systemd/backend-tcp.service" /etc/systemd/system/
-for unit in backend-backup.service backend-backup.timer backend-basebackup.service backend-basebackup.timer; do
+for unit in backend-backup.service backend-backup.timer backend-basebackup.service backend-basebackup.timer \
+            backend-grist-sync.service backend-grist-sync.timer; do
     install -m 644 "${RELEASE}/deploy/systemd/${unit}" /etc/systemd/system/
 done
 install -m 644 "${RELEASE}/deploy/nginx/backend.conf" /etc/nginx/sites-available/backend.conf
@@ -169,6 +170,15 @@ systemctl enable backend-web backend-worker backend-ws backend-tcp nginx redis-s
 systemctl restart backend-web backend-worker backend-ws backend-tcp
 systemctl reload nginx || systemctl restart nginx
 systemctl enable --now backend-backup.timer backend-basebackup.timer backend-backup-admin.socket
+# Copies the data into Grist every 10 minutes; does nothing until install-grist.sh set it up.
+systemctl enable --now backend-grist-sync.timer
+# Grist over HTTPS, once install-grist.sh has enabled it: keep its nginx file current.
+if [[ -L /etc/nginx/sites-enabled/grist.conf ]]; then
+    GRIST_PORT=$(grep -s '^GRIST_HTTPS_PORT=' "${ENV_FILE}" | cut -d= -f2- || true)
+    sed "s/listen 8444 ssl;/listen ${GRIST_PORT:-8444} ssl;/" "${RELEASE}/deploy/nginx/grist.conf" \
+        > /etc/nginx/sites-available/grist.conf
+    nginx -t && systemctl reload nginx
+fi
 if ! ls -1d /var/backups/backend/base/*/ >/dev/null 2>&1; then
     # Point-in-time recovery needs a base backup to start from.
     "${RELEASE}/scripts/backup/base_backup.sh"

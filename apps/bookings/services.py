@@ -751,7 +751,8 @@ def change_booking(
             )
             if price != paid:
                 purchase.total = price
-                purchase.save(update_fields=["total", "updated_at"])
+            # Even at the same price: the items changed (the Grist sync goes by updated_at).
+            purchase.save(update_fields=["total", "updated_at"])
 
         record_audit(
             "booking.changed",

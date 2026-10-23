@@ -5,6 +5,8 @@ BACKUP_DIR=/var/backups/backend
 DB_NAME=backend
 # Uploaded files (goods images) to back up.
 MEDIA_ROOT=/var/lib/backend/media
+# Grist (install-grist.sh), archived nightly when it is there.
+GRIST_DIR=/opt/grist
 # Keep nightly dumps this many days, and this many daily base backups (with the WAL after
 # the oldest one: point-in-time recovery reaches back that many days).
 KEEP_DAILY_DAYS=14

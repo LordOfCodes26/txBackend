@@ -103,8 +103,9 @@ def disk_usage(status: dict) -> list[dict]:
 
 def backup_health() -> dict:
     """Backup freshness: `status` "error" when backups are missing, stale, unverified, the
-    off-site copy failed or is old, a backup disk is 90% full or WAL archiving fails, with
-    `errors`; `warnings` (e.g. no off-site copy, a disk 80% full) otherwise. With
+    off-site copy failed or is old, a backup disk is 90% full, WAL archiving fails or (with
+    Grist set up) the Grist backup failed or is old, with `errors`; `warnings` (e.g. no
+    off-site copy, a disk 80% full) otherwise. With
     BACKUP_REQUIRE_PITR off, base backups and WAL archiving aren't required."""
     errors, warnings = [], []
     try:
@@ -139,6 +140,16 @@ def backup_health() -> dict:
             hours=settings.BACKUP_MAX_DUMP_AGE_HOURS
         ):
             errors.append("off-site copy is missing or too old")
+
+    # Grist (install-grist.sh): its folder is archived nightly too (grist_backup.sh).
+    if settings.GRIST_URL and status:
+        grist_at = _parse(status.get("last_grist_backup_at"))
+        if status.get("grist_backup_error"):
+            errors.append(f"Grist backup failed: {status['grist_backup_error']}")
+        elif grist_at is None or now - grist_at > timedelta(
+            hours=settings.BACKUP_MAX_DUMP_AGE_HOURS
+        ):
+            errors.append("Grist backup is missing or too old")
 
     pruned_at = _parse(status.get("space_pruned_at"))
     if pruned_at is not None and now - pruned_at < timedelta(days=7):
@@ -192,6 +203,7 @@ def backup_health() -> dict:
         "last_verify_ok": status.get("last_verify_ok") == "true",
         "last_base_backup_at": status.get("last_base_backup_at"),
         "offsite_copy_at": status.get("offsite_copy_at"),
+        "last_grist_backup_at": status.get("last_grist_backup_at"),
         "offsite_error": status.get("offsite_error") or None,
         "disks": disks,
         "wal_archiver": archiver,

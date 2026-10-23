@@ -1747,3 +1747,87 @@ msgstr "작성중인 구입만 지불할수 있습니다."
 #: common/test_console.py:147
 msgid "This developer has no active card; send a `uid` instead."
 msgstr "이 개발자에게는 활성카드가 없습니다. 대신 `uid`를 보내십시오."
+
+#: apps/spreadsheets/imports.py
+msgid "Current employee no."
+msgstr "현재 직원번호"
+
+#: apps/spreadsheets/imports.py
+msgid "New employee no."
+msgstr "새 직원번호"
+
+#: apps/spreadsheets/imports.py
+msgid "Change employee numbers"
+msgstr "직원번호 변경"
+
+#: apps/spreadsheets/grist.py
+msgid "Refunded at"
+msgstr "환불시간"
+
+#: apps/spreadsheets/grist.py
+msgid "Last changed"
+msgstr "마지막 갱신"
+
+#: apps/spreadsheets/grist.py
+msgid "Free quantity"
+msgstr "무료개수"
+
+#: apps/spreadsheets/views.py
+msgid "Grist is not set up on this server."
+msgstr "이 봉사기에는 Grist가 설정되지 않았습니다."
+
+#: apps/spreadsheets/views.py
+msgid "A sync is running now. Try again in a minute."
+msgstr "지금 동기화가 진행중입니다. 1분 후에 다시 하십시오."
+
+#: apps/spreadsheets/grist.py
+msgid "Suspended"
+msgstr "정지"
+
+#: apps/spreadsheets/grist.py
+msgid "Terminated"
+msgstr "퇴소"
+
+#: apps/spreadsheets/grist.py
+msgid "Frozen"
+msgstr "동결됨"
+
+#: apps/spreadsheets/grist.py
+msgid "Closed"
+msgstr "페점"
+
+#: apps/spreadsheets/grist.py
+msgid "Deposit"
+msgstr "충진"
+
+#: apps/spreadsheets/grist.py
+msgid "Purchase"
+msgstr "구매"
+
+#: apps/spreadsheets/grist.py
+msgid "Refund"
+msgstr "환불"
+
+#: apps/spreadsheets/grist.py
+msgid "Manual adjustment"
+msgstr "수동 수정"
+
+#: apps/spreadsheets/grist.py
+msgid "Confirmed"
+msgstr "확인됨"
+
+#: apps/spreadsheets/grist.py
+msgid "Product"
+msgstr "물건"
+
+#: apps/spreadsheets/grist.py
+msgid "Service"
+msgstr "봉사"
+
+#: apps/spreadsheets/grist.py
+msgid "Court"
+msgstr "운동장"
+
+#: apps/spreadsheets/grist.py
+msgid "Copied from the app: change it there, or add a column of your own."
+msgstr "프로그람에서 복사한 렬입니다. 프로그람에서 바꾸거나 자기 렬을 추가하십시오."

@@ -1,4 +1,4 @@
-"""Excel imports: developers, cards (with assignment), opening balances and goods.
+"""Excel imports: developers, employee numbers, cards (with assignment), balances and goods.
 
 Every row goes through the same validation and services as the web forms (audit log
 included). All or nothing: if any row has an error nothing is saved, and every error is
@@ -6,10 +6,11 @@ reported with its Excel row number. `dry_run` checks a file the same way without
 """
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -56,6 +57,10 @@ CARD_COLUMNS = [
     Column("card_uid", _("Card UID"), width=14, example="04DE00AB12"),
     Column("card_label", _("Card label"), width=12, example="0001"),
     Column("employee_number", _("Employee no."), width=14, example="E1001"),
+]
+RENUMBER_COLUMNS = [
+    Column("old_employee_number", _("Current employee no."), True, 18, example="E1001"),
+    Column("new_employee_number", _("New employee no."), True, 18, example="E2001"),
 ]
 BALANCE_COLUMNS = [
     EMPLOYEE,
@@ -106,6 +111,8 @@ def text(value) -> str:
 class Context:
     actor: object
     seen: set
+    rows: list = field(default_factory=list)  # every (number, row) of the file
+    pending: list = field(default_factory=list)  # work left for Importer.finish
 
 
 class Importer:
@@ -117,6 +124,9 @@ class Importer:
     def apply(self, ctx: Context, number: int, row: dict) -> str:
         """Save one row; return "created", "updated" or "unchanged"."""
         raise NotImplementedError
+
+    def finish(self, ctx: Context) -> None:
+        """Called once after every row passed (also on a dry run): for work on the whole file."""
 
     def label(self, key: str) -> str:
         for column in self.columns:
@@ -219,6 +229,69 @@ class DeveloperImporter(Importer):
                 "status",
             )
         return status
+
+
+class RenumberImporter(Importer):
+    """Gives developers new employee numbers: one row per developer, current number and new
+    number. Numbers may move along a chain or swap (E1 -> E2 and E2 -> E1), since a number is
+    checked against the developers left after the whole file. Cards, balances and history
+    follow the developer, not the number."""
+
+    title = _("Change employee numbers")
+    columns = RENUMBER_COLUMNS
+    permissions = ["developer.update"]
+    excel_permission = "excel.import_developers"
+    MAX_LENGTH = Developer._meta.get_field("employee_number").max_length
+
+    def apply(self, ctx, number, row):
+        old = text(row.get("old_employee_number"))
+        new = text(row.get("new_employee_number"))
+        if not old:
+            raise RowError(_("This field is required."), "old_employee_number")
+        if not new:
+            raise RowError(_("This field is required."), "new_employee_number")
+        self.once(ctx, "old_employee_number", old)
+        self.once(ctx, "new_employee_number", new)
+        if not ctx.actor.has_rbac_perm("developer.update"):
+            raise RowError(_("You may not do this."))
+        developer = Developer.objects.filter(employee_number=old).first()
+        if developer is None:
+            raise RowError(_("No developer with this employee number."), "old_employee_number")
+        scope = building_scope(ctx.actor, "developer.update")
+        if scope is not None and developer.building_id not in scope:
+            raise RowError(_("This developer is not in your buildings."), "old_employee_number")
+        if new == old:
+            return "unchanged"
+        if len(new) > self.MAX_LENGTH:
+            raise RowError(
+                _("Ensure this field has no more than {max_length} characters.").format(
+                    max_length=self.MAX_LENGTH
+                ),
+                "new_employee_number",
+            )
+        # Free if nobody has it, or its holder gets a new number in this file too.
+        olds = {text(r.get("old_employee_number")) for _n, r in ctx.rows}
+        if new not in olds and Developer.objects.filter(employee_number=new).exists():
+            raise RowError(_("This employee number is already in use."), "new_employee_number")
+        ctx.pending.append((developer, new))
+        return "updated"
+
+    def finish(self, ctx):
+        # Two steps, so a swap or chain never meets the unique number on the way.
+        now = timezone.now()
+        for developer, _new in ctx.pending:
+            Developer.objects.filter(pk=developer.pk).update(
+                employee_number=f"~renumber-{developer.pk}", updated_at=now
+            )
+        for developer, new in ctx.pending:
+            Developer.objects.filter(pk=developer.pk).update(employee_number=new, updated_at=now)
+            record_audit(
+                "developer.updated",
+                actor=ctx.actor,
+                entity=developer,
+                old_values={"employee_number": developer.employee_number},
+                new_values={"employee_number": new},
+            )
 
 
 class CardImporter(Importer):
@@ -514,6 +587,7 @@ class GoodsImporter(Importer):
 
 IMPORTERS = {
     "developers": DeveloperImporter(),
+    "renumber": RenumberImporter(),
     "cards": CardImporter(),
     "balances": BalanceImporter(),
     "goods": GoodsImporter(),
@@ -538,7 +612,7 @@ def run_import(kind: str, upload, *, actor, dry_run: bool) -> dict:
     rows = read_rows(upload, importer.columns)
     if not rows:
         raise BadWorkbook(_("The file has no rows under the header."))
-    ctx = Context(actor=actor, seen=set())
+    ctx = Context(actor=actor, seen=set(), rows=rows)
     counts = {"created": 0, "updated": 0, "unchanged": 0}
     errors = []
     with transaction.atomic():
@@ -554,6 +628,8 @@ def run_import(kind: str, upload, *, actor, dry_run: bool) -> dict:
                     errors.append({"row": number, "column": column, "message": message})
             except DomainError as exc:
                 errors.append({"row": number, "column": None, "message": str(exc.detail)})
+        if not errors:
+            importer.finish(ctx)
         if errors or dry_run:
             transaction.set_rollback(True)
     return {

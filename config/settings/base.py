@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.purchases",
     "apps.bookings",
     "apps.realtime",
+    "apps.spreadsheets",  # no models: for manage.py sync_grist
 ]
 
 MIDDLEWARE = [
@@ -292,6 +293,19 @@ BACKUP_DISK_ERROR_PERCENT = env.int("BACKUP_DISK_ERROR_PERCENT", default=90)
 # directly (a web service that already runs as root, e.g. staging).
 BACKUP_ADMIN_SOCKET = env("BACKUP_ADMIN_SOCKET", default="/run/backend-backup-admin.sock")
 BACKUP_ADMIN_COMMAND = env("BACKUP_ADMIN_COMMAND", default="")
+
+# --- Grist ----------------------------------------------------------------------
+# manage.py sync_grist copies the app's data into a Grist document (apps/spreadsheets/
+# grist.py). GRIST_URL is where the backend reaches Grist's login gate, as GRIST_USER with
+# GRIST_PASSWORD; empty: no sync. GRIST_PUBLIC_URL is the address browsers open.
+GRIST_URL = env("GRIST_URL", default="")
+GRIST_USER = env("GRIST_USER", default="app-sync")
+GRIST_PASSWORD = env("GRIST_PASSWORD", default="")
+GRIST_PUBLIC_URL = env("GRIST_PUBLIC_URL", default="")
+GRIST_DOC_NAME = env("GRIST_DOC_NAME", default="Management data")
+# Language of new columns' labels and of statuses and kinds (en, ko-kp).
+GRIST_LANGUAGE = env("GRIST_LANGUAGE", default=LANGUAGE_CODE)
+GRIST_STATUS_FILE = env("GRIST_STATUS_FILE", default="/var/lib/backend/grist-status.json")
 
 # --- Data reset -----------------------------------------------------------------
 # System -> Data reset (manage.py reset_data): the backup made first goes to

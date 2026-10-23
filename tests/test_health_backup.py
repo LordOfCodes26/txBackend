@@ -194,3 +194,34 @@ def test_redis_failure_is_logged_with_its_reason(client, settings, caplog):
     assert r.json() == {"status": "error", "component": "redis"}
     assert "health/redis: ConnectionError" in caplog.text
     assert "127.0.0.1" in caplog.text
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("grist_url", "overrides", "error"),
+    [
+        ("", {}, None),  # no Grist: nothing to check
+        ("http://127.0.0.1:8484", {"last_grist_backup_at": iso(timedelta(hours=3))}, None),
+        ("http://127.0.0.1:8484", {}, "Grist backup is missing or too old"),
+        (
+            "http://127.0.0.1:8484",
+            {"last_grist_backup_at": iso(timedelta(hours=30))},
+            "Grist backup is missing or too old",
+        ),
+        (
+            "http://127.0.0.1:8484",
+            {
+                "last_grist_backup_at": iso(timedelta(hours=3)),
+                "grist_backup_error": "tar failed",
+            },
+            "Grist backup failed: tar failed",
+        ),
+    ],
+)
+def test_grist_backup_when_grist_is_set_up(
+    client, status_file, settings, grist_url, overrides, error
+):
+    settings.GRIST_URL = grist_url
+    status_file(**healthy(**overrides))
+    body = client.get("/health/backup/").json()
+    assert body["errors"] == ([error] if error else [])

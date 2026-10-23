@@ -11,9 +11,10 @@ from rest_framework.views import APIView
 
 from apps.sellers.access import acting_seller, seller_areas
 from apps.stats.views import FinanceStatsQuerySerializer, PeriodSerializer
+from common.exceptions import Conflict, DomainError
 from common.permissions import HasPermissions
 
-from . import exports
+from . import exports, grist
 from .imports import IMPORTERS, run_import
 from .xlsx import XLSX, template
 
@@ -138,3 +139,42 @@ class ExportView(APIView):
             "finance-stats": exports.finance_stats_workbook,
         }[kind]
         return _file(build(request.user, first, last), f"{kind}-{first}-to-{last}.xlsx")
+
+
+def _grist_state(status: dict) -> dict:
+    return {
+        "configured": grist.configured(),
+        "doc_url": grist.doc_url(status.get("doc_id", "")),
+        "status": status,
+    }
+
+
+class GristView(APIView):
+    """GET the Grist sync: whether it is set up, the address of the document and the last
+    run (`status`: ok, error, finished_at, last_ok_at, and per table added / changed /
+    removed). It runs every few minutes (manage.py sync_grist). Permission: excel.grist_sync."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["excel.grist_sync"]}
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    def get(self, request):
+        return Response(_grist_state(grist.read_status()))
+
+
+class GristSyncView(APIView):
+    """POST: sync now, and answer like GET /grist/ (a failed run has status.ok false).
+    409 while another sync runs. Permission: excel.grist_sync."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"post": ["excel.grist_sync"]}
+
+    @extend_schema(request=None, responses=OpenApiTypes.OBJECT)
+    def post(self, request):
+        if not grist.configured():
+            raise DomainError(_("Grist is not set up on this server."))
+        try:
+            status = grist.run_sync(daily_full=False)
+        except grist.SyncBusy as exc:
+            raise Conflict(_("A sync is running now. Try again in a minute.")) from exc
+        return Response(_grist_state(status))

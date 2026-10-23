@@ -298,18 +298,19 @@ uninstall() {
     local unit door http https
     door=$(door_port); http=$(http_port); https=$(https_port)
     for unit in "${BACKEND_SERVICES[@]}" frontend backend-backup.timer backend-basebackup.timer \
-            backend-backup-admin.socket; do
+            backend-backup-admin.socket backend-grist-sync.timer; do
         systemctl disable --now "$unit" >/dev/null 2>&1 || true
     done
     rm -f /etc/systemd/system/backend-{web,ws,tcp,worker}.service /etc/systemd/system/frontend.service \
-        /etc/systemd/system/backend-{backup,basebackup}.{service,timer} \
+        /etc/systemd/system/backend-{backup,basebackup,grist-sync}.{service,timer} \
         /etc/systemd/system/backend-backup-admin.socket /etc/systemd/system/backend-backup-admin@.service \
         /usr/local/sbin/backend-backup-admin
     rm -rf /etc/systemd/system/backend-backup.timer.d
     systemctl daemon-reload
     systemctl reset-failed >/dev/null 2>&1 || true   # forget the stopped services' last state
     note "services and backup schedule removed"
-    rm -f /etc/nginx/sites-enabled/backend.conf "$NGINX_SITE"
+    # Grist itself (Docker, /opt/grist) stays: it has its own data; see the README.
+    rm -f /etc/nginx/sites-enabled/backend.conf /etc/nginx/sites-enabled/grist.conf "$NGINX_SITE"
     systemctl reload nginx 2>/dev/null || true
     note "web site removed from nginx"
     if (( REMOVE_DATA )) && ufw_active; then

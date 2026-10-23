@@ -102,6 +102,7 @@ AREAS: dict[str, dict[str, str]] = {
         "excel.import_goods": (
             "Import goods and stock counts from Excel (also needs Add or Change goods)"
         ),
+        "excel.grist_sync": "See the Grist sync of all data and run it now",
     },
     "System": {
         "system.tcp_log": "Read the raw TCP device log (every packet and its answer)",

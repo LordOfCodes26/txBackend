@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Nightly: full logical dump + media archive, verify by restoring, prune, copy off-site.
+# Nightly: full logical dump + media archive (+ Grist, when installed), verify by restoring,
+# prune, copy off-site.
 # Run as root (systemd: backend-backup.service).
 DIR=$(cd "$(dirname "$0")" && pwd)
 . "$DIR/common.sh"
@@ -21,6 +22,9 @@ if [[ -n "${MEDIA_ROOT:-}" && -d "$MEDIA_ROOT" ]]; then
     tar -C "$MEDIA_ROOT" -czf "$BACKUP_DIR/media/media-$stamp.tar.gz" .
 fi
 
+# Grist has its own error in the status file: it never stops the database's backup.
+"$DIR/grist_backup.sh" || echo "WARNING: the Grist backup failed (see above)." >&2
+
 echo "==> Verifying the dump by restoring it"
 if "$DIR/verify.sh" "$dump"; then
     update_status "last_verify_at=$(now_iso)" "last_verify_ok=true" \
@@ -33,7 +37,8 @@ else
 fi
 
 echo "==> Pruning dumps older than $KEEP_DAILY_DAYS days"
-find "$BACKUP_DIR/db" "$BACKUP_DIR/media" -type f -mtime "+$KEEP_DAILY_DAYS" -delete
+find "$BACKUP_DIR/db" "$BACKUP_DIR/media" "$BACKUP_DIR/grist" -type f -mtime "+$KEEP_DAILY_DAYS" \
+    -delete 2>/dev/null || true
 free_space_guard
 
 echo "==> Copying off-site"

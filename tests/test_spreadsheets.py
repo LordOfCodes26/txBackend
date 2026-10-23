@@ -164,6 +164,83 @@ def test_export_round_trips_into_import(admin, b1):
     assert (body["unchanged"], body["errors"]) == (1, []), body
 
 
+def test_renumber_changes_employee_numbers_and_keeps_links(admin):
+    ada = Developer.objects.create(employee_number="E1", full_name="Ada")
+    bob = Developer.objects.create(employee_number="E2", full_name="Bob")
+    cy = Developer.objects.create(employee_number="E3", full_name="Cy")
+    card = RFIDCard.objects.create(uid="04AA00BB11")
+    RFIDCardAssignment.objects.create(card=card, developer=ada)
+    header = ("Current employee no.", "New employee no.")
+    rows = [header, ("E1", "E2"), ("E2", "E1"), ("E3", "E3")]  # a swap, and no change
+    body = upload(admin, "renumber", *rows, dry_run=True).json()
+    assert (body["updated"], body["unchanged"], body["errors"]) == (2, 1, [])
+    assert Developer.objects.get(pk=ada.pk).employee_number == "E1"  # dry run: nothing saved
+
+    body = upload(admin, "renumber", *rows).json()
+    assert body["saved"] is True, body
+    ada.refresh_from_db()
+    bob.refresh_from_db()
+    cy.refresh_from_db()
+    assert (ada.employee_number, bob.employee_number, cy.employee_number) == ("E2", "E1", "E3")
+    assert RFIDCardAssignment.objects.get(card=card).developer == ada
+    logs = AuditLog.objects.filter(action="developer.updated").order_by("id")
+    assert [(log.old_values, log.new_values) for log in logs] == [
+        ({"employee_number": "E1"}, {"employee_number": "E2"}),
+        ({"employee_number": "E2"}, {"employee_number": "E1"}),
+    ]
+
+    # A chain into a new number works too.
+    body = upload(admin, "renumber", header, ("E1", "E9"), ("E2", "E1")).json()
+    assert body["saved"] is True, body
+    assert Developer.objects.get(pk=bob.pk).employee_number == "E9"
+    assert Developer.objects.get(pk=ada.pk).employee_number == "E1"
+
+
+def test_renumber_errors_save_nothing(admin):
+    Developer.objects.create(employee_number="E1", full_name="Ada")
+    Developer.objects.create(employee_number="E2", full_name="Bob")
+    Developer.objects.create(employee_number="E3", full_name="Cy")
+    Developer.objects.create(employee_number="E9", full_name="Dee")
+    body = upload(
+        admin,
+        "renumber",
+        ("현재 직원번호", "새 직원번호"),  # Korean headers
+        ("E1", "E9"),  # E9 keeps its number: in use
+        ("E3", "E5"),
+        ("E4", "E6"),  # no such developer
+        ("E3", "E7"),  # E3 twice
+        (None, "E8"),
+        ("E2", "x" * 51),
+    ).json()
+    assert body["saved"] is False
+    assert [(e["row"], e["column"]) for e in body["errors"]] == [
+        (2, "New employee no."),
+        (4, "Current employee no."),
+        (5, "Current employee no."),
+        (6, "Current employee no."),
+        (7, "New employee no."),
+    ]
+    assert sorted(Developer.objects.values_list("employee_number", flat=True)) == [
+        "E1",
+        "E2",
+        "E3",
+        "E9",
+    ]
+
+
+def test_renumber_scope_and_permissions(auth_client, make_user, b1):
+    b2 = Building.objects.create(code="B2", name="Building 2")
+    manager = make_user(Roles.BUILDING_MANAGER)
+    b1.managers.add(manager)
+    Developer.objects.create(employee_number="E1", full_name="Ada", building=b1)
+    Developer.objects.create(employee_number="X1", full_name="Other", building=b2)
+    header = ("Current employee no.", "New employee no.")
+    body = upload(auth_client(manager), "renumber", header, ("E1", "E5"), ("X1", "X5")).json()
+    assert [(e["row"], e["column"]) for e in body["errors"]] == [(3, "Current employee no.")]
+    boss = auth_client(make_user(Roles.BOSS))
+    assert upload(boss, "renumber", header, ("E1", "E5")).status_code == 403
+
+
 # --- Cards --------------------------------------------------------------------------
 
 
