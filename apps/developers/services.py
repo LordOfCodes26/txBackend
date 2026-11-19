@@ -174,7 +174,7 @@ def restore_developer(*, actor, developer: Developer, with_card: bool = False) -
     if with_card:
         old = card_taken_on_delete(developer)
         if old is not None and old[1] == "FREE" and developer.status != DeveloperStatus.TERMINATED:
-            from apps.rfid.services import assign_card, change_card_status
+            from apps.rfid.services import assign_card
 
             assign_card(actor=actor, card=old[0], developer=developer)
             given = old[0]

@@ -445,6 +445,8 @@ class GoodCategoryViewSet(viewsets.ModelViewSet):
         return seller
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):  # the API schema: no user
+            return GoodCategory.objects.none()
         rows = GoodCategory.objects.select_related("seller").annotate(
             goods_count=Count("goods", filter=Q(goods__deleted_at__isnull=True))
         )

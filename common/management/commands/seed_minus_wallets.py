@@ -20,7 +20,8 @@ class Command(BaseCommand):
         "Test data: takes a few developers' wallets below zero (one adjustment each, within "
         "the minus limit, which is raised if needed) so the minus figures can be tried. "
         "Running it again adds nothing for wallets already done; --undo puts every balance "
-        "and the limit back. Test servers only (DEBUG or TEST_CONSOLE_ENABLED)."
+        "back, and the limit unless it was changed since. Test servers only (DEBUG or "
+        "TEST_CONSOLE_ENABLED)."
     )
 
     def add_arguments(self, parser):
@@ -114,7 +115,9 @@ class Command(BaseCommand):
         undone = self._undone()
         reversed_ = 0
         first_limit = None
+        seeded_last = None
         for txn in self._seeded().select_related("account").order_by("id"):
+            seeded_last = txn.created_at
             if first_limit is None:
                 match = re.search(r"limit before: ([\d.]+)", txn.description)
                 first_limit = finance.money(match.group(1)) if match else None
@@ -130,6 +133,11 @@ class Command(BaseCommand):
             )
             reversed_ += 1
         self.stdout.write(f"Reversed {reversed_} wallet(s).")
-        if reversed_ and first_limit is not None:
-            finance.set_minus_limit(actor=None, minus_limit=first_limit)
-            self.stdout.write(f"Minus limit back to {first_limit}.")
+        if not reversed_ or first_limit is None:
+            return
+        # Only the limit this command set: one changed since (by an admin) stays.
+        if WalletSettings.current().updated_at > seeded_last:
+            self.stdout.write("Minus limit kept: it was changed after the seeding.")
+            return
+        finance.set_minus_limit(actor=None, minus_limit=first_limit)
+        self.stdout.write(f"Minus limit back to {first_limit}.")

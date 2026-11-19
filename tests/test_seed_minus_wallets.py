@@ -73,3 +73,12 @@ def test_keeps_a_higher_limit(people):
     out = run("--count", "1")
     assert "Minus limit" not in out.splitlines()[0]
     assert WalletSettings.current().minus_limit == Decimal("50.00")
+
+
+def test_undo_keeps_a_limit_changed_since(people):
+    run("--count", "1")
+    finance.set_minus_limit(actor=None, minus_limit="50.00")  # an admin, later
+    out = run("--undo")
+    assert "Reversed 1 wallet(s)." in out and "Minus limit kept" in out
+    assert WalletSettings.current().minus_limit == Decimal("50.00")
+    assert balances(people) == [Decimal("30.00")] * 3

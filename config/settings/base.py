@@ -188,6 +188,7 @@ SPECTACULAR_SETTINGS = {
         "SellerStatusEnum": "apps.sellers.models.SellerStatus",
         "AccountStatusEnum": "apps.finance.models.AccountStatus",
         "GoodKindEnum": "apps.goods.models.GoodKind",
+        "PricePerEnum": "apps.goods.models.PricePer",
         "ScanDirectionEnum": "apps.rfid.models.ScanDirection",
         "DeviceDirectionEnum": "apps.rfid.models.DeviceDirection",
     },

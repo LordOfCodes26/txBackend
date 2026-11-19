@@ -7,8 +7,8 @@ CARD_DENIED + CR LF) back to the reader that sent it.
 By default it listens on every CH341 (WCH) USB serial adapter, the chip in the readers,
 and checks for new ones every 3 seconds, so a reader works on whatever COM number Windows
 gives it: unplugging, another USB socket or a reboot need nothing done. Other serial
-devices (receipt printers, scales) are left alone. The frame carries the reader's ID, so the bridge doesn't
-need to know which reader is on which port.
+devices (receipt printers, scales) are left alone. The frame carries the reader's ID, so
+the bridge doesn't need to know which reader is on which port.
 
 One connection per scan means nothing can go stale: server idle timeout (300 s),
 server restarts and router/NAT timeouts no longer matter.
@@ -138,19 +138,34 @@ def wanted_ports(only: set[str], exclude: set[str], any_usb: bool) -> set[str]:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--server", help="host:port of the RFID TCP listener")
-    p.add_argument("--port", action="append", default=[],
-                   help="only this serial port (repeatable); default: every CH341 adapter")
-    p.add_argument("--exclude", action="append", default=[],
-                   help="never open this port, e.g. a receipt printer (repeatable)")
-    p.add_argument("--any-usb", action="store_true",
-                   help="every USB serial port, not only CH341 adapters")
+    p.add_argument(
+        "--port",
+        action="append",
+        default=[],
+        help="only this serial port (repeatable); default: every CH341 adapter",
+    )
+    p.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="never open this port, e.g. a receipt printer (repeatable)",
+    )
+    p.add_argument(
+        "--any-usb", action="store_true", help="every USB serial port, not only CH341 adapters"
+    )
     p.add_argument("--baud", type=int, default=115200)  # the company's readers
     p.add_argument("--timeout", type=float, default=5.0, help="seconds per TCP attempt")
     p.add_argument("--list-ports", action="store_true", help="show the COM ports and exit")
-    p.add_argument("--debug", action="store_true",
-                   help="log every byte read from the readers (to find a wrong baud rate)")
-    p.add_argument("--check", action="store_true",
-                   help="only test that the server answers on its TCP port, then exit")
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="log every byte read from the readers (to find a wrong baud rate)",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="only test that the server answers on its TCP port, then exit",
+    )
     args = p.parse_args()
     if args.list_ports:
         for info in list_ports.comports():
@@ -171,15 +186,22 @@ def main() -> None:
             socket.create_connection((host, int(tcp_port)), timeout=args.timeout).close()
         except OSError as exc:
             print(f"Cannot reach the server {host} on TCP port {tcp_port}: {exc}")
-            raise SystemExit(1)
+            raise SystemExit(1) from None
         print(f"OK: the server {host} answers on TCP port {tcp_port}.")
         return
     only = set(args.port)
     exclude = {e.upper() for e in args.exclude}
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    log.info("bridge to %s:%s, ports: %s", host, tcp_port,
-             ", ".join(sorted(only)) if only
-             else "all USB serial ports" if args.any_usb else "all CH341 adapters")
+    log.info(
+        "bridge to %s:%s, ports: %s",
+        host,
+        tcp_port,
+        ", ".join(sorted(only))
+        if only
+        else "all USB serial ports"
+        if args.any_usb
+        else "all CH341 adapters",
+    )
 
     active: dict[str, threading.Thread] = {}
     failing: dict[str, str] = {}  # port -> last open error, logged once
