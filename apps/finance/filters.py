@@ -1,4 +1,5 @@
 import django_filters
+from django.db.models import Q
 
 from .models import AccountTransaction, DeveloperAccount
 
@@ -31,7 +32,24 @@ class AccountTransactionFilter(django_filters.FilterSet):
     )
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lt")
+    # Deposit figures: a reversal or correction counts on the wrong deposit's time.
+    counted_after = django_filters.IsoDateTimeFilter(
+        method="filter_counted_after", help_text="Like created_after, on `counted_at`."
+    )
+    counted_before = django_filters.IsoDateTimeFilter(
+        method="filter_counted_before", help_text="Like created_before, on `counted_at`."
+    )
 
     class Meta:
         model = AccountTransaction
         fields = ["account", "developer", "kind", "method", "reference"]
+
+    def filter_counted_after(self, queryset, name, value):
+        return queryset.filter(
+            Q(counts_on__isnull=True, created_at__gte=value) | Q(counts_on__gte=value)
+        )
+
+    def filter_counted_before(self, queryset, name, value):
+        return queryset.filter(
+            Q(counts_on__isnull=True, created_at__lt=value) | Q(counts_on__lt=value)
+        )

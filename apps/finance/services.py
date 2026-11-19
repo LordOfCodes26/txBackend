@@ -1,3 +1,4 @@
+import hashlib
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -13,7 +14,10 @@ from apps.developers.models import Developer
 
 from .exceptions import (
     AccountNotActive,
+    DepositAlreadyReversed,
     DepositLimitExceeded,
+    DepositNotReversible,
+    DepositUnchanged,
     IdempotencyKeyReused,
     InsufficientBalance,
     InvalidAccountTransition,
@@ -54,6 +58,8 @@ def post_transaction(
     idempotency_key: str = "",
     allow_minus: bool = False,
     method: str = "",
+    reverses: AccountTransaction | None = None,
+    counts_on=None,
 ) -> AccountTransaction:
     """The only way a balance changes. Must run inside a transaction.
 
@@ -88,6 +94,8 @@ def post_transaction(
         reference=reference,
         idempotency_key=idempotency_key,
         method=method,
+        reverses=reverses,
+        counts_on=counts_on,
         actor=actor if getattr(actor, "pk", None) else None,
     )
 
@@ -108,7 +116,18 @@ def _previous(key: str, *, account, kind, amount) -> AccountTransaction | None:
 
 
 def _post_once(
-    *, actor, account, kind, amount, description, idempotency_key, audit_action, method=""
+    *,
+    actor,
+    account,
+    kind,
+    amount,
+    description,
+    idempotency_key,
+    audit_action,
+    method="",
+    reverses=None,
+    reference="",
+    counts_on=None,
 ) -> tuple[AccountTransaction, bool]:
     """Post a manual transaction exactly once per idempotency key. Returns (txn, created)."""
     existing = _previous(idempotency_key, account=account, kind=kind, amount=amount)
@@ -124,6 +143,9 @@ def _post_once(
                 description=description,
                 idempotency_key=idempotency_key,
                 method=method,
+                reverses=reverses,
+                reference=reference,
+                counts_on=counts_on,
             )
             record_audit(
                 audit_action,
@@ -136,6 +158,7 @@ def _post_once(
                     "transaction": txn.pk,
                     "description": description,
                     **({"method": method} if method else {}),
+                    **({"reverses": reverses.pk} if reverses else {}),
                 },
             )
     except IntegrityError:
@@ -156,8 +179,11 @@ def deposit(
     description: str = "",
     pin: str | None = None,
     method: str = "",
+    reference: str = "",
+    counts_on=None,
 ) -> tuple[AccountTransaction, bool]:
-    """`method`: how the money came in (DepositMethod: E-commerce or Cash)."""
+    """`method`: how the money came in (DepositMethod: E-commerce or Cash). `counts_on`:
+    see AccountTransaction (corrections)."""
     amount = money(amount)
     limit = money(settings.FINANCE_MAX_DEPOSIT)
     if amount > limit:
@@ -175,7 +201,89 @@ def deposit(
         idempotency_key=idempotency_key,
         audit_action="finance.deposit",
         method=method,
+        reference=reference,
+        counts_on=counts_on,
     )
+
+
+deposit_ = deposit  # `correct_deposit` has a parameter named `deposit`
+
+
+def reverse_deposit(
+    *, actor, deposit: AccountTransaction, reason: str, idempotency_key: str
+) -> tuple[AccountTransaction, bool]:
+    """Cancel a deposit entered by mistake: a negative DEPOSIT of the same amount and type,
+    pointing at it. Deposit statistics net the two out, on the deposit's date. Enter the
+    right amount afterwards as a new deposit. Like any debit, it cannot take the wallet
+    below zero."""
+    if deposit.kind != TransactionKind.DEPOSIT or deposit.amount <= 0:
+        raise DepositNotReversible()
+    account = deposit.account
+    _ensure_not_own_account(actor, account)
+    amount = -deposit.amount
+    previous = _previous(
+        idempotency_key, account=account, kind=TransactionKind.DEPOSIT, amount=amount
+    )
+    if previous:
+        return previous, False
+    if AccountTransaction.objects.filter(reverses=deposit).exists():
+        raise DepositAlreadyReversed()
+    try:
+        return _post_once(
+            actor=actor,
+            account=account,
+            kind=TransactionKind.DEPOSIT,
+            amount=amount,
+            description=reason,
+            idempotency_key=idempotency_key,
+            audit_action="finance.deposit_reversal",
+            method=deposit.method,
+            reverses=deposit,
+            counts_on=deposit.counts_on or deposit.created_at,
+        )
+    except IntegrityError:
+        # Another reversal of this deposit (with another key) committed first.
+        raise DepositAlreadyReversed() from None
+
+
+CORRECTS = "corrects:"
+
+
+@transaction.atomic
+def correct_deposit(
+    *, actor, deposit: AccountTransaction, amount, method: str, reason: str, idempotency_key: str
+) -> tuple[AccountTransaction, bool]:
+    """Fix a deposit entered with the wrong amount or type, in one step: the right deposit
+    (reference "corrects:<id>") and the reversal of the wrong one, both or neither. Both
+    count in the deposit figures on the wrong deposit's date. Returns
+    the new deposit. The developer's PIN is not asked: they need not be at the desk."""
+    amount = money(amount)
+    previous = AccountTransaction.objects.filter(idempotency_key=idempotency_key).first()
+    if previous:
+        if previous.reference == f"{CORRECTS}{deposit.pk}":
+            return previous, False  # a retry of this correction
+        raise IdempotencyKeyReused()
+    if deposit.kind != TransactionKind.DEPOSIT or deposit.amount <= 0:
+        raise DepositNotReversible()
+    if (amount, method) == (deposit.amount, deposit.method):
+        raise DepositUnchanged()
+    if AccountTransaction.objects.filter(reverses=deposit).exists():
+        raise DepositAlreadyReversed()
+    # The right deposit first, then the reversal: the wallet only has to cover the
+    # difference, not the whole wrong amount.
+    right, _created = deposit_(
+        actor=actor,
+        developer=deposit.account.developer,
+        amount=amount,
+        idempotency_key=idempotency_key,
+        description=reason,
+        method=method,
+        reference=f"{CORRECTS}{deposit.pk}",
+        counts_on=deposit.counts_on or deposit.created_at,
+    )
+    reversal_key = "rev:" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:56]
+    reverse_deposit(actor=actor, deposit=deposit, reason=reason, idempotency_key=reversal_key)
+    return right, True
 
 
 def ensure_wallet_empty(developer: Developer) -> None:

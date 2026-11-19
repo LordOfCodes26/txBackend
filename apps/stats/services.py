@@ -12,7 +12,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Avg, Count, Q, Sum
-from django.db.models.functions import TruncDate
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
 from apps.attendance.models import DailyAttendance
@@ -46,6 +46,23 @@ def _deposit_q(deposit_type: str | None = None) -> Q:
     if deposit_type:
         q &= Q(method="" if deposit_type == "NONE" else deposit_type)
     return q
+
+
+def _deposit_count(q: Q):
+    """How many deposits: a reversal (a negative deposit, for one entered by mistake)
+    cancels one. Their amounts net out in Sum("amount") already."""
+    return Count("pk", filter=q & Q(amount__gt=0)) - Count("pk", filter=q & Q(amount__lt=0))
+
+
+# When a movement counts: its time, except a deposit reversal or a correcting deposit,
+# which count on the wrong deposit's time (`counts_on`).
+COUNTED_AT = Coalesce("counts_on", "created_at")
+
+
+def _counted_between(start, end) -> Q:
+    return Q(counts_on__isnull=True, created_at__gte=start, created_at__lt=end) | Q(
+        counts_on__gte=start, counts_on__lt=end
+    )
 
 
 def _local_bounds(first: date, last: date):
@@ -119,7 +136,7 @@ def money(
     deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
     accounts = DeveloperAccount.objects.all()
-    period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
+    period = AccountTransaction.objects.filter(_counted_between(start, end))
     sales = Purchase.objects.filter(
         status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
     )
@@ -133,13 +150,13 @@ def money(
     by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
     totals = period.aggregate(
         deposits=Sum("amount", filter=deposit_q),
-        deposit_count=Count("pk", filter=deposit_q),
+        deposit_count=_deposit_count(deposit_q),
         spending=Sum("amount", filter=SPENDING),
         spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
     )
     per_day = {
         row["day"]: row
-        for row in period.annotate(day=TruncDate("created_at", tzinfo=start.tzinfo))
+        for row in period.annotate(day=TruncDate(COUNTED_AT, tzinfo=start.tzinfo))
         .order_by()
         .values("day")
         .annotate(
@@ -185,7 +202,9 @@ def money(
                 kind: {"total": _money(row["t"]), "count": row["n"]}
                 for kind in DEPOSIT_TYPES
                 for row in [
-                    period.filter(_deposit_q(kind)).aggregate(t=Sum("amount"), n=Count("pk"))
+                    period.aggregate(
+                        t=Sum("amount", filter=_deposit_q(kind)), n=_deposit_count(_deposit_q(kind))
+                    )
                 ]
             },
         },
@@ -303,8 +322,7 @@ def developer_money(first: date, last: date, buildings=None, deposit_type=None) 
     deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
     period = AccountTransaction.objects.filter(
-        created_at__gte=start,
-        created_at__lt=end,
+        _counted_between(start, end),
         kind__in=(TransactionKind.DEPOSIT, TransactionKind.PURCHASE, TransactionKind.REFUND),
     )
     if buildings is not None:
@@ -321,7 +339,7 @@ def developer_money(first: date, last: date, buildings=None, deposit_type=None) 
         )
         .annotate(
             deposits=Sum("amount", filter=deposit_q),
-            deposit_count=Count("pk", filter=deposit_q),
+            deposit_count=_deposit_count(deposit_q),
             spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
@@ -351,7 +369,7 @@ def building_money(first: date, last: date, buildings=None, deposit_type=None) -
     row of their own (`id` null) when the figures are company-wide."""
     deposit_q = _deposit_q(deposit_type)
     start, end = _local_bounds(first, last)
-    period = AccountTransaction.objects.filter(created_at__gte=start, created_at__lt=end)
+    period = AccountTransaction.objects.filter(_counted_between(start, end))
     accounts = DeveloperAccount.objects.all()
     places = Building.objects.order_by("code")
     if buildings is not None:
@@ -364,14 +382,14 @@ def building_money(first: date, last: date, buildings=None, deposit_type=None) -
         .values("account__developer__building")
         .annotate(
             deposits=Sum("amount", filter=deposit_q),
-            deposit_count=Count("pk", filter=deposit_q),
+            deposit_count=_deposit_count(deposit_q),
             spending=Sum("amount", filter=SPENDING),
             spending_count=Count("pk", filter=Q(kind=TransactionKind.PURCHASE)),
         )
     }
     per_day = {}
     for row in (
-        period.annotate(day=TruncDate("created_at", tzinfo=start.tzinfo))
+        period.annotate(day=TruncDate(COUNTED_AT, tzinfo=start.tzinfo))
         .order_by()
         .values("account__developer__building", "day")
         .annotate(

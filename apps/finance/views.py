@@ -17,10 +17,12 @@ from .models import AccountTransaction, DeveloperAccount, TransactionKind, Walle
 from .serializers import (
     AccountTransactionSerializer,
     AdjustmentSerializer,
+    CorrectDepositSerializer,
     DepositSerializer,
     DeskChangePinSerializer,
     DeveloperAccountSerializer,
     ResetPinSerializer,
+    ReverseDepositSerializer,
     SetPinSerializer,
     StatusChangeSerializer,
     WalletSettingsSerializer,
@@ -177,7 +179,9 @@ class DeveloperAccountViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet
 
 
 class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = AccountTransaction.objects.select_related("account__developer__building", "actor")
+    queryset = AccountTransaction.objects.select_related(
+        "account__developer__building", "actor", "reversal"
+    )
     building_lookup = "account__developer__building"
     serializer_class = AccountTransactionSerializer
     permission_classes = [HasPermissions]
@@ -186,6 +190,8 @@ class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewS
         "retrieve": ["finance.view"],
         "me": [],
         "deposits": ["finance.deposits.view"],
+        "reverse": ["finance.adjust"],
+        "correct": ["finance.adjust"],
     }
     filterset_class = AccountTransactionFilter
     # `card_label`: the card the developer holds now (annotated below).
@@ -233,6 +239,49 @@ class AccountTransactionViewSet(BuildingScopedMixin, viewsets.ReadOnlyModelViewS
     def me(self, request):
         """The caller's own transactions."""
         return self.list(request)
+
+    @extend_schema(
+        request=ReverseDepositSerializer,
+        responses={201: AccountTransactionSerializer, 200: AccountTransactionSerializer},
+        parameters=[IDEMPOTENCY_PARAM],
+    )
+    @action(detail=True, methods=["post"])
+    def reverse(self, request, pk=None):
+        """Cancel a deposit entered by mistake (wrong amount, wrong person): a negative
+        deposit of the same amount and type, so deposit statistics net it out. Then enter
+        the right deposit. 409 DEPOSIT_ALREADY_REVERSED, DEPOSIT_NOT_REVERSIBLE (not a
+        deposit), INSUFFICIENT_BALANCE (the money was spent already)."""
+        key = require_idempotency_key(request)
+        serializer = ReverseDepositSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        txn, created = services.reverse_deposit(
+            actor=request.user,
+            deposit=self.get_object(),
+            reason=serializer.validated_data["reason"],
+            idempotency_key=key,
+        )
+        return _money_response(txn, created)
+
+    @extend_schema(
+        request=CorrectDepositSerializer,
+        responses={201: AccountTransactionSerializer, 200: AccountTransactionSerializer},
+        parameters=[IDEMPOTENCY_PARAM],
+    )
+    @action(detail=True, methods=["post"])
+    def correct(self, request, pk=None):
+        """Fix a deposit's amount or type in one step: the right deposit (returned, its
+        `reference` is "corrects:<id>") and the reversal of the wrong one, both or neither.
+        400 DEPOSIT_UNCHANGED; 409 as for reverse/."""
+        key = require_idempotency_key(request)
+        serializer = CorrectDepositSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        txn, created = services.correct_deposit(
+            actor=request.user,
+            deposit=self.get_object(),
+            idempotency_key=key,
+            **serializer.validated_data,
+        )
+        return _money_response(txn, created)
 
 
 def _money_response(txn, created):

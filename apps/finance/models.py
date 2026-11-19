@@ -66,7 +66,9 @@ class DepositMethod(models.TextChoices):
 class AccountTransaction(AppendOnlyModel):
     """One ledger entry. Immutable (DB trigger); mistakes are fixed with new entries.
 
-    `amount` is signed: credits are positive, debits negative.
+    `amount` is signed: credits are positive, debits negative. A deposit entered by
+    mistake is cancelled by a negative DEPOSIT pointing at it (`reverses`), so deposit
+    figures net it out.
     """
 
     account = models.ForeignKey(
@@ -81,6 +83,14 @@ class AccountTransaction(AppendOnlyModel):
     method = models.CharField(max_length=10, choices=DepositMethod.choices, blank=True, default="")
     reference = models.CharField(max_length=100, blank=True, help_text="e.g. purchase id.")
     idempotency_key = models.CharField(max_length=64, blank=True)
+    # A deposit reversal (a negative DEPOSIT, for a deposit entered by mistake) points at
+    # the deposit it cancels. One reversal per deposit.
+    reverses = models.OneToOneField(
+        "self", on_delete=models.CASCADE, null=True, blank=True, related_name="reversal"
+    )
+    # Deposit figures count a reversal, or the deposit that corrects a wrong one, on the
+    # wrong deposit's time (not when it was fixed). Null: on `created_at`.
+    counts_on = models.DateTimeField(null=True, blank=True, db_index=True)
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
@@ -91,7 +101,8 @@ class AccountTransaction(AppendOnlyModel):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    Q(kind=TransactionKind.DEPOSIT, amount__gt=0)
+                    Q(kind=TransactionKind.DEPOSIT, amount__gt=0, reverses__isnull=True)
+                    | Q(kind=TransactionKind.DEPOSIT, amount__lt=0, reverses__isnull=False)
                     | Q(kind=TransactionKind.REFUND, amount__gt=0)
                     | Q(kind=TransactionKind.PURCHASE, amount__lt=0)
                     | (Q(kind=TransactionKind.ADJUSTMENT) & ~Q(amount=0))

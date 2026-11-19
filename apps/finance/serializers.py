@@ -61,6 +61,9 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
     card_label = serializers.CharField(
         read_only=True, default=None, help_text="The card the developer holds now (lists only)."
     )
+    reversed_by = serializers.SerializerMethodField(
+        help_text="Deposits: the reversal that cancelled it (null while it stands)."
+    )
 
     class Meta:
         model = AccountTransaction
@@ -76,11 +79,20 @@ class AccountTransactionSerializer(serializers.ModelSerializer):
             "description",
             "method",
             "reference",
+            "reverses",
+            "reversed_by",
+            "counts_on",
             "actor",
             "actor_username",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_reversed_by(self, obj) -> int | None:
+        try:
+            return obj.reversal.pk
+        except AccountTransaction.reversal.RelatedObjectDoesNotExist:
+            return None
 
 
 class DepositSerializer(serializers.Serializer):
@@ -104,6 +116,18 @@ class AdjustmentSerializer(serializers.Serializer):
         if value == 0:
             raise serializers.ValidationError(_("Amount cannot be zero."))
         return value
+
+
+class ReverseDepositSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=255, help_text="Why, e.g. the wrong amount.")
+
+
+class CorrectDepositSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
+    method = serializers.ChoiceField(
+        choices=DepositMethod.choices, help_text="How the money came in: ECOMMERCE or CASH."
+    )
+    reason = serializers.CharField(max_length=255, help_text="Why, e.g. the wrong amount.")
 
 
 class StatusChangeSerializer(serializers.Serializer):

@@ -297,6 +297,18 @@ msgstr "암호번호가 틀립니다."
 msgid "Too many wrong PIN attempts. Try again later."
 msgstr "암호번호를 너무 여러번 틀리게 입력하였습니다. 후에 다시 하십시오."
 
+#: apps/finance/exceptions.py:62
+msgid "Only a deposit can be reversed."
+msgstr "입금만 취소할수 있습니다."
+
+#: apps/finance/exceptions.py:70
+msgid "The amount and type are the same as the deposit's."
+msgstr "금액과 입금 방식이 원래 입금과 같습니다."
+
+#: apps/finance/exceptions.py:76
+msgid "This deposit was already reversed."
+msgstr "이 입금은 이미 취소되였습니다."
+
 #: apps/finance/serializers.py:105
 msgid "Amount cannot be zero."
 msgstr "금액은 0일수 없습니다."

@@ -435,3 +435,128 @@ def test_deposit_type_is_kept(finance, developer):
     assert r.status_code == 400 and "method" in r.json()["error"]["details"]
     listed = finance.get("/api/v1/finance/transactions/", {"method": "ECOMMERCE"}).json()["results"]
     assert [(t["amount"], t["method"]) for t in listed] == [("12.00", "ECOMMERCE")]
+
+
+# --- Deposit reversal --------------------------------------------------------------
+
+
+def reverse(client, txn_id, reason="Wrong amount", idem=None):
+    return client.post(
+        f"{TRANSACTIONS}{txn_id}/reverse/", {"reason": reason}, HTTP_IDEMPOTENCY_KEY=idem or key()
+    )
+
+
+@pytest.mark.django_db
+def test_reverse_a_mistaken_deposit(finance, developer):
+    wrong = deposit(finance, developer, "500.00", method="ECOMMERCE").json()
+    idem = key()
+    response = reverse(finance, wrong["id"], idem=idem)
+    assert response.status_code == 201, response.json()
+    body = response.json()
+    assert (body["kind"], body["amount"], body["balance_after"]) == ("DEPOSIT", "-500.00", "0.00")
+    assert (body["method"], body["reverses"], body["description"]) == (
+        "ECOMMERCE",
+        wrong["id"],
+        "Wrong amount",
+    )
+    assert finance.get(f"{TRANSACTIONS}{wrong['id']}/").json()["reversed_by"] == body["id"]
+    # A retry with the same key gives the same reversal; another one is refused.
+    assert reverse(finance, wrong["id"], idem=idem).status_code == 200
+    again = reverse(finance, wrong["id"])
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "DEPOSIT_ALREADY_REVERSED")
+    # A reversal itself, or anything but a deposit, cannot be reversed.
+    assert reverse(finance, body["id"]).json()["error"]["code"] == "DEPOSIT_NOT_REVERSIBLE"
+    assert balance(developer) == Decimal("0.00")
+    assert AuditLog.objects.filter(action="finance.deposit_reversal").count() == 1
+    assert services.ledger_mismatches() == []
+    listed = finance.get(f"{TRANSACTIONS}deposits/").json()["results"]
+    assert sorted(row["amount"] for row in listed) == ["-500.00", "500.00"]
+
+
+@pytest.mark.django_db
+def test_reversal_needs_reason_permission_and_money(auth_client, make_user, finance, developer):
+    wrong = deposit(finance, developer, "50.00").json()
+    assert "reason" in reverse(finance, wrong["id"], reason="").json()["error"]["details"]
+    finance.post(
+        ADJUSTMENTS,
+        {"developer": developer.pk, "amount": "-30.00", "reason": "Spent"},
+        HTTP_IDEMPOTENCY_KEY=key(),
+    )
+    response = reverse(finance, wrong["id"])
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        409,
+        "INSUFFICIENT_BALANCE",
+    )
+    assert balance(developer) == Decimal("20.00")
+    # Last: the client logs in as the seller.
+    cashier = auth_client(make_user(Roles.GOODS_SELLER))
+    assert reverse(cashier, wrong["id"]).status_code == 403
+
+
+@pytest.mark.django_db
+def test_developer_with_reversed_deposit_can_be_deleted(finance, developer):
+    from common.record_delete import plan_developer
+
+    wrong = deposit(finance, developer, "10.00").json()
+    reverse(finance, wrong["id"])
+    with transaction.atomic():
+        plan_developer(developer).run()
+    assert not AccountTransaction.objects.exists()
+
+
+def correct(client, txn_id, amount, method="CASH", reason="Typed 500 for 50", idem=None):
+    return client.post(
+        f"{TRANSACTIONS}{txn_id}/correct/",
+        {"amount": amount, "method": method, "reason": reason},
+        HTTP_IDEMPOTENCY_KEY=idem or key(),
+    )
+
+
+@pytest.mark.django_db
+def test_correct_a_deposit_in_one_step(finance, developer):
+    wrong = deposit(finance, developer, "500.00").json()
+    idem = key()
+    response = correct(finance, wrong["id"], "50.00", method="ECOMMERCE", idem=idem)
+    assert response.status_code == 201, response.json()
+    right = response.json()
+    assert (right["kind"], right["amount"], right["method"], right["reference"]) == (
+        "DEPOSIT",
+        "50.00",
+        "ECOMMERCE",
+        f"corrects:{wrong['id']}",
+    )
+    assert balance(developer) == Decimal("50.00")
+    reversal = finance.get(f"{TRANSACTIONS}{wrong['id']}/").json()["reversed_by"]
+    assert finance.get(f"{TRANSACTIONS}{reversal}/").json()["amount"] == "-500.00"
+    # A retry gives the same deposit; a second correction is refused.
+    assert correct(finance, wrong["id"], "50.00", method="ECOMMERCE", idem=idem).status_code == 200
+    assert correct(finance, wrong["id"], "60.00").json()["error"]["code"] == (
+        "DEPOSIT_ALREADY_REVERSED"
+    )
+    assert balance(developer) == Decimal("50.00")
+    assert services.ledger_mismatches() == []
+
+
+@pytest.mark.django_db
+def test_correction_rules(finance, developer):
+    wrong = deposit(finance, developer, "500.00").json()
+    assert correct(finance, wrong["id"], "500.00").json()["error"]["code"] == "DEPOSIT_UNCHANGED"
+    # Only the difference has to be in the wallet: 500 in, 480 spent, 20 left.
+    finance.post(
+        ADJUSTMENTS,
+        {"developer": developer.pk, "amount": "-480.00", "reason": "Spent"},
+        HTTP_IDEMPOTENCY_KEY=key(),
+    )
+    assert correct(finance, wrong["id"], "480.00").status_code == 201
+    assert balance(developer) == Decimal("0.00")
+    # Nothing is posted when the reversal cannot be: both or neither.
+    other = deposit(finance, developer, "100.00").json()
+    finance.post(
+        ADJUSTMENTS,
+        {"developer": developer.pk, "amount": "-100.00", "reason": "Spent"},
+        HTTP_IDEMPOTENCY_KEY=key(),
+    )
+    count = AccountTransaction.objects.count()
+    response = correct(finance, other["id"], "10.00")
+    assert response.json()["error"]["code"] == "INSUFFICIENT_BALANCE"
+    assert AccountTransaction.objects.count() == count

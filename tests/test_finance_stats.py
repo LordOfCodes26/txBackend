@@ -1,5 +1,7 @@
 """Finance statistics (/stats/finance/): money and a per-seller comparison."""
 
+from decimal import Decimal
+
 import pytest
 
 from apps.accounts.rbac import Roles
@@ -193,3 +195,101 @@ def test_deposits_by_type(auth_client, make_user, site):  # noqa: F811
         (r["employee_number"], r["deposits"]) for r in body["developers"] if r["deposit_count"]
     ] == [("E1", "7.00")]
     assert client.get(FINANCE_STATS, {"deposit_type": "X"}).status_code == 400
+
+
+def test_reversed_deposit_leaves_the_deposit_figures(auth_client, make_user, site):  # noqa: F811
+    """A deposit entered by mistake and reversed counts for nothing; the right one counts."""
+    from apps.finance import services as finance
+
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+
+    def figures():
+        body = client.get(FINANCE_STATS).json()
+        deposits = body["money"]["deposits"]
+        [ada] = [r for r in body["developers"] if r["employee_number"] == "E1"]
+        return (
+            Decimal(deposits["total"]),
+            deposits["count"],
+            deposits["by_type"]["CASH"],
+            Decimal(ada["deposits"]),
+            ada["deposit_count"],
+        )
+
+    total, count, cash, ada_total, ada_count = figures()
+    wrong, _ = finance.deposit(
+        actor=None, developer=site.ada, amount="70.00", idempotency_key="w-1", method="CASH"
+    )
+    finance.reverse_deposit(actor=None, deposit=wrong, reason="Typo", idempotency_key="r-1")
+    finance.deposit(
+        actor=None, developer=site.ada, amount="7.00", idempotency_key="ok-1", method="CASH"
+    )
+    assert cash == {"total": "0.00", "count": 0}
+    assert figures() == (
+        total + Decimal("7.00"),
+        count + 1,
+        {"total": "7.00", "count": 1},
+        ada_total + Decimal("7.00"),
+        ada_count + 1,
+    )
+
+
+def test_a_fix_counts_on_the_wrong_deposits_date(auth_client, make_user, site):  # noqa: F811
+    """A deposit corrected (or reversed) a month later: the fix counts in the month of the
+    wrong deposit, and leaves the month it was made in alone."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from apps.finance import services as finance
+    from apps.finance.models import AccountTransaction, DeveloperAccount
+
+    now = timezone.localtime()
+    then = now - timedelta(days=40)
+    account = DeveloperAccount.objects.get(developer=site.ada)
+    DeveloperAccount.objects.filter(pk=account.pk).update(balance=account.balance + 100)
+    wrong = AccountTransaction.objects.create(
+        account=account,
+        kind="DEPOSIT",
+        amount=100,
+        balance_after=account.balance + 100,
+        method="CASH",
+        created_at=then,
+    )
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+
+    def cash(day):
+        query = {"date_from": day.date().isoformat(), "date_to": day.date().isoformat()}
+        return client.get(FINANCE_STATS, query).json()["money"]["deposits"]["by_type"]["CASH"]
+
+    assert (cash(then), cash(now)) == (
+        {"total": "100.00", "count": 1},
+        {"total": "0.00", "count": 0},
+    )
+    right, _ = finance.correct_deposit(
+        actor=None,
+        deposit=wrong,
+        amount="10.00",
+        method="CASH",
+        reason="Typo",
+        idempotency_key="c-1",
+    )
+    assert right.counts_on == wrong.created_at
+    assert (cash(then), cash(now)) == (
+        {"total": "10.00", "count": 1},
+        {"total": "0.00", "count": 0},
+    )
+    # The deposit list finds them on that day too.
+    listed = client.get(
+        "/api/v1/finance/transactions/deposits/",
+        {
+            "counted_after": then.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
+            "counted_before": (then + timedelta(days=1)).replace(hour=0, minute=0).isoformat(),
+        },
+    ).json()["results"]
+    assert sorted(
+        row["amount"] for row in listed if row["developer"]["employee_number"] == "E1"
+    ) == [
+        "-100.00",
+        "10.00",
+        "100.00",
+    ]

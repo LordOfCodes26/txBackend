@@ -56,3 +56,21 @@ class PinLocked(DomainError):
     status_code = status.HTTP_423_LOCKED
     code = "PIN_LOCKED"
     default_detail = _("Too many wrong PIN attempts. Try again later.")
+
+
+class DepositNotReversible(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "DEPOSIT_NOT_REVERSIBLE"
+    default_detail = _("Only a deposit can be reversed.")
+
+
+class DepositUnchanged(DomainError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    code = "DEPOSIT_UNCHANGED"
+    default_detail = _("The amount and type are the same as the deposit's.")
+
+
+class DepositAlreadyReversed(DomainError):
+    status_code = status.HTTP_409_CONFLICT
+    code = "DEPOSIT_ALREADY_REVERSED"
+    default_detail = _("This deposit was already reversed.")
