@@ -30,7 +30,7 @@ WINE=/usr/lib/wine/wine64
 [[ -x "$WINE" ]] || { echo "Install wine64 first (apt-get install --no-install-recommends wine64)" >&2; exit 1; }
 
 echo "==> Windows Python $PY_VERSION"
-curl -fsSL -o "$WORK/python.nupkg" "https://api.nuget.org/v3-flatcontainer/python/$PY_VERSION/python.$PY_VERSION.nupkg"
+curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$WORK/python.nupkg" "https://api.nuget.org/v3-flatcontainer/python/$PY_VERSION/python.$PY_VERSION.nupkg"
 xvfb-run -a "$WINE" wineboot -i </dev/null >/dev/null 2>&1 || true
 # Windows Python under Wine can't write straight to a file (no terminal, e.g. cron/CI):
 # its output always goes through a pipe.
@@ -60,10 +60,10 @@ EXE="$WINEPREFIX/drive_c/build/dist/ReaderBridge.exe"
     || { echo "ReaderBridge.exe does not run" >&2; exit 1; }
 
 echo "==> NSSM $NSSM_VERSION"
-curl -fsSL -o "$WORK/nssm.zip" "https://nssm.cc/release/nssm-$NSSM_VERSION.zip"
+curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$WORK/nssm.zip" "https://nssm.cc/release/nssm-$NSSM_VERSION.zip"
 
 echo "==> CH341 driver"
-curl -fsSL -o "$WORK/ch341.zip" "$CH341_URL"
+curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "$WORK/ch341.zip" "$CH341_URL"
 
 echo "==> Kit"
 KIT="$WORK/reader-bridge-kit-$VERSION"

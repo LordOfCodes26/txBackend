@@ -56,33 +56,58 @@ def send_frame(host: str, port: int, frame: bytes, timeout: float) -> bytes:
     return b""
 
 
-def take_frames(buf: bytearray) -> list[bytes]:
-    """Pull complete `$...$` frames out of `buf`; keep any partial frame for later."""
-    frames = []
+def take_frames(buf: bytearray) -> tuple[list[bytes], bytes]:
+    """Pull complete `$...$` frames out of `buf`; keep any partial frame for later.
+
+    Returns the frames and the bytes outside frames that were dropped.
+    """
+    frames, dropped = [], bytearray()
     while True:
         start = buf.find(MARK)
         end = buf.find(MARK, start + 1) if start >= 0 else -1
         if end < 0:
             if start < 0:
+                dropped += buf
                 buf.clear()
             elif start > 0:
+                dropped += buf[:start]
                 del buf[:start]
-            return frames
+            return frames, bytes(dropped)
+        dropped += buf[:start]
         frame = bytes(buf[start : end + 1])
         del buf[: end + 1]
         if len(frame) > 2:
             frames.append(frame)
 
 
-def serve_port(ser: serial.Serial, host: str, tcp_port: int, timeout: float) -> None:
-    """Forward one open port's frames until the port goes away."""
+def serve_port(
+    ser: serial.Serial, host: str, tcp_port: int, timeout: float, debug: bool = False
+) -> None:
+    """Forward one open port's frames until the port goes away.
+
+    Bytes that are not part of a `$...$` frame are logged (wrong baud rate or a reader
+    sending another format show up there); `debug` logs every byte read.
+    """
     name = ser.port
     buf = bytearray()
+    last_data = time.monotonic()
     try:
         while True:
             data = ser.read(ser.in_waiting or 1)
+            if not data:
+                # A frame started but never ended (no closing "$"): show it, start over.
+                if buf and time.monotonic() - last_data > 2:
+                    log.warning("%s incomplete packet ignored: %r", name, bytes(buf[:200]))
+                    buf.clear()
+                continue
+            last_data = time.monotonic()
+            if debug:
+                log.info("%s raw %r", name, data)
             buf += data.replace(b"\x00", b"")  # line noise
-            for frame in take_frames(buf):
+            frames, dropped = take_frames(buf)
+            if dropped.strip():
+                log.warning("%s ignored (not a $...$ packet): %r", name, dropped[:200])
+            for frame in frames:
                 log.info("%s -> %s", name, frame.decode(errors="replace"))
                 reply = send_frame(host, tcp_port, frame, timeout)
                 if not reply:
@@ -119,9 +144,13 @@ def main() -> None:
                    help="never open this port, e.g. a receipt printer (repeatable)")
     p.add_argument("--any-usb", action="store_true",
                    help="every USB serial port, not only CH341 adapters")
-    p.add_argument("--baud", type=int, default=9600)
+    p.add_argument("--baud", type=int, default=115200)  # the company's readers
     p.add_argument("--timeout", type=float, default=5.0, help="seconds per TCP attempt")
     p.add_argument("--list-ports", action="store_true", help="show the COM ports and exit")
+    p.add_argument("--debug", action="store_true",
+                   help="log every byte read from the readers (to find a wrong baud rate)")
+    p.add_argument("--check", action="store_true",
+                   help="only test that the server answers on its TCP port, then exit")
     args = p.parse_args()
     if args.list_ports:
         for info in list_ports.comports():
@@ -135,11 +164,20 @@ def main() -> None:
         return
     if not args.server:
         p.error("--server is required")
-    host, tcp_port = args.server.rsplit(":", 1)
+    host, _, tcp_port = args.server.partition(":")
+    tcp_port = tcp_port or "9100"
+    if args.check:
+        try:
+            socket.create_connection((host, int(tcp_port)), timeout=args.timeout).close()
+        except OSError as exc:
+            print(f"Cannot reach the server {host} on TCP port {tcp_port}: {exc}")
+            raise SystemExit(1)
+        print(f"OK: the server {host} answers on TCP port {tcp_port}.")
+        return
     only = set(args.port)
     exclude = {e.upper() for e in args.exclude}
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    log.info("bridge to %s, ports: %s", args.server,
+    log.info("bridge to %s:%s, ports: %s", host, tcp_port,
              ", ".join(sorted(only)) if only
              else "all USB serial ports" if args.any_usb else "all CH341 adapters")
 
@@ -159,7 +197,9 @@ def main() -> None:
             failing.pop(name, None)
             log.info("%s open", name)
             thread = threading.Thread(
-                target=serve_port, args=(ser, host, int(tcp_port), args.timeout), daemon=True
+                target=serve_port,
+                args=(ser, host, int(tcp_port), args.timeout, args.debug),
+                daemon=True,
             )
             thread.start()
             active[name] = thread
