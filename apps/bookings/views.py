@@ -332,6 +332,7 @@ class BookingCheckoutViewSet(
         "confirm": ["booking.pay"],
         "cancel": ["booking.cancel"],
         "wait": ["booking.pay"],
+        "renew_wait": ["booking.pay"],
         "stop_waiting": ["booking.pay"],
         "readers": ["booking.pay"],
         "set_reader": ["booking.pay"],
@@ -342,6 +343,7 @@ class BookingCheckoutViewSet(
         "confirm",
         "cancel",
         "wait",
+        "renew_wait",
         "stop_waiting",
         "readers",
         "set_reader",
@@ -424,6 +426,12 @@ class BookingCheckoutViewSet(
         """ "Scan card to book": the next tap on the desk's reader (within 2 minutes) goes to
         this booking."""
         return self._respond(purchase_services.wait_for_card(purchase=self.get_object()))
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="renew-wait")
+    def renew_wait(self, request, pk=None):
+        """The pay screen is still open: a wait still running starts its 2 minutes over."""
+        return self._respond(purchase_services.renew_wait(purchase=self.get_object()))
 
     @extend_schema(
         parameters=[DeskReadersQuerySerializer], responses=DeskReaderSerializer(many=True)

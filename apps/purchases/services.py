@@ -195,6 +195,19 @@ def wait_for_card(*, purchase: Purchase) -> Purchase:
 
 
 @transaction.atomic
+def renew_wait(*, purchase: Purchase) -> Purchase:
+    """The pay screen is still open: the wait for a card starts over, so it does not run
+    out while the developer looks for their card. Only a purchase still waiting renews: a
+    card that came meanwhile stays, and a purchase another one displaced stays displaced."""
+    purchase = _lock_takes_card(purchase)
+    since = timezone.now() - timedelta(seconds=settings.PURCHASE_CARD_PRESENTATION_SECONDS)
+    if purchase.waiting_since is not None and purchase.waiting_since >= since:
+        purchase.waiting_since = timezone.now()
+        purchase.save(update_fields=["waiting_since", "updated_at"])
+    return purchase
+
+
+@transaction.atomic
 def stop_waiting(*, purchase: Purchase) -> Purchase:
     """The seller closed the scan dialog: taps no longer go to this purchase."""
     purchase = _lock_takes_card(purchase)

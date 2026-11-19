@@ -65,6 +65,7 @@ SELLER_ACTIONS = (
     "set_label",
     "readers",
     "wait",
+    "renew_wait",
     "stop_waiting",
     "confirm",
     "cancel",
@@ -113,6 +114,7 @@ class PurchaseViewSet(
         "set_label": ["purchase.create"],
         "readers": ["purchase.create"],
         "wait": ["purchase.create"],
+        "renew_wait": ["purchase.create"],
         "stop_waiting": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "cancel": ["purchase.cancel"],
@@ -319,6 +321,14 @@ class PurchaseViewSet(
         """ "Scan card to buy": the next tap on the purchase's reader (within 2 minutes) goes
         to this purchase; another purchase waiting on that reader stops waiting."""
         services.wait_for_card(purchase=self.get_object())
+        return self._respond(self.get_object())
+
+    @extend_schema(request=None, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="renew-wait")
+    def renew_wait(self, request, pk=None):
+        """The pay screen is still open: a wait still running starts its 2 minutes over. A
+        card already tapped, or a wait another purchase took over, is left as it is."""
+        services.renew_wait(purchase=self.get_object())
         return self._respond(self.get_object())
 
     @extend_schema(request=None, responses=PurchaseSerializer)

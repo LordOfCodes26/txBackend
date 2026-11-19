@@ -423,6 +423,28 @@ def tap_on_till(client, world, pid, uid="04AABBCCDD"):
 
 
 @pytest.mark.django_db
+def test_renew_wait_keeps_a_tap_and_a_displacement(till, world):
+    pid = new_purchase(till, world, (world.tea, 1))
+    tap_on_till(till, world, pid)
+    # A card came: renewing does not start a new wait or drop the card.
+    body = till.post(f"{PURCHASES}{pid}/renew-wait/").json()
+    assert body["presented_card"] is not None and body["waiting_for_card"] is False
+
+    # A wait about to run out starts over.
+    till.post(f"{PURCHASES}{pid}/wait/")
+    old = timezone.now() - timedelta(seconds=100)
+    Purchase.objects.filter(pk=pid).update(waiting_since=old)
+    assert till.post(f"{PURCHASES}{pid}/renew-wait/").json()["waiting_for_card"] is True
+    assert Purchase.objects.get(pk=pid).waiting_since > old
+
+    # One that ran out, or another purchase took over, stays ended.
+    Purchase.objects.filter(pk=pid).update(waiting_since=timezone.now() - timedelta(minutes=5))
+    assert till.post(f"{PURCHASES}{pid}/renew-wait/").json()["waiting_for_card"] is False
+    Purchase.objects.filter(pk=pid).update(waiting_since=None)
+    assert till.post(f"{PURCHASES}{pid}/renew-wait/").json()["waiting_for_card"] is False
+
+
+@pytest.mark.django_db
 def test_higher_total_needs_card_tap_and_pin(till, world):
     pid = paid(till, world, (world.tea, 1))
     Good.objects.filter(pk=world.tea.pk).update(price="9.00")  # the paid line keeps its price
