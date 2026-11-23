@@ -3,7 +3,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import mixins, status, viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -16,8 +16,8 @@ from common.idempotency import HEADER, require_idempotency_key
 
 from . import reports, services
 from .access import sellers_for, visible_sellers
-from .filters import CashEntryFilter, StockCountFilter
-from .models import CashEntry, StockCount
+from .filters import CashEntryFilter
+from .models import CashEntry
 from .serializers import (
     CashEntrySerializer,
     CashOverviewSerializer,
@@ -25,11 +25,6 @@ from .serializers import (
     HandoverSerializer,
     PriceChangeSerializer,
     ReasonSerializer,
-    ResolveSerializer,
-    SheetGoodSerializer,
-    SheetQuerySerializer,
-    StockCountInputSerializer,
-    StockCountSerializer,
 )
 
 IDEMPOTENCY_PARAM = OpenApiParameter(
@@ -67,8 +62,8 @@ def _checked(serializer_class, request, *, data=None, **context):
 
 
 class CashStoreViewSet(viewsets.GenericViewSet):
-    """Cash control: per store, the cash sales, cash returned, handovers, missing goods
-    charged, and what it still owes. A store's own login sees its own store."""
+    """Cash control: per store, the cash sales, cash returned, handovers and what it
+    still owes. A store's own login sees its own store."""
 
     permission_classes = [CashPermission]
     required_permissions = {
@@ -123,8 +118,7 @@ class CashStoreViewSet(viewsets.GenericViewSet):
     @extend_schema(parameters=[PeriodSerializer], responses={(200, XLSX): OpenApiTypes.BINARY})
     @action(detail=False, methods=["get"])
     def export(self, request):
-        """The period as .xlsx: the stores, their days, every entry, the price changes and
-        the stock counts."""
+        """The period as .xlsx: the stores, their days, every entry and the price changes."""
         from apps.spreadsheets.exports import cash_workbook
 
         _ensure_sees_cash(request.user)
@@ -185,7 +179,7 @@ class CashEntryViewSet(viewsets.ReadOnlyModelViewSet):
     )
     @action(detail=True, methods=["post"])
     def reverse(self, request, pk=None):
-        """Cancel a handover or a charge entered by mistake (409 NOT_REVERSIBLE otherwise)."""
+        """Cancel a handover entered by mistake (409 NOT_REVERSIBLE otherwise)."""
         key = require_idempotency_key(request)
         entry = get_object_or_404(
             CashEntry, pk=pk, seller__in=sellers_for(request.user, "cash.handover")
@@ -194,66 +188,3 @@ class CashEntryViewSet(viewsets.ReadOnlyModelViewSet):
         return self._response(
             *services.reverse_entry(actor=request.user, entry=entry, idempotency_key=key, **data)
         )
-
-
-class StockCountViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    """Stock counted by someone who does not work for the store. Missing goods are explained
-    or charged to the store (`resolve/`)."""
-
-    queryset = StockCount.objects.select_related(
-        "seller", "counted_by", "resolved_by", "charge"
-    ).prefetch_related("lines__good")
-    serializer_class = StockCountSerializer
-    permission_classes = [CashPermission]
-    required_permissions = {
-        "list": None,
-        "retrieve": None,
-        "sheet": "cash.count",
-        "create": "cash.count",
-        "resolve": "cash.count",
-    }
-    filterset_class = StockCountFilter
-    ordering_fields = ["created_at", "missing_value"]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        if self.action == "resolve":
-            return qs.filter(seller__in=sellers_for(self.request.user, "cash.count"))
-        return qs.filter(seller__in=visible_sellers(self.request.user))
-
-    def _respond(self, count, code=status.HTTP_200_OK):
-        fresh = StockCountViewSet.queryset.get(pk=count.pk)
-        return Response(StockCountSerializer(fresh).data, status=code)
-
-    @extend_schema(
-        parameters=[OpenApiParameter("seller", int, required=True)],
-        responses=SheetGoodSerializer(many=True),
-    )
-    @action(detail=False, methods=["get"], pagination_class=None, filterset_class=None)
-    def sheet(self, request):
-        """The store's goods to count, with their stock now."""
-        data = _checked(
-            SheetQuerySerializer,
-            request,
-            data=request.query_params,
-            sellers=sellers_for(request.user, "cash.count"),
-        )
-        goods = services.countable(data["seller"].pk).order_by("service_position__name", "name")
-        return Response(SheetGoodSerializer(goods, many=True).data)
-
-    @extend_schema(request=StockCountInputSerializer, responses={201: StockCountSerializer})
-    def create(self, request):
-        """Record a count. 409 STOCK_MOVED (`details.goods`) for goods sold or moved since
-        `expected` was read: count those again."""
-        data = _checked(
-            StockCountInputSerializer, request, sellers=sellers_for(request.user, "cash.count")
-        )
-        count = services.count_stock(actor=request.user, **data)
-        return self._respond(count, status.HTTP_201_CREATED)
-
-    @extend_schema(request=ResolveSerializer, responses=StockCountSerializer)
-    @action(detail=True, methods=["post"])
-    def resolve(self, request, pk=None):
-        count = self.get_object()
-        data = _checked(ResolveSerializer, request)
-        return self._respond(services.resolve_count(actor=request.user, count=count, **data))

@@ -1883,20 +1883,8 @@ msgstr "이 매장은 현금을 받지 않습니다. 카드로 지불하십시�
 msgid "A cash sale can't be changed. Ask finance to delete it and sell again."
 msgstr "현금판매는 변경할수 없습니다. 재정과에 삭제를 요청하고 다시 판매하십시오."
 
-msgid "Your store takes cash, so someone else must do this. Ask finance."
-msgstr "이 매장은 현금을 받으므로 다른 사람이 하여야 합니다. 재정과에 문의하십시오."
-
 msgid "You work for this store, so someone else must do this."
 msgstr "자신이 일하는 매장이므로 다른 사람이 하여야 합니다."
-
-msgid "Only a handover or a charge can be cancelled, and only once."
-msgstr "인계나 부담만 취소할수 있으며 한번만 할수 있습니다."
-
-msgid "Some of these goods were sold or moved meanwhile. Count them again."
-msgstr "일부 상품이 그사이에 판매되였거나 움직였습니다. 다시 세십시오."
-
-msgid "This stock count has nothing left to explain."
-msgstr "이 재고 조사에는 더 해명할것이 없습니다."
 
 msgid "The amount must be greater than zero."
 msgstr "금액은 0보다 커야 합니다."
@@ -1906,12 +1894,6 @@ msgstr "매장이 인계할 현금보다 많습니다. 비고에 리유를 적�
 
 msgid "This is not a cash sale."
 msgstr "현금판매가 아닙니다."
-
-msgid "Pick goods of this store that track stock."
-msgstr "재고를 관리하는 이 매장의 상품을 고르십시오."
-
-msgid "Enter an amount up to the value of the missing goods."
-msgstr "부족한 상품의 값을 넘지 않는 금액을 입력하십시오."
 
 msgid "Your account cannot switch cash sales on or off."
 msgstr "이 계정은 현금판매를 켜거나 끌수 없습니다."
@@ -1952,9 +1934,6 @@ msgstr "판매현금"
 msgid "Handed over"
 msgstr "인계한 현금"
 
-msgid "Missing goods charged"
-msgstr "부족상품 부담금"
-
 msgid "Stores"
 msgstr "매장"
 
@@ -1966,9 +1945,6 @@ msgstr "마감 인계할 현금"
 
 msgid "Owed now"
 msgstr "현재 인계할 현금"
-
-msgid "Missing goods to explain"
-msgstr "해명할 부족상품"
 
 msgid "Cash entries"
 msgstr "현금기록"
@@ -1982,38 +1958,8 @@ msgstr "이전 가격"
 msgid "New price"
 msgstr "새 가격"
 
-msgid "Stock counts"
-msgstr "재고 조사"
-
-msgid "Count no."
-msgstr "조사번호"
-
-msgid "In the system"
-msgstr "체계의 수량"
-
-msgid "Counted"
-msgstr "센 수량"
-
-msgid "Difference"
-msgstr "차이"
-
-msgid "Outcome"
-msgstr "결과"
-
 msgid "Cash sale"
 msgstr "현금판매"
-
-msgid "Nothing missing"
-msgstr "부족 없음"
-
-msgid "To explain"
-msgstr "해명 필요"
-
-msgid "Explained"
-msgstr "해명됨"
-
-msgid "Store pays"
-msgstr "매장 부담"
 
 msgid "Buyer (cash)"
 msgstr "구매자 (현금)"
@@ -2026,3 +1972,6 @@ msgstr "자신이 현금을 받은 판매이므로 다른 사람이 삭제하여
 
 msgid "Price changes"
 msgstr "가격 변경"
+
+msgid "Only a handover can be cancelled, and only once."
+msgstr "인계만 취소할수 있으며 한번만 할수 있습니다."

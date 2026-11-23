@@ -4,11 +4,9 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.finance.models import MONEY
-from apps.goods.models import Good
-from apps.goods.serializers import QuantityField
 from apps.sellers.models import Seller
 
-from .models import CashEntry, CountOutcome, StockCount, StockCountLine
+from .models import CashEntry
 
 
 def _reason(**kwargs):
@@ -26,14 +24,10 @@ class CashStoreSerializer(serializers.Serializer):
     returned_count = serializers.IntegerField()
     expected = serializers.DecimalField(**MONEY, help_text="Cash from sales: sales - returned.")
     handed_over = serializers.DecimalField(**MONEY)
-    charged = serializers.DecimalField(**MONEY, help_text="Missing goods charged to the store.")
     closing = serializers.DecimalField(**MONEY, help_text="Owed at the end of the period.")
     owed = serializers.DecimalField(**MONEY, help_text="Owed now.")
     last_handover_at = serializers.DateTimeField(allow_null=True)
     price_changes = serializers.IntegerField(help_text="Prices changed and goods added.")
-    open_counts = serializers.IntegerField(help_text="Stock counts still to be explained.")
-    open_missing = serializers.DecimalField(**MONEY, help_text="The missing goods' value.")
-    last_count_at = serializers.DateTimeField(allow_null=True)
 
 
 class CashDaySerializer(serializers.Serializer):
@@ -42,7 +36,6 @@ class CashDaySerializer(serializers.Serializer):
     returned = serializers.DecimalField(**MONEY)
     expected = serializers.DecimalField(**MONEY)
     handed_over = serializers.DecimalField(**MONEY)
-    charged = serializers.DecimalField(**MONEY)
     owed = serializers.DecimalField(**MONEY, help_text="Owed at the end of the day.")
 
 
@@ -126,96 +119,3 @@ class HandoverSerializer(serializers.Serializer):
 
 class ReasonSerializer(serializers.Serializer):
     reason = _reason()
-
-
-class SheetQuerySerializer(serializers.Serializer):
-    seller = SellerField()
-
-
-class SheetGoodSerializer(serializers.Serializer):
-    good = serializers.IntegerField(source="pk")
-    name = serializers.CharField()
-    category_name = serializers.CharField(source="category.name", default=None)
-    counter = serializers.CharField(source="service_position.name")
-    quantity = QuantityField(help_text="Stock now; send it back as `expected`.")
-    decimal_quantity = serializers.BooleanField()
-    price = serializers.DecimalField(max_digits=12, decimal_places=2)
-    is_active = serializers.BooleanField()
-
-
-class CountLineInputSerializer(serializers.Serializer):
-    good = serializers.PrimaryKeyRelatedField(queryset=Good.objects.all())
-    expected = QuantityField(min_value=0)
-    counted = QuantityField(min_value=0)
-
-
-class StockCountInputSerializer(serializers.Serializer):
-    seller = SellerField()
-    lines = CountLineInputSerializer(many=True, allow_empty=False)
-    note = _reason(required=False, allow_blank=True, default="")
-
-    def validate_lines(self, lines):
-        goods = [line["good"].pk for line in lines]
-        if len(goods) != len(set(goods)):
-            raise serializers.ValidationError(_("Each good can only be listed once."))
-        return lines
-
-
-class StockCountLineSerializer(serializers.ModelSerializer):
-    good_name = serializers.CharField(source="good.name", read_only=True)
-    expected = QuantityField(read_only=True)
-    counted = QuantityField(read_only=True)
-    difference = QuantityField(read_only=True)
-
-    class Meta:
-        model = StockCountLine
-        fields = ["good", "good_name", "expected", "counted", "difference", "price"]
-        read_only_fields = fields
-
-
-class StockCountSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(source="seller.name", read_only=True)
-    counted_by_username = serializers.CharField(
-        source="counted_by.username", read_only=True, default=None
-    )
-    resolved_by_username = serializers.CharField(
-        source="resolved_by.username", read_only=True, default=None
-    )
-    charged = serializers.DecimalField(
-        source="charge.amount", read_only=True, default=None, **MONEY
-    )
-    goods_count = serializers.SerializerMethodField()
-    lines = StockCountLineSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = StockCount
-        fields = [
-            "id",
-            "seller",
-            "seller_name",
-            "note",
-            "missing_value",
-            "surplus_value",
-            "outcome",
-            "outcome_note",
-            "charge",
-            "charged",
-            "counted_by_username",
-            "resolved_by_username",
-            "resolved_at",
-            "goods_count",
-            "lines",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-    def get_goods_count(self, count) -> int:
-        return len(count.lines.all())
-
-
-class ResolveSerializer(serializers.Serializer):
-    outcome = serializers.ChoiceField(choices=[CountOutcome.EXPLAINED, CountOutcome.CHARGED])
-    note = _reason(help_text="The explanation, or why the store pays.")
-    amount = serializers.DecimalField(
-        **MONEY, required=False, help_text="CHARGED: less than the whole missing value."
-    )

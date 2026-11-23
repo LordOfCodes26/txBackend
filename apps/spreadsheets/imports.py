@@ -15,7 +15,6 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from apps.audit.services import record_audit
-from apps.cash import services as cash
 from apps.developers import services as developers
 from apps.developers.models import Developer, DeveloperStatus
 from apps.developers.serializers import DeveloperSerializer
@@ -572,7 +571,6 @@ class GoodsImporter(Importer):
         serializer.is_valid(raise_exception=True)
         changed = {k: v for k, v in serializer.validated_data.items() if getattr(good, k) != v}
         if changed:
-            cash.ensure_may_update(ctx.actor, good, changed)
             good = goods.update_good(actor=ctx.actor, good=good, **changed)
         moved = False
         if quantity is not None:
@@ -580,7 +578,6 @@ class GoodsImporter(Importer):
                 if quantity:
                     raise RowError(_("This good does not track stock."), "quantity")
             elif quantity != good.quantity:
-                cash.ensure_may_change_stock(ctx.actor, good, MovementKind.ADJUSTMENT)
                 goods.move_stock(
                     good=good,
                     kind=MovementKind.ADJUSTMENT,

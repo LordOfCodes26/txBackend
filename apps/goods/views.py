@@ -191,18 +191,12 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         self._check_court(serializer.instance.kind)
         if "kind" in serializer.validated_data:  # turning a good into a court, or back
             self._check_court(serializer.validated_data["kind"])
-        from apps.cash import services as cash
-
-        cash.ensure_may_update(self.request.user, serializer.instance, serializer.validated_data)
         serializer.instance = services.update_good(
             actor=self.request.user, good=serializer.instance, **serializer.validated_data
         )
 
     def perform_destroy(self, instance):
-        from apps.cash import services as cash
-
         self._check_court(instance.kind)
-        cash.ensure_may_remove(self.request.user, instance)
         services.delete_good(actor=self.request.user, good=instance)
 
     def _court(self) -> Good:
@@ -290,14 +284,10 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     @action(detail=True, methods=["post"], parser_classes=[JSONParser])
     def stock(self, request, pk=None):
         """RESTOCK (+quantity), DAMAGE (-quantity, reason) or ADJUSTMENT (counted_quantity,
-        reason). Returns the recorded movement. At a store that takes cash its own people
-        only restock: 403 CASH_STORE_LOCKED."""
-        from apps.cash import services as cash
-
+        reason). Returns the recorded movement."""
         good = self.get_object()
         serializer = StockChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        cash.ensure_may_change_stock(request.user, good, serializer.validated_data["kind"])
         movement = services.adjust_stock(actor=request.user, good=good, **serializer.validated_data)
         return Response(InventoryMovementSerializer(movement).data, status.HTTP_201_CREATED)
 

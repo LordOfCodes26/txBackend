@@ -705,10 +705,10 @@ def preferential_workbook(rows: list[dict], first: date, last: date) -> bytes:
 
 
 def cash_workbook(sellers, first: date, last: date) -> bytes:
-    """Cash control as a workbook: the stores, each store's days, every cash entry, the
-    price changes and the stock counts of the period."""
+    """Cash control as a workbook: the stores, each store's days, every cash entry
+    and the price changes of the period."""
     from apps.cash import reports
-    from apps.cash.models import CashEntry, StockCountLine
+    from apps.cash.models import CashEntry
     from apps.sellers.models import Seller
 
     start, end = _local_bounds(first, last)
@@ -718,13 +718,12 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
     when = Column("time", _("Time"), width=17, kind="datetime")
     note = Column("note", _("Note"), width=30)
     by = Column("by", _("By"), width=16)
-    figures = ("sales", "returned", "expected", "handed_over", "charged")
+    figures = ("sales", "returned", "expected", "handed_over")
     figure_columns = [
         money("sales", _("Cash sales")),
         money("returned", _("Cash returned")),
         money("expected", _("Cash from sales")),
         money("handed_over", _("Handed over")),
-        money("charged", _("Missing goods charged")),
     ]
     rows = reports.stores(sellers, first, last)
     names = {r["id"]: r["name"] for r in rows}
@@ -740,13 +739,6 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
         .order_by("id")
     )
     changes = reports.price_changes(sellers, first, last)
-    lines = (
-        StockCountLine.objects.filter(
-            count__seller__in=sellers, count__created_at__gte=start, count__created_at__lt=end
-        )
-        .select_related("count__seller", "count__counted_by", "good")
-        .order_by("count_id", "id")
-    )
     return workbook(
         [
             Sheet(
@@ -758,7 +750,6 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                     money("closing", _("Owed at the end")),
                     money("owed", _("Owed now")),
                     Column("changes", _("Price changes"), width=12, kind="int"),
-                    money("missing", _("Missing goods to explain")),
                 ],
                 [
                     [
@@ -768,7 +759,6 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                         r["closing"],
                         r["owed"],
                         r["price_changes"],
-                        r["open_missing"],
                     ]
                     for r in rows
                 ],
@@ -831,38 +821,6 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                     for c in changes
                 ],
             ),
-            Sheet(
-                _("Stock counts"),
-                [
-                    when,
-                    Column("count", _("Count no."), width=10, kind="int"),
-                    store,
-                    Column("good", _("Good"), width=24),
-                    Column("expected", _("In the system"), width=12, kind="quantity"),
-                    Column("counted", _("Counted"), width=12, kind="quantity"),
-                    Column("difference", _("Difference"), width=12, kind="quantity"),
-                    money("price", _("Price")),
-                    money("value", _("Value")),
-                    Column("outcome", _("Outcome"), width=14),
-                    by,
-                ],
-                [
-                    [
-                        _local(i.count.created_at),
-                        i.count_id,
-                        i.count.seller.name,
-                        i.good.name,
-                        i.expected,
-                        i.counted,
-                        i.difference,
-                        i.price,
-                        (i.difference * i.price).quantize(Decimal("0.01")),
-                        str(CASH_OUTCOME.get(i.count.outcome, i.count.outcome)),
-                        i.count.counted_by.username if i.count.counted_by else None,
-                    ]
-                    for i in lines
-                ],
-            ),
         ]
     )
 
@@ -871,11 +829,4 @@ CASH_KIND = {
     "SALE": _("Cash sale"),
     "RETURN": _("Cash returned"),
     "HANDOVER": _("Handed over"),
-    "MISSING": _("Missing goods charged"),
-}
-CASH_OUTCOME = {
-    "MATCHED": _("Nothing missing"),
-    "OPEN": _("To explain"),
-    "EXPLAINED": _("Explained"),
-    "CHARGED": _("Store pays"),
 }

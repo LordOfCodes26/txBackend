@@ -23,12 +23,6 @@ class CashDeletedByFinance(CashConflict):
     default_detail = _("Only finance can delete a cash sale. Tell them why.")
 
 
-class CashStoreLocked(DomainError):
-    status_code = status.HTTP_403_FORBIDDEN
-    code = "CASH_STORE_LOCKED"
-    default_detail = _("Your store takes cash, so someone else must do this. Ask finance.")
-
-
 class OwnStore(DomainError):
     status_code = status.HTTP_403_FORBIDDEN
     code = "OWN_STORE"
@@ -43,14 +37,4 @@ class OwnSale(DomainError):
 
 class NotReversible(CashConflict):
     code = "NOT_REVERSIBLE"
-    default_detail = _("Only a handover or a charge can be cancelled, and only once.")
-
-
-class StockMoved(CashConflict):
-    code = "STOCK_MOVED"
-    default_detail = _("Some of these goods were sold or moved meanwhile. Count them again.")
-
-
-class CountResolved(CashConflict):
-    code = "COUNT_RESOLVED"
-    default_detail = _("This stock count has nothing left to explain.")
+    default_detail = _("Only a handover can be cancelled, and only once.")

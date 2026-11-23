@@ -9,14 +9,14 @@ from decimal import Decimal
 import pytest
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role, UserRole
 from apps.accounts.rbac import ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.cash import services as cash
-from apps.cash.models import CashEntry, StockCount
+from apps.cash.models import CashEntry
 from apps.finance import services as finance
 from apps.finance.models import AccountTransaction
 from apps.goods import services as goods
@@ -39,7 +39,6 @@ GOODS = "/api/v1/goods/"
 STORES = "/api/v1/cash/stores/"
 ENTRIES = "/api/v1/cash/entries/"
 IMPORT_GOODS = "/api/v1/imports/goods/"
-COUNTS = "/api/v1/cash/stock-counts/"
 
 
 def client_of(user):
@@ -459,51 +458,13 @@ def test_price_changes_are_per_store(till, shop, make_user, finance_client):
 
 
 @pytest.mark.django_db
-def test_stock_is_added_but_not_written_off_by_the_store(till, shop, admin_client):
+def test_the_store_works_with_its_stock_as_usual(till, shop):
     url = f"{GOODS}{shop.tea.pk}/stock/"
     damage = {"kind": "DAMAGE", "quantity": 1, "reason": "Broken"}
     count = {"kind": "ADJUSTMENT", "counted_quantity": 3, "reason": "Count"}
-    assert code(till.post(url, damage)) == (403, "CASH_STORE_LOCKED")
-    assert code(till.post(url, count)) == (403, "CASH_STORE_LOCKED")
-    assert till.post(url, {"kind": "RESTOCK", "quantity": 5}).status_code == 201
-    assert code(till.patch(f"{GOODS}{shop.tea.pk}/", {"track_stock": False})) == (
-        403,
-        "CASH_STORE_LOCKED",
-    )
-    assert code(till.delete(f"{GOODS}{shop.tea.pk}/")) == (403, "CASH_STORE_LOCKED")
-    assert stock(shop.tea) == 15
-    assert admin_client.post(url, damage).status_code == 201
-    assert till.delete(f"{GOODS}{shop.coffee.pk}/").status_code == 204  # no stock to hide
-
-
-@pytest.mark.django_db
-def test_the_excel_import_is_no_way_around_the_count(shop, make_user, finance_client):
-    """A store's own login importing goods: the same rules as on the pages."""
-    role = Role.objects.create(code="IMPORT", name="Import")
-    from apps.accounts.models import Permission
-
-    role.permissions.add(Permission.objects.get(codename="excel.import_goods"))
-    UserRole.objects.create(user=shop.seller_user, role=role)
-    client = client_of(type(shop.seller_user).objects.get(pk=shop.seller_user.pk))
-
-    def load(header, *row):
-        book = Workbook()
-        sheet = book.active
-        sheet.append(header)
-        sheet.append(list(row))
-        file = io.BytesIO()
-        book.save(file)
-        file.seek(0)
-        file.name = "goods.xlsx"
-        return client.post(IMPORT_GOODS, {"file": file, "dry_run": "false"}, format="multipart")
-
-    assert load(["good", "price"], "Tea", "0.10").status_code == 200
-    assert price(shop.tea) == Decimal("0.10")
-    assert [r["good_name"] for r in changes(finance_client, shop)] == ["Tea"]
-    load(["good", "quantity"], "Tea", 1)
-    load(["good", "track_stock"], "Tea", "no")
-    tea = Good.objects.get(pk=shop.tea.pk)
-    assert tea.quantity == 10 and tea.track_stock
+    assert till.post(url, damage).status_code == 201
+    assert till.post(url, count).status_code == 201
+    assert stock(shop.tea) == 3
 
 
 @pytest.mark.django_db
@@ -517,86 +478,6 @@ def test_courts_are_not_listed(shop, finance_client):
     )
     goods.update_good(actor=shop.seller_user, good=court, price=Decimal("6"))
     assert changes(finance_client, shop) == []
-
-
-# --- Stock counts -------------------------------------------------------------------------
-
-
-def count_lines(client, shop, *lines):
-    body = {
-        "seller": shop.seller.pk,
-        "lines": [{"good": g.pk, "expected": e, "counted": c} for g, e, c in lines],
-    }
-    return client.post(COUNTS, body, format="json")
-
-
-@pytest.mark.django_db
-def test_counting_the_stock(till, shop, finance_client):
-    sheet = finance_client.get(f"{COUNTS}sheet/", {"seller": shop.seller.pk}).json()
-    assert [(g["name"], g["quantity"]) for g in sheet] == [("Cake", 2), ("Tea", 10)]
-    response = count_lines(finance_client, shop, (shop.tea, 10, 7), (shop.cake, 2, 3))
-    assert response.status_code == 201, response.json()
-    body = response.json()
-    assert (body["missing_value"], body["surplus_value"], body["outcome"]) == (
-        "7.50",
-        "4.00",
-        "OPEN",
-    )
-    assert stock(shop.tea) == 7 and stock(shop.cake) == 3
-    row = finance_client.get(STORES).json()["stores"][0]
-    assert (row["open_counts"], row["open_missing"], row["owed"]) == (1, "7.50", "0.00")
-    assert_books()
-
-    url = f"{COUNTS}{body['id']}/resolve/"
-    assert finance_client.post(url, {"outcome": "CHARGED"}).status_code == 400  # say why
-    too_much = {"outcome": "CHARGED", "note": "x", "amount": "8"}
-    assert finance_client.post(url, too_much).status_code == 400
-    charged = finance_client.post(url, {"outcome": "CHARGED", "note": "No reason", "amount": "5"})
-    assert charged.json()["charged"] == "5.00" and cash.owed(shop.seller.pk) == Decimal("5.00")
-    assert code(finance_client.post(url, {"outcome": "EXPLAINED", "note": "x"})) == (
-        409,
-        "COUNT_RESOLVED",
-    )
-    # Cancelling the charge opens the count again.
-    back = finance_client.post(
-        f"{ENTRIES}{charged.json()['charge']}/reverse/",
-        {"reason": "Found them"},
-        HTTP_IDEMPOTENCY_KEY=key(),
-    )
-    assert back.status_code == 201 and cash.owed(shop.seller.pk) == 0
-    assert StockCount.objects.get().outcome == "OPEN"
-    done = finance_client.post(url, {"outcome": "EXPLAINED", "note": "Found in the fridge"})
-    assert done.json()["outcome"] == "EXPLAINED"
-    assert_books()
-
-
-@pytest.mark.django_db
-def test_a_count_of_goods_sold_meanwhile_is_counted_again(till, shop, finance_client):
-    sell(till, shop, (shop.tea, 1))
-    response = count_lines(finance_client, shop, (shop.tea, 10, 9), (shop.cake, 2, 2))
-    assert code(response) == (409, "STOCK_MOVED")
-    assert response.json()["error"]["details"]["goods"] == [shop.tea.pk]
-    assert not StockCount.objects.exists()
-    assert count_lines(finance_client, shop, (shop.tea, 9, 9)).json()["outcome"] == "MATCHED"
-
-
-@pytest.mark.django_db
-def test_the_store_does_not_count_itself(till, shop, make_user, finance_client):
-    assert count_lines(till, shop, (shop.tea, 10, 1)).status_code == 403
-    assert till.get(f"{COUNTS}sheet/", {"seller": shop.seller.pk}).status_code == 403
-    assert count_lines(client_of(make_user(Roles.BOSS)), shop, (shop.tea, 10, 1)).status_code == 403
-    UserRole.objects.create(
-        user=shop.seller_user, role=Role.objects.get(code=Roles.FINANCE_MANAGER)
-    )
-    fresh = client_of(type(shop.seller_user).objects.get(pk=shop.seller_user.pk))
-    assert code(count_lines(fresh, shop, (shop.tea, 10, 1))) == (403, "OWN_STORE")
-    # Other stores' goods, goods without stock, and the same good twice are refused.
-    assert count_lines(finance_client, shop, (shop.coffee, 0, 0)).status_code == 400
-    assert (
-        count_lines(finance_client, shop, (shop.tea, 10, 9), (shop.tea, 10, 8)).status_code == 400
-    )
-    assert count_lines(finance_client, shop, (shop.tea, 10, "9.5")).status_code == 400
-    assert stock(shop.tea) == 10
 
 
 # --- What finance and the store see -------------------------------------------------------
@@ -684,7 +565,7 @@ def test_only_admins_switch_cash_on(shop, admin_client, make_user):
 
 def test_roles():
     fin = ROLES[Roles.FINANCE_MANAGER].permissions
-    assert {"cash.view", "cash.handover", "cash.delete", "cash.count"} <= fin
+    assert {"cash.view", "cash.handover", "cash.delete"} <= fin
     assert "cash.enable" not in fin and "purchase.cash" not in fin
     assert "cash.view" in ROLES[Roles.BOSS].permissions
     assert "cash.view" not in ROLES[Roles.BUILDING_OWNER].permissions
@@ -726,7 +607,7 @@ def test_figures_split_cash_and_wallet(till, shop, make_user, finance_client, ad
     assert one["sellers"][0]["sales_total"] == "5.00"
 
     book = load_workbook(io.BytesIO(finance_client.get(f"{STORES}export/").content))
-    assert len(book.worksheets) == 5
+    assert len(book.worksheets) == 4
     assert book.worksheets[0]["A2"].value == "Cafe"
     book = load_workbook(io.BytesIO(admin_client.get(f"{PURCHASES}export/").content))
     rows = list(book.worksheets[0].values)
@@ -756,7 +637,6 @@ def test_deleting_a_good_for_good_keeps_what_is_owed(till, shop, finance_client)
     from common import record_delete
 
     pid = sell(till, shop, (shop.tea, 2))
-    count_lines(finance_client, shop, (shop.tea, 8, 8))
     with transaction.atomic():
         record_delete.plan_good(shop.tea).run()
     assert not Purchase.objects.filter(pk=pid).exists()
@@ -772,17 +652,15 @@ def test_deleting_a_store_or_user_for_good(till, shop, finance_client, make_user
     finance_client.post(
         f"{ENTRIES}{made['id']}/reverse/", {"reason": "x"}, HTTP_IDEMPOTENCY_KEY=key()
     )
-    body = count_lines(finance_client, shop, (shop.tea, 8, 7)).json()
-    finance_client.post(f"{COUNTS}{body['id']}/resolve/", {"outcome": "CHARGED", "note": "x"})
-    fin = CashEntry.objects.get(kind="MISSING").actor
+    fin = CashEntry.objects.filter(kind="HANDOVER").first().actor
     root = make_user(Roles.ADMIN, username="root2")
     with transaction.atomic():
         record_delete.plan_user(fin, root).run()
-    assert CashEntry.objects.filter(actor__isnull=True).count() == 3
+    assert CashEntry.objects.filter(actor__isnull=True).count() == 2
     assert_books()
     with transaction.atomic():
         plan = record_delete.plan_seller(shop.seller)
-        assert plan.deletes["cash_entries"] == 4
+        assert plan.deletes["cash_entries"] == 3
         plan.run()
     assert not Seller.objects.exists() and not CashEntry.objects.exists()
 

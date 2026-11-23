@@ -14,7 +14,7 @@ with each record:
   transactions for those purchases stay, so balances don't change. Till readers of a
   deleted seller stay, unassigned.
   A cash sale's entry in the store's cash ledger stays too, so what the store owes doesn't
-  change; a deleted seller's cash ledger and stock counts go with it.
+  change; a deleted seller's cash ledger goes with it.
 - user: the login and its roles. What they did stays (audit log, transactions, ...) under
   their username; their developer or seller profile stays, unlinked. Not yourself, not the
   last active admin.
@@ -38,7 +38,7 @@ from apps.attendance.services import recompute_day
 from apps.audit.models import AuditLog
 from apps.audit.services import record_audit
 from apps.bookings.models import Booking
-from apps.cash.models import CashEntry, StockCount
+from apps.cash.models import CashEntry
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
 from apps.goods.models import Good, GoodImage, InventoryMovement
@@ -241,7 +241,6 @@ def plan_seller(seller: Seller) -> Plan:
 
     def rest():
         readers.update(seller=None)
-        StockCount.objects.filter(seller=seller).delete()
         with _writable(CashEntry):
             # Reversals point at the entries they cancel: they go first.
             CashEntry.objects.filter(seller=seller, reverses__isnull=False).delete()
