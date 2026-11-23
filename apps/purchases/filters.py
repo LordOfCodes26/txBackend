@@ -24,7 +24,7 @@ class PurchaseFilter(django_filters.FilterSet):
 
     class Meta:
         model = Purchase
-        fields = ["kind", "status", "seller", "service_position", "developer"]
+        fields = ["kind", "status", "payment", "seller", "service_position", "developer"]
 
     def filter_when(self, queryset, name, value):
         lookup = "gte" if name == "when_after" else "lt"

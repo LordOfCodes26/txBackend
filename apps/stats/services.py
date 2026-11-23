@@ -19,7 +19,7 @@ from apps.attendance.models import DailyAttendance
 from apps.attendance.occupancy import occupancy
 from apps.developers.models import Developer, DeveloperStatus
 from apps.finance.models import AccountTransaction, DeveloperAccount, TransactionKind
-from apps.purchases.models import Purchase, PurchaseKind, PurchaseStatus
+from apps.purchases.models import Payment, Purchase, PurchaseKind, PurchaseStatus
 from apps.rfid.models import Building
 from apps.sellers.models import Seller
 
@@ -144,7 +144,7 @@ def money(
         accounts = accounts.filter(developer__building__in=buildings)
         period = period.filter(account__developer__building__in=buildings)
         if sales_by == "buyer":
-            sales = sales.filter(developer__building__in=buildings)
+            sales = sales.filter(_bought_in(buildings))
         else:
             sales = sales.filter(service_position__building__in=buildings)
     by_status = dict(accounts.order_by().values_list("status").annotate(n=Count("pk")))
@@ -178,6 +178,8 @@ def money(
         sales_count=Count("pk", filter=Q(kind=PurchaseKind.SALE)),
         bookings_total=Sum("total", filter=Q(kind=PurchaseKind.BOOKING)),
         bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
+        cash_total=Sum("total", filter=Q(payment=Payment.CASH)),
+        cash_count=Count("pk", filter=Q(payment=Payment.CASH)),
     )
     return {
         "developer_accounts": {
@@ -218,6 +220,9 @@ def money(
             "sales_count": store_sales["sales_count"],
             "bookings_total": _money(store_sales["bookings_total"]),
             "bookings_count": store_sales["bookings_count"],
+            # The part of the till sales paid in cash (no wallet).
+            "cash_total": _money(store_sales["cash_total"]),
+            "cash_count": store_sales["cash_count"],
         },
     }
 
@@ -246,6 +251,14 @@ def company_stats(first: date, last: date, buildings=None) -> dict:
     }
 
 
+def _bought_in(buildings) -> Q:
+    """Purchases by the buyer's home building. A cash sale has no known buyer: the
+    building of its counter counts."""
+    return Q(payment=Payment.WALLET, developer__building__in=buildings) | Q(
+        payment=Payment.CASH, service_position__building__in=buildings
+    )
+
+
 def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
     """Per seller (store), for the finance dashboard: store sales and bookings in the
     period. Limited to `buildings` by the BUYER: what developers of those buildings bought,
@@ -256,7 +269,7 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
         status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
     )
     if buildings is not None:
-        sales = sales.filter(developer__building__in=buildings)
+        sales = sales.filter(_bought_in(buildings))
         sellers = sellers.filter(pk__in=sales.values("seller"))
 
     sold = {
@@ -268,14 +281,16 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             sales_count=Count("pk", filter=Q(kind=PurchaseKind.SALE)),
             bookings_total=Sum("total", filter=Q(kind=PurchaseKind.BOOKING)),
             bookings_count=Count("pk", filter=Q(kind=PurchaseKind.BOOKING)),
+            cash_total=Sum("total", filter=Q(payment=Payment.CASH)),
+            cash_count=Count("pk", filter=Q(payment=Payment.CASH)),
         )
     }
     # Each seller's sales and bookings split by the buyer's home building (`building` null:
-    # buyers without one).
+    # buyers without one); cash sales, whose buyer is not known, are a part of their own.
     split = {}
     for row in (
         sales.order_by()
-        .values("seller", "developer__building")
+        .values("seller", "developer__building", "payment")
         .annotate(total=Sum("total"), count=Count("pk"))
     ):
         split.setdefault(row["seller"], []).append(row)
@@ -287,6 +302,7 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
         parts = sorted(
             split.get(seller.pk, []),
             key=lambda r: (
+                r["payment"] == Payment.CASH,
                 r["developer__building"] is None,
                 names.get(r["developer__building"], ""),
             ),
@@ -299,9 +315,12 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             "sales_count": s.get("sales_count", 0),
             "bookings_total": _money(s.get("bookings_total")),
             "bookings_count": s.get("bookings_count", 0),
+            "cash_total": _money(s.get("cash_total")),
+            "cash_count": s.get("cash_count", 0),
             "by_building": [
                 {
                     "building": part["developer__building"],
+                    "cash": part["payment"] == Payment.CASH,
                     "code": names.get(part["developer__building"], ""),
                     "name": titles.get(part["developer__building"], ""),
                     "total": _money(part["total"]),

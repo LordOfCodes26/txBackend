@@ -16,7 +16,7 @@ from apps.developers.filters import DeveloperFilter
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
 from apps.goods.models import Good, InventoryMovement, show_quantity
-from apps.purchases.models import Purchase, PurchaseItem, PurchaseStatus
+from apps.purchases.models import Payment, Purchase, PurchaseItem, PurchaseStatus
 from apps.rfid.models import RFIDCardAssignment
 from apps.rfid.scope import building_scope
 from apps.stats.services import _local_bounds, finance_stats
@@ -280,6 +280,8 @@ def finance_stats_workbook(
         ],
         [str(_("Spending")), Decimal(money["spending"]["total"])],
         [str(_("Payment count")), money["spending"]["count"]],
+        [str(_("Cash sales")), Decimal(money["store_sales"]["cash_total"])],
+        [str(_("Cash sales count")), money["store_sales"]["cash_count"]],
         [str(_("In minus now")), Decimal(money["minus"]["total"])],
         [str(_("Wallets in minus")), money["minus"]["count"]],
     ]
@@ -292,6 +294,7 @@ def finance_stats_workbook(
             s["name"],
             s["sales_total"],
             s["sales_count"],
+            s["cash_total"],
             s["bookings_total"],
             s["bookings_count"],
             Decimal(s["sales_total"]) + Decimal(s["bookings_total"]),
@@ -364,6 +367,7 @@ def finance_stats_workbook(
                     Column("seller", _("Seller"), width=24),
                     cash("sales", _("Till sales")),
                     count("sales_count", _("Sales count")),
+                    cash("cash", _("Paid in cash")),
                     cash("bookings", _("Court bookings")),
                     count("bookings_count", _("Booking count")),
                     cash("total", _("Total")),
@@ -396,6 +400,7 @@ PURCHASE_STATUS = {
     "CANCELLED": _("Cancelled"),
     "REFUNDED": _("Refunded"),
 }
+PAYMENT = {"WALLET": _("Wallet"), "CASH": _("Cash")}
 PURCHASE_KIND = {"SALE": _("Sale"), "BOOKING": _("Booking")}
 
 
@@ -422,10 +427,15 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
     counter = Column("counter", _("Counter"), width=18)
     buyer_no = Column("employee_number", _("Buyer no."), width=14)
     buyer = Column("buyer", _("Buyer"), width=22)
+    payment = Column("payment", _("Payment"), width=10)
     heads, lines = [], []
     for p in purchases:
         time = _local(p.moment)
         who = [p.developer.employee_number, p.developer.full_name] if p.developer else [None, None]
+        if p.payment == Payment.CASH:
+            who = [None, p.buyer_name or None]
+        # A draft is not paid yet: how is not known.
+        paid_by = str(PAYMENT[p.payment]) if p.confirmed_at else None
         items = list(p.items.all())
         heads.append(
             [
@@ -434,6 +444,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                 time,
                 str(PURCHASE_STATUS.get(p.status, p.status)),
                 str(PURCHASE_KIND.get(p.kind, p.kind)),
+                paid_by,
                 p.seller.name,
                 p.service_position.name,
                 *who,
@@ -449,6 +460,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                     p.store_number,
                     time,
                     str(PURCHASE_STATUS.get(p.status, p.status)),
+                    paid_by,
                     p.seller.name,
                     p.service_position.name,
                     *who,
@@ -470,6 +482,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                     when,
                     state,
                     Column("kind", _("Kind"), width=10),
+                    payment,
                     seller,
                     counter,
                     buyer_no,
@@ -487,6 +500,7 @@ def purchases_workbook(purchases, first: date, last: date) -> bytes:
                     store_no,
                     when,
                     state,
+                    payment,
                     seller,
                     counter,
                     buyer_no,
@@ -518,12 +532,16 @@ def sales_report_workbook(goods, rows: list[dict], after, before, first: date, l
     paid = sales.filter(status=PurchaseStatus.CONFIRMED)
     refunded = sales.filter(status=PurchaseStatus.REFUNDED)
     taken = sum((p.total or Decimal("0") for p in paid), Decimal("0"))
+    in_cash = [p for p in paid if p.payment == Payment.CASH]
+    cash = sum((p.total for p in in_cash), Decimal("0"))
     back = sum((p.total or Decimal("0") for p in refunded), Decimal("0"))
     money_total = sum((row["money"] for row in rows), Decimal("0"))
     summary = [
         [str(_("From")), str(first), None, None],
         [str(_("To")), str(last), None, None],
         [str(_("Money taken")), None, paid.count(), taken],
+        [str(_("Paid by wallet")), None, len(paid) - len(in_cash), taken - cash],
+        [str(_("Paid in cash")), None, len(in_cash), cash],
         [str(_("Refunded")), None, refunded.count(), back],
         [str(_("Goods sold")), None, sum(row["sold"] for row in rows), money_total],
     ]
@@ -536,6 +554,7 @@ def sales_report_workbook(goods, rows: list[dict], after, before, first: date, l
             row["sold"],
             row["sales"],
             row["money"],
+            row["cash"],
             round(float(row["money"] / money_total * 100), 1) if money_total else None,
             row["stock"],
         ]
@@ -563,6 +582,7 @@ def sales_report_workbook(goods, rows: list[dict], after, before, first: date, l
                     Column("sold", _("Quantity sold"), width=12, kind="quantity"),
                     Column("sales", _("Number of sales"), width=14, kind="int"),
                     Column("money", _("Money taken"), width=14, kind="money"),
+                    Column("cash", _("Paid in cash"), width=14, kind="money"),
                     Column("share", _("Share %"), width=9),
                     Column("stock", _("Stock left"), width=10, kind="quantity"),
                 ],
@@ -682,3 +702,207 @@ def preferential_workbook(rows: list[dict], first: date, last: date) -> bytes:
             )
         ]
     )
+
+
+def cash_workbook(sellers, first: date, last: date) -> bytes:
+    """Cash control as a workbook: the stores, each store's days, every cash entry, the
+    requests and the stock counts of the period."""
+    from apps.cash import reports
+    from apps.cash.models import CashEntry, CashRequest, StockCountLine
+    from apps.sellers.models import Seller
+
+    start, end = _local_bounds(first, last)
+    during = {"created_at__gte": start, "created_at__lt": end}
+    money = lambda key, title: Column(key, title, width=14, kind="money")  # noqa: E731
+    store = Column("store", _("Store"), width=24)
+    when = Column("time", _("Time"), width=17, kind="datetime")
+    note = Column("note", _("Note"), width=30)
+    by = Column("by", _("By"), width=16)
+    figures = ("sales", "returned", "expected", "handed_over", "charged")
+    figure_columns = [
+        money("sales", _("Cash sales")),
+        money("returned", _("Cash returned")),
+        money("expected", _("Cash from sales")),
+        money("handed_over", _("Handed over")),
+        money("charged", _("Missing goods charged")),
+    ]
+    rows = reports.stores(sellers, first, last)
+    names = {r["id"]: r["name"] for r in rows}
+    days = []
+    for seller in Seller.objects.filter(pk__in=names).order_by("name"):
+        for d in reports.daily(seller, first, last):
+            days.append(
+                [date.fromisoformat(d["date"]), seller.name, *(d[k] for k in figures), d["owed"]]
+            )
+    entries = (
+        CashEntry.objects.filter(seller__in=sellers, **during)
+        .select_related("seller", "actor")
+        .order_by("id")
+    )
+    requests = (
+        CashRequest.objects.filter(seller__in=sellers, **during)
+        .select_related("seller", "purchase", "good", "requested_by", "decided_by")
+        .order_by("id")
+    )
+    lines = (
+        StockCountLine.objects.filter(
+            count__seller__in=sellers, count__created_at__gte=start, count__created_at__lt=end
+        )
+        .select_related("count__seller", "count__counted_by", "good")
+        .order_by("count_id", "id")
+    )
+    return workbook(
+        [
+            Sheet(
+                _("Stores"),
+                [
+                    store,
+                    money("opening", _("Owed before")),
+                    *figure_columns,
+                    money("closing", _("Owed at the end")),
+                    money("owed", _("Owed now")),
+                    Column("pending", _("Waiting for approval"), width=12, kind="int"),
+                    money("missing", _("Missing goods to explain")),
+                ],
+                [
+                    [
+                        r["name"],
+                        r["opening"],
+                        *(r[k] for k in figures),
+                        r["closing"],
+                        r["owed"],
+                        r["pending_requests"],
+                        r["open_missing"],
+                    ]
+                    for r in rows
+                ],
+            ),
+            Sheet(
+                _("Daily"),
+                [
+                    Column("date", _("Date"), width=12, kind="date"),
+                    store,
+                    *figure_columns,
+                    money("owed", _("Owed at the end")),
+                ],
+                days,
+            ),
+            Sheet(
+                _("Cash entries"),
+                [
+                    when,
+                    store,
+                    Column("kind", _("Kind"), width=18),
+                    money("amount", _("Amount")),
+                    money("owed", _("Owed after")),
+                    Column("reference", _("Reference"), width=18),
+                    note,
+                    by,
+                ],
+                [
+                    [
+                        _local(e.created_at),
+                        e.seller.name,
+                        str(CASH_KIND.get(e.kind, e.kind)),
+                        e.amount,
+                        e.owed_after,
+                        e.reference,
+                        e.note,
+                        e.actor.username if e.actor else None,
+                    ]
+                    for e in entries
+                ],
+            ),
+            Sheet(
+                _("Requests"),
+                [
+                    when,
+                    store,
+                    Column("kind", _("Kind"), width=18),
+                    Column("status", _("Status"), width=12),
+                    Column("what", _("What"), width=24),
+                    money("old", _("Old price")),
+                    money("new", _("New price")),
+                    money("total", _("Total")),
+                    Column("reason", _("Reason"), width=30),
+                    Column("asked", _("Asked by"), width=16),
+                    Column("decided", _("Decided by"), width=16),
+                    note,
+                ],
+                [
+                    [
+                        _local(r.created_at),
+                        r.seller.name,
+                        str(CASH_REQUEST.get(r.kind, r.kind)),
+                        str(CASH_REQUEST_STATUS.get(r.status, r.status)),
+                        r.good.name if r.good else f"#{r.purchase.store_number}",
+                        r.old_price,
+                        r.new_price,
+                        r.purchase.total if r.purchase else None,
+                        r.reason,
+                        r.requested_by.username if r.requested_by else None,
+                        r.decided_by.username if r.decided_by else None,
+                        r.decision_note,
+                    ]
+                    for r in requests
+                ],
+            ),
+            Sheet(
+                _("Stock counts"),
+                [
+                    when,
+                    Column("count", _("Count no."), width=10, kind="int"),
+                    store,
+                    Column("good", _("Good"), width=24),
+                    Column("expected", _("In the system"), width=12, kind="quantity"),
+                    Column("counted", _("Counted"), width=12, kind="quantity"),
+                    Column("difference", _("Difference"), width=12, kind="quantity"),
+                    money("price", _("Price")),
+                    money("value", _("Value")),
+                    Column("outcome", _("Outcome"), width=14),
+                    by,
+                ],
+                [
+                    [
+                        _local(i.count.created_at),
+                        i.count_id,
+                        i.count.seller.name,
+                        i.good.name,
+                        i.expected,
+                        i.counted,
+                        i.difference,
+                        i.price,
+                        (i.difference * i.price).quantize(Decimal("0.01")),
+                        str(CASH_OUTCOME.get(i.count.outcome, i.count.outcome)),
+                        i.count.counted_by.username if i.count.counted_by else None,
+                    ]
+                    for i in lines
+                ],
+            ),
+        ]
+    )
+
+
+CASH_KIND = {
+    "SALE": _("Cash sale"),
+    "RETURN": _("Cash returned"),
+    "HANDOVER": _("Handed over"),
+    "MISSING": _("Missing goods charged"),
+}
+CASH_REQUEST = {
+    "DELETE_SALE": _("Delete a cash sale"),
+    "PRICE": _("New price"),
+    "NEW_GOOD": _("New good"),
+}
+CASH_REQUEST_STATUS = {
+    "PENDING": _("Waiting for approval"),
+    "APPROVED": _("Approved"),
+    "REJECTED": _("Rejected"),
+    "WITHDRAWN": _("Withdrawn"),
+}
+CASH_OUTCOME = {
+    "MATCHED": _("Nothing missing"),
+    "OPEN": _("To explain"),
+    "EXPLAINED": _("Explained"),
+    "CHARGED": _("Store pays"),
+}

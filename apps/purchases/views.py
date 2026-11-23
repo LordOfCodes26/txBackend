@@ -30,8 +30,9 @@ from common.permissions import HasPermissions
 
 from . import preferential, services
 from .filters import PurchaseFilter
-from .models import PreferentialSettings, Purchase, PurchaseKind, PurchaseStatus
+from .models import Payment, PreferentialSettings, Purchase, PurchaseKind, PurchaseStatus
 from .serializers import (
+    CashConfirmSerializer,
     ConfirmSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
@@ -68,6 +69,7 @@ SELLER_ACTIONS = (
     "renew_wait",
     "stop_waiting",
     "confirm",
+    "confirm_cash",
     "cancel",
     "partial_update",
     "destroy",
@@ -117,6 +119,7 @@ class PurchaseViewSet(
         "renew_wait": ["purchase.create"],
         "stop_waiting": ["purchase.create"],
         "confirm": ["purchase.confirm"],
+        "confirm_cash": ["purchase.cash"],
         "cancel": ["purchase.cancel"],
         "partial_update": ["purchase.change"],
         "destroy": ["purchase.delete"],
@@ -129,7 +132,13 @@ class PurchaseViewSet(
     playground_filter = Q(kind=PurchaseKind.BOOKING)
     scope_permission = "purchase.view"
     filterset_class = PurchaseFilter
-    search_fields = ["developer__full_name", "developer__employee_number", "seller__name", "label"]
+    search_fields = [
+        "developer__full_name",
+        "developer__employee_number",
+        "seller__name",
+        "label",
+        "buyer_name",
+    ]
     ordering_fields = ["created_at", "confirmed_at", "total", "store_number"]
 
     position_lookup = "service_position"
@@ -183,6 +192,8 @@ class PurchaseViewSet(
             count=Count("pk"),
             money=Sum("total", default=ZERO),
             buyers=Count("developer", distinct=True),
+            cash_count=Count("pk", filter=Q(payment=Payment.CASH)),
+            cash=Sum("total", filter=Q(payment=Payment.CASH), default=ZERO),
         )
 
         def ranked(*fields):
@@ -214,6 +225,10 @@ class PurchaseViewSet(
             "paid_total": totals["money"],
             "refunded_total": refunded["money"],
             "buyers": totals["buyers"],
+            "cash_count": totals["cash_count"],
+            "cash_total": totals["cash"],
+            "wallet_count": totals["count"] - totals["cash_count"],
+            "wallet_total": totals["money"] - totals["cash"],
             "currency": settings.CURRENCY,
             "by_seller": ranked("seller__name"),
             "by_reader": ranked("reader__name", "reader__code"),
@@ -385,6 +400,36 @@ class PurchaseViewSet(
         serializer = ConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         purchase, created = services.confirm_purchase(
+            actor=request.user,
+            purchase=purchase,
+            idempotency_key=key,
+            **serializer.validated_data,
+        )
+        return self._respond(purchase, status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @extend_schema(
+        request=CashConfirmSerializer,
+        responses={201: PurchaseSerializer, 200: PurchaseSerializer},
+        parameters=[
+            OpenApiParameter(
+                HEADER,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="Unique per checkout attempt; a retry with the same key is safe.",
+            )
+        ],
+    )
+    @action(detail=True, methods=["post"], url_path="confirm-cash")
+    def confirm_cash(self, request, pk=None):
+        """The seller took cash for a till sale, at a store that accepts cash: no card, PIN or
+        wallet. 201 when paid now; 200 when this Idempotency-Key already paid it. 409
+        CASH_NOT_ACCEPTED. A cash sale can't be changed; deleting it needs finance's approval
+        (`POST /cash/requests/`)."""
+        key = require_idempotency_key(request)
+        purchase = self.get_object()
+        serializer = CashConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase, created = services.confirm_cash_sale(
             actor=request.user,
             purchase=purchase,
             idempotency_key=key,

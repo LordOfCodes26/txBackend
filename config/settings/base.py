@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.finance",
     "apps.purchases",
     "apps.bookings",
+    "apps.cash",
     "apps.realtime",
     "apps.spreadsheets",  # no models: for manage.py sync_grist
 ]

@@ -1,3 +1,4 @@
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, viewsets
@@ -89,12 +90,25 @@ class SellerViewSet(
     search_fields = ["name", "contact_name", "email"]
     ordering_fields = ["name", "status", "created_at"]
 
+    def _check_cash(self, serializer):
+        """Taking cash is switched on and off by whoever has `cash.enable` (admins)."""
+        wanted = serializer.validated_data.get("accepts_cash")
+        now = serializer.instance.accepts_cash if serializer.instance else False
+        if (
+            wanted is not None
+            and wanted != now
+            and not self.request.user.has_rbac_perm("cash.enable")
+        ):
+            raise PermissionDenied(_("Your account cannot switch cash sales on or off."))
+
     def perform_create(self, serializer):
+        self._check_cash(serializer)
         serializer.instance = services.create_seller(
             actor=self.request.user, **serializer.validated_data
         )
 
     def perform_update(self, serializer):
+        self._check_cash(serializer)
         serializer.instance = services.update_seller(
             actor=self.request.user, seller=serializer.instance, **serializer.validated_data
         )

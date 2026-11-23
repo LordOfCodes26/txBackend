@@ -747,8 +747,9 @@ def test_export_purchases_and_items(auth_client, make_user, till, world):
     assert [row[3] for row in book["Purchases"][1:]] == ["Paid", "Draft"]
     first = book["Purchases"][1]
     assert first[0] == paid and first[1] == Purchase.objects.get(pk=paid).store_number
-    assert first[7:9] == ("E1", "Ada") and first[10:] == (3, 9)
-    assert [(row[8], row[9], row[11]) for row in book["Items"][1:3]] == [
+    assert first[5] == "Wallet" and book["Purchases"][2][5] is None  # a draft: not known yet
+    assert first[8:10] == ("E1", "Ada") and first[11:] == (3, 9)
+    assert [(row[9], row[10], row[12]) for row in book["Items"][1:3]] == [
         ("Tea", 2, 5),
         ("Cake", 1, 4),
     ]

@@ -354,6 +354,9 @@ Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASS
 (`details: {max}`), `SELF_TRANSACTION_FORBIDDEN`, `IDEMPOTENCY_KEY_REUSED`,
 `INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
+`CASH_NOT_ACCEPTED`, `CASH_SALE_FIXED`, `CASH_DELETE_NEEDS_APPROVAL`, `CASH_STORE_LOCKED`,
+`OWN_STORE`, `OWN_REQUEST`, `REQUEST_CLOSED`, `ALREADY_REQUESTED`, `AWAITING_APPROVAL`,
+`NOT_REVERSIBLE`, `STOCK_MOVED` (`details: {goods}`), `COUNT_RESOLVED`,
 `PIN_NOT_SET`, `CARD_NOT_PRESENTED`, `MANUAL_CARD_ENTRY_DISABLED`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
 `details: {locked_until}`),
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
@@ -713,6 +716,32 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - **Confirmed purchases are final**; there are no refunds. Only drafts can be cancelled.
 - Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
 - `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
+
+### Cash sales and Cash control
+
+Stores with `accepts_cash` (off by default; only `cash.enable`, admins, switches it) sell goods
+to people without a card. Courts are never paid in cash.
+
+- `POST /purchases/{id}/confirm-cash/` `{buyer_name?}` + `Idempotency-Key`: pays a till draft.
+  `payment` is `CASH`; no developer, card or wallet entry. It is never changed
+  (`CASH_SALE_FIXED`) nor deleted directly (`CASH_DELETE_NEEDS_APPROVAL`). A store's own login
+  sells at its own store; staff need `purchase.cash`.
+- `GET /cash/stores/?date_from&date_to`, `/cash/stores/{id}/` (with `daily`), `/cash/stores/export/`:
+  per store `sales` (ones deleted later too), `returned` (on the day it was returned),
+  `expected` = sales - returned, `handed_over`, `charged`, `opening`, `closing`, `owed` (now).
+- `GET /cash/entries/`: the append-only ledger. `POST /cash/entries/handover/`
+  `{seller, amount, note}` (`cash.handover`; more than owed needs a note) and
+  `POST /cash/entries/{id}/reverse/` `{reason}`, both with `Idempotency-Key`.
+- `/cash/requests/`: `POST {purchase, reason}` asks to delete a cash sale; `approve/`, `reject/
+  {note}` (`cash.approve`), `withdraw/` (who asked). Someone who may approve deletes at once.
+- `/cash/stock-counts/`: `sheet/?seller=`, `POST {seller, lines: [{good, expected, counted}], note}`,
+  `{id}/resolve/` `{outcome: EXPLAINED | CHARGED, note, amount?}` (`cash.count`).
+
+While a store takes cash, the people who work for it: get price changes and new goods as requests
+(`pending_request` on the good), can only restock (`CASH_STORE_LOCKED` for write-offs, counts,
+`track_stock` and removing a good with stock), also through the Excel import. Nobody uses
+`cash.*` controls on a store they work for (`OWN_STORE`), and nobody approves their own request or
+a sale they took the cash for (`OWN_REQUEST`).
 
 ### Simulating card taps while developing (staging only)
 

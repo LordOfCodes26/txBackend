@@ -86,7 +86,9 @@ def test_role_is_boss_minus_company_wide_lists():
     perms = set(
         Role.objects.get(code=Roles.BUILDING_OWNER).permissions.values_list("codename", flat=True)
     )
-    assert perms == (VIEW - {"user.view", "role.view", "audit.view"}) | {"excel.export"}
+    assert perms == (VIEW - {"user.view", "role.view", "audit.view", "cash.view"}) | {
+        "excel.export"
+    }
 
 
 def test_people_and_money_of_own_building(client, site):
@@ -140,6 +142,8 @@ def test_statistics_of_own_buildings(client, site):
         "sales_count": 2,
         "bookings_total": "0.00",
         "bookings_count": 0,
+        "cash_total": "0.00",
+        "cash_count": 0,
     }
     assert "sellers" not in money  # no seller balances any more
 

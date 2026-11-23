@@ -34,6 +34,8 @@ class Seller(TimeStampedModel):
         max_length=10, choices=SellerStatus.choices, default=SellerStatus.ACTIVE
     )
     notes = models.TextField(blank=True)
+    # Goods may be sold for cash, without a card (apps.cash). Off: card and PIN only.
+    accepts_cash = models.BooleanField(default=False)
     # The last store number given to one of its purchases (Purchase.store_number).
     purchase_counter = models.PositiveIntegerField(default=0, editable=False)
 

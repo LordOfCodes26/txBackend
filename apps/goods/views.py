@@ -77,6 +77,7 @@ def goods_sold(goods, after, before) -> list[dict]:
             sold=Sum("quantity"),
             sales=Count("purchase", distinct=True),
             money=Sum("line_total"),
+            cash=Sum("line_total", filter=Q(purchase__payment="CASH")),
         )
     }
     zero = Decimal("0.00")
@@ -95,6 +96,7 @@ def goods_sold(goods, after, before) -> list[dict]:
                 "sold": sold.get("sold") or 0,
                 "sales": sold.get("sales") or 0,
                 "money": sold.get("money") or zero,
+                "cash": sold.get("cash") or zero,
                 "stock": good.quantity if good.track_stock else None,
                 "currency": settings.CURRENCY,
             }
@@ -180,8 +182,10 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
             raise PermissionDenied(_("Your account cannot add or change goods."))
 
     def perform_create(self, serializer):
+        from apps.cash import services as cash
+
         self._check_court(serializer.validated_data.get("kind", GoodKind.PRODUCT))
-        serializer.instance = services.create_good(
+        serializer.instance = cash.create_store_good(
             actor=self.request.user, **serializer.validated_data
         )
 
@@ -189,12 +193,17 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         self._check_court(serializer.instance.kind)
         if "kind" in serializer.validated_data:  # turning a good into a court, or back
             self._check_court(serializer.validated_data["kind"])
-        serializer.instance = services.update_good(
+        from apps.cash import services as cash
+
+        serializer.instance = cash.update_store_good(
             actor=self.request.user, good=serializer.instance, **serializer.validated_data
         )
 
     def perform_destroy(self, instance):
+        from apps.cash import services as cash
+
         self._check_court(instance.kind)
+        cash.ensure_may_remove(self.request.user, instance)
         services.delete_good(actor=self.request.user, good=instance)
 
     def _court(self) -> Good:
@@ -274,6 +283,20 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
         response["Content-Disposition"] = f'attachment; filename="sales-{first}-to-{last}.xlsx"'
         return response
 
+    def get_queryset(self):
+        from django.db.models import Prefetch
+
+        from apps.cash.models import CashRequest
+
+        waiting = CashRequest.objects.filter(status="PENDING", kind__in=("PRICE", "NEW_GOOD"))
+        return (
+            super()
+            .get_queryset()
+            .prefetch_related(
+                Prefetch("cash_requests", queryset=waiting, to_attr="waiting_requests")
+            )
+        )
+
     def _good_response(self, good, code=status.HTTP_200_OK):
         good = self.get_queryset().get(pk=good.pk)
         return Response(GoodSerializer(good, context=self.get_serializer_context()).data, code)
@@ -282,10 +305,14 @@ class GoodViewSet(BuildingScopedMixin, SellerScopedQuerysetMixin, viewsets.Model
     @action(detail=True, methods=["post"], parser_classes=[JSONParser])
     def stock(self, request, pk=None):
         """RESTOCK (+quantity), DAMAGE (-quantity, reason) or ADJUSTMENT (counted_quantity,
-        reason). Returns the recorded movement."""
+        reason). Returns the recorded movement. At a store that takes cash its own people
+        only restock: 403 CASH_STORE_LOCKED."""
+        from apps.cash import services as cash
+
         good = self.get_object()
         serializer = StockChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        cash.ensure_may_change_stock(request.user, good, serializer.validated_data["kind"])
         movement = services.adjust_stock(actor=request.user, good=good, **serializer.validated_data)
         return Response(InventoryMovementSerializer(movement).data, status.HTTP_201_CREATED)
 

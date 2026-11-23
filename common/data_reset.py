@@ -1,8 +1,8 @@
 """Delete all business data, keeping the setup: users, roles, readers and the stores.
 
 Deleted: developers, RFID cards and their assignments, every scan, the TCP log,
-attendance, developer accounts and ledgers, purchases, bookings, stock history and the
-audit log.
+attendance, developer accounts and ledgers, purchases, bookings, the stores' cash ledger,
+requests and stock counts, stock history and the audit log.
 
 Kept: users and roles, RFID readers (door units, tills, card assign readers), buildings,
 sellers, counters and goods. Each tracked good keeps its current stock as one opening
@@ -27,6 +27,7 @@ from apps.attendance.models import AttendanceRecord, DailyAttendance, DeveloperP
 from apps.audit.models import AuditLog
 from apps.audit.services import record_audit
 from apps.bookings.models import Booking
+from apps.cash.models import CashEntry, CashRequest, StockCount, StockCountLine
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
 from apps.goods.models import Good, InventoryMovement, MovementKind
@@ -60,6 +61,10 @@ DELETED = {
     "purchases": Purchase,
     "purchase_items": PurchaseItem,
     "bookings": Booking,
+    "cash_entries": CashEntry,
+    "cash_requests": CashRequest,
+    "stock_counts": StockCount,
+    "stock_count_lines": StockCountLine,
     "stock_movements": InventoryMovement,
     "audit_log": AuditLog,
 }

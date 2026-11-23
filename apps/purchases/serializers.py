@@ -19,6 +19,7 @@ from apps.sellers.serializers import SellerSummarySerializer
 
 from . import preferential
 from .models import (
+    Payment,
     PreferentialGood,
     PreferentialSettings,
     Purchase,
@@ -145,6 +146,16 @@ class PresentedCardSerializer(serializers.Serializer):
         return (purchase.presented_at + window).isoformat()
 
 
+class DeleteRequestSerializer(serializers.Serializer):
+    """The last request to delete a paid cash sale (apps.cash)."""
+
+    id = serializers.IntegerField()
+    status = serializers.CharField()
+    reason = serializers.CharField()
+    decision_note = serializers.CharField()
+    requested_by = serializers.IntegerField(allow_null=True)
+
+
 class PurchaseSerializer(serializers.ModelSerializer):
     seller = SellerSummarySerializer(read_only=True)
     service_position_name = serializers.CharField(source="service_position.name", read_only=True)
@@ -162,6 +173,9 @@ class PurchaseSerializer(serializers.ModelSerializer):
     waiting_for_card = serializers.SerializerMethodField(
         help_text="The seller pressed Scan card to buy: the next tap on the reader goes here."
     )
+    delete_request = serializers.SerializerMethodField(
+        help_text="Paid cash sales: the last request to delete it, or null."
+    )
     total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
     balance_after = serializers.SerializerMethodField(
@@ -176,6 +190,8 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "store_number",
             "label",
             "kind",
+            "payment",
+            "buyer_name",
             "status",
             "seller",
             "service_position",
@@ -198,8 +214,25 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "cancelled_at",
             "refunded_by",
             "refunded_at",
+            "refund_reason",
+            "delete_request",
         ]
         read_only_fields = fields
+
+    @extend_schema_field(DeleteRequestSerializer(allow_null=True))
+    def get_delete_request(self, purchase) -> dict | None:
+        if purchase.payment != Payment.CASH or purchase.status != PurchaseStatus.CONFIRMED:
+            return None
+        last = purchase.cash_requests.order_by("-id").first()
+        if last is None:
+            return None
+        return {
+            "id": last.pk,
+            "status": last.status,
+            "reason": last.reason,
+            "decision_note": last.decision_note,
+            "requested_by": last.requested_by_id,
+        }
 
     def get_booking(self, purchase) -> int | None:
         if purchase.kind != "BOOKING" or purchase.status != "CONFIRMED":
@@ -378,6 +411,12 @@ class PaidChangeSerializer(serializers.Serializer):
         return items
 
 
+class CashConfirmSerializer(serializers.Serializer):
+    buyer_name = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, default="", help_text="Optional."
+    )
+
+
 class ConfirmSerializer(serializers.Serializer):
     card_uid = UIDField(
         required=False,
@@ -408,6 +447,10 @@ class PurchaseSummarySerializer(serializers.Serializer):
     paid_count = serializers.IntegerField()
     paid_total = serializers.DecimalField(max_digits=14, decimal_places=2)
     refunded_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    cash_count = serializers.IntegerField(help_text="Paid purchases paid in cash.")
+    cash_total = serializers.DecimalField(max_digits=14, decimal_places=2)
+    wallet_count = serializers.IntegerField(help_text="Paid purchases paid by card and PIN.")
+    wallet_total = serializers.DecimalField(max_digits=14, decimal_places=2)
     buyers = serializers.IntegerField(help_text="Different developers who paid.")
     currency = serializers.CharField()
     by_seller = SummaryRowSerializer(many=True, help_text="Paid sales, the most money first.")

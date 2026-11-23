@@ -11,7 +11,7 @@ from .models import Seller, ServicePosition
 class SellerSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = Seller
-        fields = ["id", "name", "status"]
+        fields = ["id", "name", "status", "accepts_cash"]
 
 
 def _ensure_seller_login(user):
@@ -49,6 +49,7 @@ class SellerSerializer(serializers.ModelSerializer):
             "phone",
             "status",
             "notes",
+            "accepts_cash",
             "counters_count",
             "goods_count",
             "courts_count",

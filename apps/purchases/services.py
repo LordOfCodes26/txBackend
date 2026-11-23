@@ -35,7 +35,7 @@ from .exceptions import (
     SelfPurchaseForbidden,
     SellerNotActive,
 )
-from .models import Purchase, PurchaseItem, PurchaseKind, PurchaseStatus
+from .models import Payment, Purchase, PurchaseItem, PurchaseKind, PurchaseStatus
 
 INACTIVE_DEVELOPER = {DeveloperStatus.SUSPENDED, DeveloperStatus.TERMINATED}
 MAX_ITEM_QUANTITY = 999  # matches PurchaseItem.quantity's validator
@@ -54,7 +54,7 @@ TAKES_CARD = (PurchaseStatus.DRAFT, PurchaseStatus.CONFIRMED)
 
 def _lock_takes_card(purchase: Purchase) -> Purchase:
     purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
-    if purchase.status not in TAKES_CARD:
+    if purchase.status not in TAKES_CARD or purchase.payment == Payment.CASH:
         raise PurchaseNotDraft()
     return purchase
 
@@ -560,6 +560,100 @@ def confirm_purchase(
     return purchase, True
 
 
+def confirm_cash_sale(
+    *, actor, purchase: Purchase, idempotency_key: str, buyer_name: str = ""
+) -> tuple[Purchase, bool]:
+    """The seller took cash for a draft till sale: no card, PIN, developer or wallet.
+    Returns (purchase, newly confirmed); a retry with the same key is safe.
+
+    The normal prices, no preferential units. Stock goes down as in any sale, and the total
+    is added to the cash the store owes (apps.cash). Locks in the checkout's order:
+    purchase → goods by id → the store.
+    """
+    from apps.cash import services as cash
+    from apps.cash.exceptions import CashNotAccepted
+    from apps.cash.models import CashKind
+
+    replay = Purchase.objects.filter(confirm_idempotency_key=idempotency_key).first()
+    if replay is not None:
+        if replay.pk != purchase.pk or replay.payment != Payment.CASH:
+            raise IdempotencyKeyReused()
+        return replay, False
+
+    with transaction.atomic():
+        purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
+        if purchase.status != PurchaseStatus.DRAFT:
+            if purchase.confirm_idempotency_key == idempotency_key:
+                return purchase, False
+            raise PurchaseNotDraft()
+        _ensure_sale(purchase)
+        position = ServicePosition.all_objects.select_related("seller").get(
+            pk=purchase.service_position_id
+        )
+        _ensure_seller_active(position)
+        if not position.seller.accepts_cash:
+            raise CashNotAccepted()
+
+        items = list(purchase.items.order_by("good_id"))
+        if not items:
+            raise PurchaseEmpty()
+        locked_goods = _lock_goods([i.good_id for i in items])
+        total = Decimal("0.00")
+        for item in items:
+            good = locked_goods[item.good_id]
+            _ensure_sellable(good, purchase)
+            item.free_quantity = 0
+            item.unit_price = good.price
+            item.line_total = finance.money(good.price * item.quantity)
+            total += item.line_total
+        if total <= 0:
+            raise PurchaseEmpty(_("The purchase total must be greater than zero."))
+        for item in items:
+            good = locked_goods[item.good_id]
+            if good.track_stock:
+                goods.move_stock(
+                    good=good,
+                    kind=MovementKind.SALE,
+                    delta=-item.quantity,
+                    actor=actor,
+                    reference=f"purchase:{purchase.pk}",
+                )
+        PurchaseItem.objects.bulk_update(items, ["free_quantity", "unit_price", "line_total"])
+
+        purchase.status = PurchaseStatus.CONFIRMED
+        purchase.payment = Payment.CASH
+        purchase.buyer_name = buyer_name.strip()
+        purchase.total = total
+        purchase.confirm_idempotency_key = idempotency_key
+        purchase.confirmed_by = actor
+        purchase.confirmed_at = timezone.now()
+        # No card is expected any more (a tap made before does not count).
+        purchase.presented_event = None
+        purchase.presented_at = None
+        purchase.waiting_since = None
+        purchase.save()
+        entry = cash.post_entry(
+            seller_id=purchase.seller_id,
+            kind=CashKind.SALE,
+            amount=total,
+            actor=actor,
+            reference=f"purchase:{purchase.pk}",
+        )
+        record_audit(
+            "purchase.paid_cash",
+            actor=actor,
+            entity=purchase,
+            new_values={
+                "total": total,
+                "buyer": purchase.buyer_name,
+                "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
+                "store_owes": entry.owed_after,
+            },
+        )
+        notify_purchase(purchase.pk, purchase.service_position_id, "purchase_confirmed")
+    return purchase, True
+
+
 # --- Changing or deleting a paid purchase ---------------------------------------------------
 
 
@@ -601,6 +695,63 @@ def _lock_goods(ids) -> dict[int, Good]:
 
 
 @transaction.atomic
+def delete_cash_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
+    """Delete a cash sale, once finance approved it (apps.cash.services): the goods go back
+    to stock and the total off what the store owes; the seller returns the cash by hand.
+
+    Locks in the checkout's order: purchase → goods by id → the store.
+    """
+    from apps.cash import services as cash
+    from apps.cash.models import CashKind
+
+    purchase = _lock_paid(purchase)
+    items = list(purchase.items.order_by("good_id"))
+    locked_goods = _lock_goods([i.good_id for i in items])
+    reference = f"purchase:{purchase.pk}"
+    for item in items:
+        good = locked_goods[item.good_id]
+        if good.track_stock:
+            goods.move_stock(
+                good=good,
+                kind=MovementKind.RETURN,
+                delta=item.quantity,
+                actor=actor,
+                reference=reference,
+            )
+    entry = cash.post_entry(
+        seller_id=purchase.seller_id,
+        kind=CashKind.RETURN,
+        amount=-purchase.total,
+        actor=actor,
+        note=reason,
+        reference=reference,
+    )
+    purchase.status = PurchaseStatus.REFUNDED
+    purchase.refunded_by = actor if getattr(actor, "pk", None) else None
+    purchase.refunded_at = timezone.now()
+    purchase.refund_reason = reason
+    purchase.save(
+        update_fields=["status", "refunded_by", "refunded_at", "refund_reason", "updated_at"]
+    )
+    record_audit(
+        "purchase.refunded",
+        actor=actor,
+        entity=purchase,
+        old_values={"status": PurchaseStatus.CONFIRMED, "total": purchase.total},
+        new_values={
+            "status": PurchaseStatus.REFUNDED,
+            "payment": Payment.CASH,
+            "refunded": purchase.total,
+            "reason": reason,
+            "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
+            "store_owes": entry.owed_after,
+        },
+    )
+    notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")
+    return purchase
+
+
+@transaction.atomic
 def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
     """Delete a paid purchase: the whole total goes back to the developer's wallet (a REFUND
     entry; the ledger itself is never changed), tracked goods go back to stock, and the
@@ -610,6 +761,10 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
     Locks in the checkout's order: purchase → account → goods by id.
     """
     purchase = _lock_paid(purchase)
+    if purchase.payment == Payment.CASH:
+        from apps.cash.exceptions import CashDeleteNeedsApproval
+
+        raise CashDeleteNeedsApproval()
     account = DeveloperAccount.objects.select_for_update().get(developer_id=purchase.developer_id)
     items = list(purchase.items.order_by("good_id"))
 
@@ -707,6 +862,10 @@ def change_paid_purchase(
         raise PaidBookingNotEditable()
     if purchase.status != PurchaseStatus.CONFIRMED:
         raise PurchaseNotPaid()
+    if purchase.payment == Payment.CASH:
+        from apps.cash.exceptions import CashSaleFixed
+
+        raise CashSaleFixed()
     if pin:
         # Own transaction (as at checkout), so a wrong PIN is counted even if we fail later.
         finance.verify_pin(account=finance.open_account(purchase.developer), pin=pin)

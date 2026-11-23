@@ -67,10 +67,18 @@ AREAS: dict[str, dict[str, str]] = {
         "purchase.view": "See purchases (every sale) and their pages",
         "purchase.create": "Open a till and build a purchase",
         "purchase.confirm": "Take payment for a purchase (card and PIN)",
+        "purchase.cash": "Take cash for a purchase at a store that accepts cash",
         "purchase.cancel": "Cancel a purchase that is not paid yet",
         "purchase.change": "Change a paid purchase (the difference is refunded or charged)",
         "purchase.delete": "Delete a paid purchase (the money goes back to the wallet)",
         "purchase.report.view": "See the sales report: goods sold and money in a range, with Excel",
+    },
+    "Cash control": {
+        "cash.view": "See the cash each store owes, its handovers, requests and stock counts",
+        "cash.handover": "Record cash handed over by a store, and cancel a wrong handover",
+        "cash.approve": "Approve deleting cash sales and the price changes of stores with cash",
+        "cash.count": "Count a store's stock, and settle what is missing",
+        "cash.enable": "Switch cash sales on and off for a store",
     },
     "Playground": {
         "booking.view": "See courts, bookings and the playground desk",
@@ -178,6 +186,8 @@ ROLES: dict[str, RoleSpec] = {
         # The minus limit and the preferential service are the admins' decision.
         (_prefixed("finance") - {"finance.minus_limit", "finance.preferential"})
         | {"developer.view", "purchase.view", "purchase.report.view", "booking.view", "audit.view"}
+        # Stores' cash. Switching it on for a store is the admins' decision.
+        | (_prefixed("cash") - {"cash.enable"})
         | {"excel.export", "excel.import_balances"},
     ),
     # Every permission of this role is narrowed to the user's buildings
@@ -213,7 +223,8 @@ ROLES: dict[str, RoleSpec] = {
     Roles.BUILDING_OWNER: RoleSpec(
         "Building owner",
         "Sees the data, stores and statistics of their own buildings, read-only",
-        (VIEW - {"user.view", "role.view", "audit.view"}) | {"excel.export"},
+        # A store's cash is the whole store's, also of its counters in other buildings.
+        (VIEW - {"user.view", "role.view", "audit.view", "cash.view"}) | {"excel.export"},
     ),
     Roles.DEVELOPER: RoleSpec("Developer", "Self-service access to own data"),
     Roles.PLAYGROUND_SELLER: RoleSpec(

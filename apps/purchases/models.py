@@ -26,6 +26,11 @@ class PurchaseKind(models.TextChoices):
     BOOKING = "BOOKING", "Court booking checkout"
 
 
+class Payment(models.TextChoices):
+    WALLET = "WALLET", "Card and PIN (the developer's wallet)"
+    CASH = "CASH", "Cash (no card, developer or wallet)"
+
+
 class Purchase(TimeStampedModel):
     """A sale at a seller's till.
 
@@ -35,6 +40,10 @@ class Purchase(TimeStampedModel):
     changed (the difference is refunded or charged) or deleted (REFUNDED: the total goes
     back to the wallet and the goods back to stock); see services.change_paid_purchase /
     refund_purchase.
+
+    A CASH sale (at a store that accepts cash) has no developer, card or wallet entry: its
+    money is in the store's cash ledger (apps.cash). It is never changed, and deleted only
+    with finance's approval.
     """
 
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="purchases")
@@ -53,6 +62,9 @@ class Purchase(TimeStampedModel):
     )
     # SALE: goods at a till. BOOKING: one court booking (apps.bookings), paid the same way.
     kind = models.CharField(max_length=10, choices=PurchaseKind.choices, default=PurchaseKind.SALE)
+    payment = models.CharField(max_length=6, choices=Payment.choices, default=Payment.WALLET)
+    # Cash sales: who bought, if the seller typed it.
+    buyer_name = models.CharField(max_length=100, blank=True)
     service_position = models.ForeignKey(
         ServicePosition, on_delete=models.PROTECT, related_name="purchases"
     )
@@ -107,6 +119,8 @@ class Purchase(TimeStampedModel):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     refunded_at = models.DateTimeField(null=True, blank=True)
+    # Why a cash sale was deleted.
+    refund_reason = models.CharField(max_length=255, blank=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]
@@ -124,11 +138,30 @@ class Purchase(TimeStampedModel):
                 condition=~Q(status=PurchaseStatus.CONFIRMED)
                 | Q(
                     Q(account_transaction__isnull=False) | Q(total=0),
+                    payment=Payment.WALLET,
                     developer__isnull=False,
                     total__isnull=False,
                     confirmed_at__isnull=False,
+                )
+                | Q(
+                    payment=Payment.CASH,
+                    developer__isnull=True,
+                    total__isnull=False,
+                    total__gt=0,
+                    confirmed_at__isnull=False,
                 ),
                 name="purchase_confirmed_is_complete",
+            ),
+            # Cash buys goods at a till, and never touches a wallet.
+            models.CheckConstraint(
+                condition=Q(payment=Payment.WALLET)
+                | Q(
+                    kind=PurchaseKind.SALE,
+                    developer__isnull=True,
+                    card__isnull=True,
+                    account_transaction__isnull=True,
+                ),
+                name="purchase_cash_has_no_wallet",
             ),
         ]
         indexes = [
@@ -136,6 +169,7 @@ class Purchase(TimeStampedModel):
             models.Index(fields=["reader", "status", "waiting_since"]),
             models.Index(fields=["seller", "status", "created_at"]),
             models.Index(fields=["developer", "confirmed_at"]),
+            models.Index(fields=["payment", "confirmed_at"]),
         ]
 
     def __str__(self):
