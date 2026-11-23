@@ -207,7 +207,6 @@ def test_delete_a_seller_with_goods_stock_and_sales(world, admin):
         "stock_movements": 5,  # 2 initial + 3 sale lines
         "purchases": 2,
         "bookings": 0,
-        "cash_entries": 0,
     }
     assert preview["keeps"] == {"money_transactions": 2, "readers": 1}
     assert delete(admin, "seller", world.cafe.pk).status_code == 200

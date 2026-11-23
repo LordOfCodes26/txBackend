@@ -566,13 +566,10 @@ def confirm_cash_sale(
     """The seller took cash for a draft till sale: no card, PIN, developer or wallet.
     Returns (purchase, newly confirmed); a retry with the same key is safe.
 
-    The normal prices, no preferential units. Stock goes down as in any sale, and the total
-    is added to the cash the store owes (apps.cash). Locks in the checkout's order:
-    purchase → goods by id → the store.
+    The normal prices, no preferential units. Stock goes down as in any sale; the seller
+    keeps the cash. Locks in the checkout's order: purchase → goods by id.
     """
-    from apps.cash import services as cash
     from apps.cash.exceptions import CashNotAccepted
-    from apps.cash.models import CashKind
 
     replay = Purchase.objects.filter(confirm_idempotency_key=idempotency_key).first()
     if replay is not None:
@@ -632,13 +629,6 @@ def confirm_cash_sale(
         purchase.presented_at = None
         purchase.waiting_since = None
         purchase.save()
-        entry = cash.post_entry(
-            seller_id=purchase.seller_id,
-            kind=CashKind.SALE,
-            amount=total,
-            actor=actor,
-            reference=f"purchase:{purchase.pk}",
-        )
         record_audit(
             "purchase.paid_cash",
             actor=actor,
@@ -647,7 +637,6 @@ def confirm_cash_sale(
                 "total": total,
                 "buyer": purchase.buyer_name,
                 "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
-                "store_owes": entry.owed_after,
             },
         )
         notify_purchase(purchase.pk, purchase.service_position_id, "purchase_confirmed")
@@ -697,13 +686,10 @@ def _lock_goods(ids) -> dict[int, Good]:
 @transaction.atomic
 def delete_cash_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
     """Delete a cash sale, for finance only (apps.cash.services.delete_sale): the goods go back
-    to stock and the total off what the store owes; the seller returns the cash by hand.
+    to stock, and the seller returns the cash by hand.
 
-    Locks in the checkout's order: purchase → goods by id → the store.
+    Locks in the checkout's order: purchase → goods by id.
     """
-    from apps.cash import services as cash
-    from apps.cash.models import CashKind
-
     purchase = _lock_paid(purchase)
     items = list(purchase.items.order_by("good_id"))
     locked_goods = _lock_goods([i.good_id for i in items])
@@ -718,14 +704,6 @@ def delete_cash_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
                 actor=actor,
                 reference=reference,
             )
-    entry = cash.post_entry(
-        seller_id=purchase.seller_id,
-        kind=CashKind.RETURN,
-        amount=-purchase.total,
-        actor=actor,
-        note=reason,
-        reference=reference,
-    )
     purchase.status = PurchaseStatus.REFUNDED
     purchase.refunded_by = actor if getattr(actor, "pk", None) else None
     purchase.refunded_at = timezone.now()
@@ -744,7 +722,6 @@ def delete_cash_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
             "refunded": purchase.total,
             "reason": reason,
             "items": [[i.good_id, i.quantity, str(i.unit_price)] for i in items],
-            "store_owes": entry.owed_after,
         },
     )
     notify_purchase(purchase.pk, purchase.service_position_id, "purchase_updated")

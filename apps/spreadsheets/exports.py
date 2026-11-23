@@ -705,109 +705,50 @@ def preferential_workbook(rows: list[dict], first: date, last: date) -> bytes:
 
 
 def cash_workbook(sellers, first: date, last: date) -> bytes:
-    """Cash control as a workbook: the stores, each store's days, every cash entry
+    """What the stores sold by card and in cash, as a workbook: the stores, each store's days
     and the price changes of the period."""
     from apps.cash import reports
-    from apps.cash.models import CashEntry
     from apps.sellers.models import Seller
 
-    start, end = _local_bounds(first, last)
-    during = {"created_at__gte": start, "created_at__lt": end}
-    money = lambda key, title: Column(key, title, width=14, kind="money")  # noqa: E731
+    money = lambda key, title: Column(key, title, width=16, kind="money")  # noqa: E731
+    count = lambda key, title: Column(key, title, width=12, kind="int")  # noqa: E731
     store = Column("store", _("Store"), width=24)
-    when = Column("time", _("Time"), width=17, kind="datetime")
-    note = Column("note", _("Note"), width=30)
-    by = Column("by", _("By"), width=16)
-    figures = ("sales", "returned", "expected", "handed_over")
-    figure_columns = [
-        money("sales", _("Cash sales")),
-        money("returned", _("Cash returned")),
-        money("expected", _("Cash from sales")),
-        money("handed_over", _("Handed over")),
+    keys = ("card_total", "card_count", "cash_total", "cash_count", "total")
+    columns = [
+        money("card", _("Card sales (to pay)")),
+        count("card_count", _("Card sales count")),
+        money("cash", _("Cash sales")),
+        count("cash_count", _("Cash sales count")),
+        money("total", _("Total")),
     ]
     rows = reports.stores(sellers, first, last)
-    names = {r["id"]: r["name"] for r in rows}
-    days = []
-    for seller in Seller.objects.filter(pk__in=names).order_by("name"):
-        for d in reports.daily(seller, first, last):
-            days.append(
-                [date.fromisoformat(d["date"]), seller.name, *(d[k] for k in figures), d["owed"]]
-            )
-    entries = (
-        CashEntry.objects.filter(seller__in=sellers, **during)
-        .select_related("seller", "actor")
-        .order_by("id")
-    )
+    days = [
+        [date.fromisoformat(d["date"]), seller.name, *(d[k] for k in keys)]
+        for seller in Seller.objects.filter(pk__in=[r["id"] for r in rows]).order_by("name")
+        for d in reports.daily(seller, first, last)
+    ]
     changes = reports.price_changes(sellers, first, last)
     return workbook(
         [
             Sheet(
                 _("Stores"),
-                [
-                    store,
-                    money("opening", _("Owed before")),
-                    *figure_columns,
-                    money("closing", _("Owed at the end")),
-                    money("owed", _("Owed now")),
-                    Column("changes", _("Price changes"), width=12, kind="int"),
-                ],
-                [
-                    [
-                        r["name"],
-                        r["opening"],
-                        *(r[k] for k in figures),
-                        r["closing"],
-                        r["owed"],
-                        r["price_changes"],
-                    ]
-                    for r in rows
-                ],
+                [store, *columns, count("changes", _("Price changes"))],
+                [[r["name"], *(r[k] for k in keys), r["price_changes"]] for r in rows],
             ),
             Sheet(
                 _("Daily"),
-                [
-                    Column("date", _("Date"), width=12, kind="date"),
-                    store,
-                    *figure_columns,
-                    money("owed", _("Owed at the end")),
-                ],
+                [Column("date", _("Date"), width=12, kind="date"), store, *columns],
                 days,
-            ),
-            Sheet(
-                _("Cash entries"),
-                [
-                    when,
-                    store,
-                    Column("kind", _("Kind"), width=18),
-                    money("amount", _("Amount")),
-                    money("owed", _("Owed after")),
-                    Column("reference", _("Reference"), width=18),
-                    note,
-                    by,
-                ],
-                [
-                    [
-                        _local(e.created_at),
-                        e.seller.name,
-                        str(CASH_KIND.get(e.kind, e.kind)),
-                        e.amount,
-                        e.owed_after,
-                        e.reference,
-                        e.note,
-                        e.actor.username if e.actor else None,
-                    ]
-                    for e in entries
-                ],
             ),
             Sheet(
                 _("Price changes"),
                 [
-                    when,
+                    Column("time", _("Time"), width=17, kind="datetime"),
                     store,
                     Column("good", _("Good"), width=24),
                     money("old", _("Old price")),
                     money("new", _("New price")),
-                    by,
+                    Column("by", _("By"), width=16),
                 ],
                 [
                     [
@@ -823,10 +764,3 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
             ),
         ]
     )
-
-
-CASH_KIND = {
-    "SALE": _("Cash sale"),
-    "RETURN": _("Cash returned"),
-    "HANDOVER": _("Handed over"),
-}

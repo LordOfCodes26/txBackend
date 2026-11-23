@@ -73,9 +73,8 @@ AREAS: dict[str, dict[str, str]] = {
         "purchase.delete": "Delete a paid purchase (the money goes back to the wallet)",
         "purchase.report.view": "See the sales report: goods sold and money in a range, with Excel",
     },
-    "Stores' cash": {
-        "cash.view": "See the cash each store owes, its handovers and price changes",
-        "cash.handover": "Record cash handed over by a store, and cancel a wrong handover",
+    "Store payments": {
+        "cash.view": "See what each store sold by card and in cash, and its price changes",
         "cash.delete": "Delete cash sales, with a reason",
         "cash.enable": "Switch cash sales on and off for a store",
     },

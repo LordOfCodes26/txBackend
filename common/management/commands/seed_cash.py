@@ -11,11 +11,6 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.accounts.rbac import Roles
 from apps.audit.models import AuditLog
-from apps.cash import services as cash
-from apps.cash.models import (
-    CashEntry,
-    CashKind,
-)
 from apps.finance.services import money
 from apps.goods import services as goods
 from apps.goods.models import Good, GoodKind, InventoryMovement, MovementKind
@@ -24,7 +19,7 @@ from apps.sellers import services as sellers
 from apps.sellers.models import Seller, SellerStatus
 from common.record_delete import _writable
 
-KEY = "seed-cash-"  # purchases and cash entries: their idempotency keys start with it
+KEY = "seed-cash-"  # purchases: their idempotency keys start with it
 DELIVERY = "seed-cash-delivery"  # its stock movements' reference
 MARK = "(demo)"  # new goods: their name ends with it
 LOGGED = "seed-cash"  # its audit entries' request id
@@ -34,10 +29,10 @@ BUYERS = ["", "", "", "Visitor Kim", "Ri (driver)", "Guest, floor 2", "Pak (clea
 
 class Command(BaseCommand):
     help = (
-        "Test data: cash sales of the last days at the demo stores, with handovers to finance, "
-        "deleted sales and price changes. "
+        "Test data: cash sales of the last days at the demo stores, with deleted sales and price "
+        "changes. "
         "Switches cash on for those stores. Stock and prices stay as they are now. Stores that "
-        "already have cash entries are left alone; --undo removes what this seeded. Test "
+        "already have cash sales are left alone; --undo removes what this seeded. Test "
         "servers only (DEBUG or TEST_CONSOLE_ENABLED)."
     )
 
@@ -60,10 +55,10 @@ class Command(BaseCommand):
             else:
                 self._seed(days, store, per_day)
             # Inside the transaction: if the books don't add up, nothing is kept.
-            problems = cash.ledger_mismatches() + list(goods.stock_mismatches())
+            problems = list(goods.stock_mismatches())
             if problems:
                 raise CommandError(f"Reconciliation failed: {problems[:3]}")
-        self.stdout.write(self.style.SUCCESS("Cash ledger and stock reconcile."))
+        self.stdout.write(self.style.SUCCESS("Stock reconciles."))
 
     # -- seeding ---------------------------------------------------------------------------
 
@@ -82,8 +77,8 @@ class Command(BaseCommand):
             raise CommandError("No active store with one of these names.")
         done = 0
         for seller in wanted:
-            if CashEntry.objects.filter(seller=seller).exists():
-                self.stdout.write(f"  {seller.name}: already has cash entries, left alone.")
+            if Purchase.objects.filter(seller=seller, payment=Payment.CASH).exists():
+                self.stdout.write(f"  {seller.name}: already has cash sales, left alone.")
                 continue
             catalog = list(
                 Good.objects.filter(service_position__seller=seller, is_active=True, price__gt=0)
@@ -160,14 +155,11 @@ class Command(BaseCommand):
         self._write(seller, clerk, first, sales, rng)
         self._prices(clerk, catalog, rng, now)
         self.stdout.write(
-            f"  {seller.name}: {len(sales)} cash sales, owes {cash.owed(seller.pk)}"
-            f"{', cash switched on' if switched else ''}."
+            f"  {seller.name}: {len(sales)} cash sales{', cash switched on' if switched else ''}."
         )
 
     def _write(self, seller, clerk, first, sales, rng):
         tag = f"{KEY}{seller.pk}-"
-        self.owed = ZERO
-        self.serial = 0
         # A delivery covering what goes out for good, so today's stock stays as it is.
         need: dict[Good, Decimal] = {}
         for sale in sales:
@@ -185,14 +177,6 @@ class Command(BaseCommand):
         events += [
             (s["moment"] + timedelta(hours=20), "return", s) for s in sales if "deleted" in s
         ]
-        # Finance comes in the evening, not on Sundays and not today.
-        wrong = None
-        day = first
-        while day < timezone.localdate():
-            if day.weekday() != 6:
-                events.append((_at(day, time(20, 30)), "handover", None))
-                wrong = wrong or day
-            day += timedelta(days=1)
         for moment, kind, what in sorted(events, key=lambda e: (e[0], e[1])):
             if kind == "sale":
                 total = ZERO
@@ -226,57 +210,18 @@ class Command(BaseCommand):
                     created_at=moment - timedelta(minutes=2),
                     updated_at=moment,
                 )
-                self._entry(seller, CashKind.SALE, total, moment, clerk, reference=reference)
             elif kind == "return":
                 purchase, total = what["purchase"], what["total"]
                 reference = f"purchase:{purchase.pk}"
                 for good, quantity in what["lines"].items():
                     if good.track_stock:
                         self._move(stock, good, MovementKind.RETURN, quantity, moment, reference)
-                self._entry(
-                    seller,
-                    CashKind.RETURN,
-                    -total,
-                    moment,
-                    self.finance,
-                    note=what["deleted"],
-                    reference=reference,
-                )
                 Purchase.objects.filter(pk=purchase.pk).update(
                     status=PurchaseStatus.REFUNDED,
                     refunded_by=self.finance,
                     refunded_at=moment,
                     refund_reason=what["deleted"],
                     updated_at=moment,
-                )
-            elif kind == "handover" and self.owed > 0:
-                if wrong is not None and moment.date() > wrong + timedelta(days=2):
-                    # Once: typed wrong, cancelled, entered again.
-                    typo = self._entry(
-                        seller, CashKind.HANDOVER, -(self.owed * 10), moment, self.finance
-                    )
-                    moment += timedelta(minutes=3)
-                    self._entry(
-                        seller,
-                        CashKind.HANDOVER,
-                        -typo.amount,
-                        moment,
-                        self.finance,
-                        note="Typed wrong",
-                        reference=f"reverses:{typo.pk}",
-                        reverses=typo,
-                    )
-                    moment += timedelta(minutes=1)
-                    wrong = None
-                short = rng.random() < 0.25  # some cash stays in the drawer
-                amount = money(self.owed * Decimal("0.80")) if short else self.owed
-                self._entry(
-                    seller,
-                    CashKind.HANDOVER,
-                    -amount,
-                    moment,
-                    self.finance,
-                    note="Change left in the drawer" if short else "",
                 )
 
     def _move(self, stock, good, kind, delta, moment, reference, reason=""):
@@ -290,22 +235,6 @@ class Command(BaseCommand):
             quantity_after=stock[good.pk],
             reason=reason,
             reference=reference,
-            created_at=moment,
-        )
-
-    def _entry(self, seller, kind, amount, moment, actor, note="", reference="", reverses=None):
-        self.owed += amount
-        self.serial += 1
-        return CashEntry.objects.create(
-            seller=seller,
-            kind=kind,
-            amount=amount,
-            owed_after=self.owed,
-            note=note,
-            reference=reference,
-            idempotency_key=f"{KEY}{seller.pk}-{self.serial}",
-            reverses=reverses,
-            actor=actor,
             created_at=moment,
         )
 
@@ -356,21 +285,10 @@ class Command(BaseCommand):
     def _undo(self):
         bought = Purchase.objects.filter(confirm_idempotency_key__startswith=KEY)
         purchases = list(bought.values_list("pk", flat=True))
-        seeded = CashEntry.objects.filter(idempotency_key__startswith=KEY)
-        stores = set(seeded.values_list("seller", flat=True)) | set(
-            bought.values_list("seller", flat=True)
-        )
+        stores = set(bought.values_list("seller", flat=True))
         if not stores:
             raise CommandError("Nothing seeded to undo.")
         references = [f"purchase:{pk}" for pk in purchases]
-        # Also what people did with the seeded rows since (a sale deleted, a seeded
-        # handover cancelled): it goes with them.
-        base = set(
-            CashEntry.objects.filter(
-                Q(idempotency_key__startswith=KEY) | Q(reference__in=references)
-            ).values_list("pk", flat=True)
-        )
-        entries = CashEntry.objects.filter(Q(pk__in=base) | Q(reverses__in=base))
         moves = InventoryMovement.objects.filter(
             Q(reference__in=references) | Q(reference=DELIVERY)
         )
@@ -385,21 +303,12 @@ class Command(BaseCommand):
             if good.quantity - total < 0:
                 raise CommandError(f"{good.name}: not enough stock left to undo.")
             Good.all_objects.filter(pk=good_id).update(quantity=good.quantity - total)
-        with _writable(CashEntry, InventoryMovement, AuditLog):
+        with _writable(InventoryMovement, AuditLog):
             logged = AuditLog.objects.filter(request_id=LOGGED)
             added = list(logged.filter(action="good.created").values_list("entity_id", flat=True))
             logged.delete()
             moves.delete()
-            gone = list(entries.values_list("pk", flat=True))
-            CashEntry.objects.filter(pk__in=gone, reverses__isnull=False).delete()
-            CashEntry.objects.filter(pk__in=gone).delete()
             Purchase.objects.filter(pk__in=purchases).delete()
-            # Real entries made meanwhile stay, with what was owed after each worked out anew.
-            for seller_id in stores:
-                owed = ZERO
-                for entry in CashEntry.objects.filter(seller=seller_id).order_by("id"):
-                    owed += entry.amount
-                    CashEntry.objects.filter(pk=entry.pk).update(owed_after=owed)
         kept = 0
         for good in Good.all_objects.filter(pk__in=[int(pk) for pk in added]):
             if good.purchase_items.exists() or good.movements.exists():
@@ -418,11 +327,11 @@ class Command(BaseCommand):
                 .first()
             )
             mine = last is not None and not last.actor_username
-            if mine and not CashEntry.objects.filter(seller=seller).exists():
+            if mine and not seller.purchases.filter(payment=Payment.CASH).exists():
                 sellers.update_seller(actor=None, seller=seller, accepts_cash=False)
                 self.stdout.write(f"  {seller.name}: cash switched off again.")
         self.stdout.write(
-            f"Removed {len(purchases)} cash sales and {len(gone)} cash entries."
+            f"Removed {len(purchases)} cash sales."
             + (f" Kept {kept} new good(s) sold since." if kept else "")
         )
 

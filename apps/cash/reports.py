@@ -1,121 +1,87 @@
-"""The Cash control figures, by company-local day: the money from the stores' cash ledger,
-the price changes from the audit log (which records every one, whoever made it)."""
+"""What each store sold, by company-local day: by card (finance pays it to the store) and in
+cash (the seller has it already). Paid sales count on the day they were paid, deleted ones not
+at all, as in the statistics. Price changes come from the audit log."""
 
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncDate
 
 from apps.audit.models import AuditLog
 from apps.goods.models import Good, GoodKind
-from apps.sellers.models import Seller
-from apps.stats.services import _days, _local_bounds
+from apps.purchases.models import Payment, Purchase, PurchaseStatus
+from apps.sellers.models import Seller, SellerStatus
+from apps.stats.services import _local_bounds
 
-from .models import CashEntry, CashKind
 from .services import works_for
 
 ZERO = Decimal("0.00")
-KINDS = {
-    "sales": CashKind.SALE,
-    "returned": CashKind.RETURN,
-    "handed_over": CashKind.HANDOVER,
+
+
+def _paid(sellers, first: date, last: date):
+    start, end = _local_bounds(first, last)
+    return Purchase.objects.filter(
+        seller__in=sellers,
+        status=PurchaseStatus.CONFIRMED,
+        confirmed_at__gte=start,
+        confirmed_at__lt=end,
+    ).order_by()
+
+
+SUMS = {
+    "card_total": Sum("total", filter=Q(payment=Payment.WALLET), default=ZERO),
+    "card_count": Count("pk", filter=Q(payment=Payment.WALLET)),
+    "cash_total": Sum("total", filter=Q(payment=Payment.CASH), default=ZERO),
+    "cash_count": Count("pk", filter=Q(payment=Payment.CASH)),
 }
 
 
-def _sums() -> dict:
-    return {name: Sum("amount", filter=Q(kind=kind)) for name, kind in KINDS.items()}
-
-
-def _figures(row: dict) -> dict:
-    """What came in and went out, as positive amounts. `expected` is the cash from sales:
-    sales less returns. Handovers cancelled later net out."""
-    sales = row.get("sales") or ZERO
-    returned = -(row.get("returned") or ZERO)
-    return {
-        "sales": sales,
-        "returned": returned,
-        "expected": sales - returned,
-        "handed_over": -(row.get("handed_over") or ZERO),
-    }
-
-
-def _by_seller(qs, **annotations) -> dict[int, dict]:
-    return {r["seller"]: r for r in qs.order_by().values("seller").annotate(**annotations)}
-
-
 def stores(sellers, first: date, last: date) -> list[dict]:
-    """Per store that takes cash, or ever did: the period's figures, what it owed before and
-    after it, what it owes now and its price changes. The most owed first."""
-    start, end = _local_bounds(first, last)
-    entries = CashEntry.objects.filter(seller__in=sellers)
-    before = _by_seller(entries.filter(created_at__lt=start), total=Sum("amount"))
-    during = _by_seller(
-        entries.filter(created_at__gte=start, created_at__lt=end),
-        **_sums(),
-        sales_count=Count("pk", filter=Q(kind=CashKind.SALE)),
-        returned_count=Count("pk", filter=Q(kind=CashKind.RETURN)),
-    )
-    now = _by_seller(
-        entries,
-        total=Sum("amount"),
-        last_handover_at=Max(
-            "created_at",
-            filter=Q(kind=CashKind.HANDOVER, reverses__isnull=True, reversal__isnull=True),
-        ),
-    )
+    """Per open store, and any other with sales in the period: its card sales (till sales and
+    court bookings: what to pay it), its cash sales and its price changes. The most to pay
+    first."""
+    sold = {r["seller"]: r for r in _paid(sellers, first, last).values("seller").annotate(**SUMS)}
     changes: dict[int, int] = {}
     for change in price_changes(sellers, first, last):
         changes[change["seller"]] = changes.get(change["seller"], 0) + 1
     rows = []
-    shown = Q(accepts_cash=True) | Q(pk__in=list(now))
-    for seller in Seller.objects.filter(pk__in=sellers.values("pk")).filter(shown):
-        period = during.get(seller.pk, {})
-        figures = _figures(period)
-        opening = before.get(seller.pk, {}).get("total") or ZERO
-        closing = opening + figures["expected"] - figures["handed_over"]
+    for seller in Seller.objects.filter(pk__in=sellers.values("pk")).filter(
+        Q(status=SellerStatus.ACTIVE) | Q(pk__in=list(sold))
+    ):
+        figures = {k: sold.get(seller.pk, {}).get(k) or 0 for k in SUMS}
         rows.append(
             {
                 "id": seller.pk,
                 "name": seller.name,
                 "accepts_cash": seller.accepts_cash,
-                "opening": opening,
                 **figures,
-                "sales_count": period.get("sales_count", 0),
-                "returned_count": period.get("returned_count", 0),
-                "closing": closing,
-                "owed": now.get(seller.pk, {}).get("total") or ZERO,
-                "last_handover_at": now.get(seller.pk, {}).get("last_handover_at"),
+                "total": figures["card_total"] + figures["cash_total"],
                 "price_changes": changes.get(seller.pk, 0),
             }
         )
-    rows.sort(key=lambda r: (-r["owed"], r["name"].lower()))
+    rows.sort(key=lambda r: (-r["card_total"], -r["cash_total"], r["name"].lower()))
     return rows
 
 
 def daily(seller: Seller, first: date, last: date) -> list[dict]:
-    """One row per day (newest first): the cash from sales, what was handed over and what
-    the store owed at the end of the day. Days without any change are left out."""
-    start, end = _local_bounds(first, last)
-    entries = CashEntry.objects.filter(seller=seller)
-    running = entries.filter(created_at__lt=start).aggregate(t=Sum("amount"))["t"] or ZERO
-    rows = {
-        r["day"]: r
-        for r in entries.filter(created_at__gte=start, created_at__lt=end)
-        .annotate(day=TruncDate("created_at", tzinfo=start.tzinfo))
-        .order_by()
+    """The store's days with sales, newest first."""
+    tz = _local_bounds(first, last)[0].tzinfo
+    rows = (
+        _paid([seller], first, last)
+        .annotate(day=TruncDate("confirmed_at", tzinfo=tz))
         .values("day")
-        .annotate(**_sums())
-    }
-    out = []
-    for day in _days(first, last):
-        if day not in rows:
-            continue
-        figures = _figures(rows[day])
-        running += figures["expected"] - figures["handed_over"]
-        out.append({"date": day.isoformat(), **figures, "owed": running})
-    out.reverse()
-    return out
+        .annotate(**SUMS)
+        .order_by("-day")
+    )
+    return [
+        {
+            "date": r["day"].isoformat(),
+            **{k: r[k] for k in SUMS},
+            "total": r["card_total"] + r["cash_total"],
+        }
+        for r in rows
+    ]
 
 
 def price_changes(sellers, first: date, last: date) -> list[dict]:

@@ -1,9 +1,9 @@
-"""Cash sales at stores that accept cash, and finance's controls over them."""
+"""Cash sales at stores that accept cash. The seller keeps the cash; finance pays the store its
+card sales."""
 
 import io
 import threading
 import uuid
-from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,10 +13,9 @@ from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role, UserRole
-from apps.accounts.rbac import ROLES, Roles
+from apps.accounts.rbac import ALL, ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.cash import services as cash
-from apps.cash.models import CashEntry
 from apps.finance import services as finance
 from apps.finance.models import AccountTransaction
 from apps.goods import services as goods
@@ -37,7 +36,6 @@ PURCHASES = test_purchases.PURCHASES
 
 GOODS = "/api/v1/goods/"
 STORES = "/api/v1/cash/stores/"
-ENTRIES = "/api/v1/cash/entries/"
 IMPORT_GOODS = "/api/v1/imports/goods/"
 
 
@@ -80,14 +78,6 @@ def sell(client, shop, *items, buyer=""):
     return pid
 
 
-def handover(client, shop, amount, note="", idem=None):
-    return client.post(
-        f"{ENTRIES}handover/",
-        {"seller": shop.seller.pk, "amount": amount, "note": note},
-        HTTP_IDEMPOTENCY_KEY=idem or key(),
-    )
-
-
 def delete_sale(client, pid, reason="Wrong goods"):
     return client.post(f"{PURCHASES}{pid}/delete-cash/", {"reason": reason})
 
@@ -99,7 +89,6 @@ def code(response):
 def assert_books():
     assert finance.ledger_mismatches() == []
     assert goods.stock_mismatches() == []
-    assert cash.ledger_mismatches() == []
 
 
 # --- Selling for cash ---------------------------------------------------------------------
@@ -115,9 +104,6 @@ def test_cash_sale(till, shop):
     assert stock(shop.tea) == 8
     assert test_purchases.balance(shop) == Decimal("50.00")  # no wallet is touched
     assert not AccountTransaction.objects.filter(reference=f"purchase:{pid}").exists()
-    entry = CashEntry.objects.get()
-    assert (entry.kind, entry.amount, entry.owed_after) == ("SALE", Decimal("8.00"), Decimal("8"))
-    assert entry.actor == shop.seller_user and cash.owed(shop.seller.pk) == Decimal("8.00")
     assert AuditLog.objects.filter(action="purchase.paid_cash").count() == 1
     assert_books()
 
@@ -126,7 +112,7 @@ def test_cash_sale(till, shop):
 def test_a_store_without_cash_sells_by_card_only(till, world):
     pid = new_purchase(till, world, (world.tea, 1))
     assert code(pay_cash(till, pid)) == (409, "CASH_NOT_ACCEPTED")
-    assert stock(world.tea) == 10 and not CashEntry.objects.exists()
+    assert stock(world.tea) == 10
     assert test_purchases.confirm(till, pid).status_code == 201
 
 
@@ -137,7 +123,7 @@ def test_a_retry_or_second_click_sells_once(till, shop):
     assert pay_cash(till, pid, idem=idem).status_code == 201
     assert pay_cash(till, pid, idem=idem).status_code == 200
     assert code(pay_cash(till, pid)) == (409, "PURCHASE_NOT_DRAFT")
-    assert CashEntry.objects.count() == 1 and stock(shop.tea) == 9
+    assert stock(shop.tea) == 9
     other = new_purchase(till, shop, (shop.tea, 1))
     assert code(pay_cash(till, other, idem=idem))[1] == "IDEMPOTENCY_KEY_REUSED"
     assert till.post(f"{PURCHASES}{other}/confirm-cash/").status_code == 400  # no key
@@ -165,7 +151,6 @@ def test_nothing_is_sold_without_stock_or_goods(till, shop):
     )
     pid = new_purchase(till, shop, (free, 1))
     assert code(pay_cash(till, pid))[1] == "PURCHASE_EMPTY"
-    assert not CashEntry.objects.exists()
 
 
 @pytest.mark.django_db
@@ -233,89 +218,6 @@ def test_a_cash_sale_takes_no_card_afterwards(till, shop):
         assert code(till.post(f"{PURCHASES}{pid}/{path}/")) == (409, "PURCHASE_NOT_DRAFT")
 
 
-# --- The ledger and handovers -------------------------------------------------------------
-
-
-@pytest.mark.django_db
-def test_the_ledger_is_append_only(till, shop):
-    sell(till, shop, (shop.tea, 1))
-    entry = CashEntry.objects.get()
-    with pytest.raises(TypeError):
-        entry.save()
-    for sql in ("UPDATE cash_cashentry SET amount = 1", "DELETE FROM cash_cashentry"):
-        with pytest.raises(IntegrityError), transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute(sql)
-
-
-@pytest.mark.django_db
-def test_finance_records_a_handover(till, shop, finance_client):
-    sell(till, shop, (shop.tea, 4))
-    idem = key()
-    response = handover(finance_client, shop, "6.00", idem=idem)
-    assert response.status_code == 201, response.json()
-    body = response.json()
-    assert (body["kind"], body["amount"], body["owed_after"]) == ("HANDOVER", "-6.00", "4.00")
-    assert body["actor_username"] == "fin"
-    assert handover(finance_client, shop, "6.00", idem=idem).status_code == 200
-    assert code(handover(finance_client, shop, "5.00", idem=idem))[1] == "IDEMPOTENCY_KEY_REUSED"
-    assert cash.owed(shop.seller.pk) == Decimal("4.00")
-    assert AuditLog.objects.filter(action="cash.handed_over").count() == 1
-    assert_books()
-
-
-@pytest.mark.django_db
-def test_more_than_owed_needs_a_note(till, shop, finance_client):
-    sell(till, shop, (shop.tea, 1))
-    assert handover(finance_client, shop, "9.00").status_code == 400
-    assert handover(finance_client, shop, "0").status_code == 400
-    assert handover(finance_client, shop, "-1").status_code == 400
-    assert handover(finance_client, shop, "9.00", note="Found in drawer").status_code == 201
-    assert cash.owed(shop.seller.pk) == Decimal("-6.50")
-
-
-@pytest.mark.django_db
-def test_only_finance_records_handovers(till, shop, make_user):
-    sell(till, shop, (shop.tea, 1))
-    for role in (Roles.BOSS, Roles.MANAGER, Roles.BUILDING_OWNER, Roles.BUILDING_MANAGER):
-        assert handover(client_of(make_user(role)), shop, "1").status_code == 403
-    assert handover(till, shop, "1").status_code == 403
-    # Not even finance, for a store they work for.
-    UserRole.objects.create(
-        user=shop.seller_user, role=Role.objects.get(code=Roles.FINANCE_MANAGER)
-    )
-    fresh = type(shop.seller_user).objects.get(pk=shop.seller_user.pk)
-    assert code(handover(client_of(fresh), shop, "1")) == (403, "OWN_STORE")
-    assert cash.owed(shop.seller.pk) == Decimal("2.50")
-
-
-@pytest.mark.django_db
-def test_a_wrong_handover_is_cancelled_once(till, shop, finance_client):
-    sell(till, shop, (shop.tea, 4))
-    wrong = handover(finance_client, shop, "8.00").json()["id"]
-    url = f"{ENTRIES}{wrong}/reverse/"
-
-    def reverse(client, pk=wrong, idem=None):
-        return client.post(
-            f"{ENTRIES}{pk}/reverse/",
-            {"reason": "Typed wrong"},
-            HTTP_IDEMPOTENCY_KEY=idem or key(),
-        )
-
-    assert finance_client.post(url, {}, HTTP_IDEMPOTENCY_KEY=key()).status_code == 400
-    assert reverse(till).status_code == 403
-    idem = key()
-    back = reverse(finance_client, idem=idem)
-    assert back.status_code == 201 and back.json()["owed_after"] == "10.00"
-    assert reverse(finance_client, idem=idem).status_code == 200
-    assert code(reverse(finance_client)) == (409, "NOT_REVERSIBLE")
-    assert code(reverse(finance_client, back.json()["id"])) == (409, "NOT_REVERSIBLE")
-    sale = CashEntry.objects.get(kind="SALE")
-    assert code(reverse(finance_client, sale.pk)) == (409, "NOT_REVERSIBLE")
-    row = next(r for r in finance_client.get(STORES).json()["stores"])
-    assert (row["handed_over"], row["owed"], row["last_handover_at"]) == ("0.00", "10.00", None)
-    assert_books()
-
-
 # --- Deleting a cash sale -----------------------------------------------------------------
 
 
@@ -327,7 +229,7 @@ def test_a_cash_sale_is_neither_changed_nor_deleted_as_a_wallet_sale(till, shop,
         change = {"items": [{"good": shop.tea.pk, "quantity": 1}]}
         response = client.patch(f"{PURCHASES}{pid}/", change, format="json")
         assert code(response) == (409, "CASH_SALE_FIXED")
-    assert stock(shop.tea) == 8 and cash.owed(shop.seller.pk) == Decimal("5.00")
+    assert stock(shop.tea) == 8
 
 
 @pytest.mark.django_db
@@ -339,7 +241,7 @@ def test_finance_deletes_a_cash_sale(till, shop, finance_client):
     assert (body["status"], body["refund_reason"]) == ("REFUNDED", "Wrong goods")
     purchase = Purchase.objects.get(pk=pid)
     assert purchase.refunded_by.username == "fin"
-    assert stock(shop.tea) == 10 and cash.owed(shop.seller.pk) == 0
+    assert stock(shop.tea) == 10
     assert code(delete_sale(finance_client, pid)) == (409, "PURCHASE_NOT_PAID")
     assert AuditLog.objects.filter(action="purchase.refunded").count() == 1
     assert_books()
@@ -484,34 +386,27 @@ def test_courts_are_not_listed(shop, finance_client):
 
 
 @pytest.mark.django_db
-def test_returned_cash_counts_on_the_day_it_is_returned(till, shop, finance_client):
-    """Yesterday's sale deleted today: yesterday's cash stays as it was, today's drops."""
-    pid = sell(till, shop, (shop.tea, 2))
-    yesterday = timezone.now() - timedelta(days=1)
-    with connection.cursor() as cursor:  # move the sale to yesterday
-        cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
-        cursor.execute("ALTER TABLE cash_cashentry DISABLE TRIGGER cash_cashentry_append_only")
-        cursor.execute("UPDATE cash_cashentry SET created_at = %s", [yesterday])
-        cursor.execute("ALTER TABLE cash_cashentry ENABLE TRIGGER cash_cashentry_append_only")
-    sell(till, shop, (shop.tea, 3))
-    delete_sale(finance_client, pid)
-    handover(finance_client, shop, "1.00")
+def test_card_sales_are_paid_to_the_store_and_cash_is_kept(till, shop, finance_client):
+    sell(till, shop, (shop.tea, 2))  # 5.00 in cash
+    gone = sell(till, shop, (shop.tea, 1))
+    delete_sale(finance_client, gone)
+    for good, n in ((shop.cake, 1), (shop.coffee, 2)):  # 4.00 and 6.00 by card
+        assert test_purchases.confirm(till, new_purchase(till, shop, (good, n))).status_code == 201
+    new_purchase(till, shop, (shop.tea, 1))  # not paid yet
+    row = finance_client.get(STORES).json()["stores"][0]
+    assert (row["card_total"], row["card_count"]) == ("10.00", 2)
+    assert (row["cash_total"], row["cash_count"], row["total"]) == ("5.00", 1, "15.00")
     body = finance_client.get(f"{STORES}{shop.seller.pk}/").json()
-    assert [
-        (d["sales"], d["returned"], d["expected"], d["handed_over"], d["owed"])
-        for d in body["daily"]
-    ] == [
-        ("7.50", "5.00", "2.50", "1.00", "6.50"),
-        ("5.00", "0.00", "5.00", "0.00", "5.00"),
+    assert [(d["card_total"], d["cash_total"], d["total"]) for d in body["daily"]] == [
+        ("10.00", "5.00", "15.00")
     ]
-    today = timezone.localdate().isoformat()
-    row = finance_client.get(STORES, {"date_from": today, "date_to": today}).json()["stores"][0]
-    assert (row["opening"], row["expected"], row["closing"], row["owed"]) == (
-        "5.00",
-        "2.50",
-        "6.50",
-        "6.50",
-    )
+    # Refunded card sales are not paid.
+    card = Purchase.objects.filter(payment="WALLET", status="CONFIRMED", total="6.00").get()
+    assert till.delete(f"{PURCHASES}{card.pk}/").status_code == 200
+    assert finance_client.get(STORES).json()["stores"][0]["card_total"] == "4.00"
+    past = {"date_from": "2020-01-01", "date_to": "2020-01-02"}
+    row = finance_client.get(STORES, past).json()["stores"][0]
+    assert (row["card_total"], row["total"]) == ("0.00", "0.00")
 
 
 @pytest.mark.django_db
@@ -523,7 +418,6 @@ def test_stores_see_their_own_cash_only(till, shop, make_user, finance_client):
     theirs = client_of(other)
     assert [s["name"] for s in theirs.get(STORES).json()["stores"]] == ["Other"]
     assert theirs.get(f"{STORES}{shop.seller.pk}/").status_code == 404
-    assert theirs.get(ENTRIES).json()["count"] == 0
     names = {s["name"] for s in finance_client.get(STORES).json()["stores"]}
     assert names == {"Cafe", "Other"}
     boss = client_of(make_user(Roles.BOSS))
@@ -534,12 +428,14 @@ def test_stores_see_their_own_cash_only(till, shop, make_user, finance_client):
 
 
 @pytest.mark.django_db
-def test_a_store_that_stopped_taking_cash_still_owes(till, shop, finance_client):
-    sell(till, shop, (shop.tea, 1))
-    Seller.objects.filter(pk=shop.seller.pk).update(accepts_cash=False)
-    row = finance_client.get(STORES).json()["stores"][0]
-    assert (row["accepts_cash"], row["owed"]) == (False, "2.50")
-    assert handover(finance_client, shop, "2.50").status_code == 201
+def test_every_open_store_is_listed_and_closed_ones_with_sales(till, shop, finance_client):
+    Seller.objects.create(name="Open")
+    closed = Seller.objects.create(name="Closed", status="CLOSED")
+    test_purchases.confirm(till, new_purchase(till, shop, (shop.tea, 1)))
+    Seller.objects.filter(pk=shop.seller.pk).update(status="CLOSED", accepts_cash=False)
+    names = [s["name"] for s in finance_client.get(STORES).json()["stores"]]
+    assert names == ["Cafe", "Open"]
+    assert finance_client.get(f"{STORES}{closed.pk}/").status_code == 404
 
 
 @pytest.mark.django_db
@@ -565,7 +461,7 @@ def test_only_admins_switch_cash_on(shop, admin_client, make_user):
 
 def test_roles():
     fin = ROLES[Roles.FINANCE_MANAGER].permissions
-    assert {"cash.view", "cash.handover", "cash.delete"} <= fin
+    assert {"cash.view", "cash.delete"} <= fin and "cash.handover" not in ALL
     assert "cash.enable" not in fin and "purchase.cash" not in fin
     assert "cash.view" in ROLES[Roles.BOSS].permissions
     assert "cash.view" not in ROLES[Roles.BUILDING_OWNER].permissions
@@ -607,7 +503,7 @@ def test_figures_split_cash_and_wallet(till, shop, make_user, finance_client, ad
     assert one["sellers"][0]["sales_total"] == "5.00"
 
     book = load_workbook(io.BytesIO(finance_client.get(f"{STORES}export/").content))
-    assert len(book.worksheets) == 4
+    assert len(book.worksheets) == 3
     assert book.worksheets[0]["A2"].value == "Cafe"
     book = load_workbook(io.BytesIO(admin_client.get(f"{PURCHASES}export/").content))
     rows = list(book.worksheets[0].values)
@@ -627,42 +523,6 @@ def test_cash_does_not_earn_or_use_preferential_service(till, shop):
     item = Purchase.objects.get(payment=Payment.CASH).items.get()
     assert item.free_quantity == 0
     assert preferential.usage_last_month(shop.developer.pk) == 0
-
-
-# --- Deleting for good --------------------------------------------------------------------
-
-
-@pytest.mark.django_db
-def test_deleting_a_good_for_good_keeps_what_is_owed(till, shop, finance_client):
-    from common import record_delete
-
-    pid = sell(till, shop, (shop.tea, 2))
-    with transaction.atomic():
-        record_delete.plan_good(shop.tea).run()
-    assert not Purchase.objects.filter(pk=pid).exists()
-    assert cash.owed(shop.seller.pk) == Decimal("5.00")
-
-
-@pytest.mark.django_db
-def test_deleting_a_store_or_user_for_good(till, shop, finance_client, make_user):
-    from common import record_delete
-
-    sell(till, shop, (shop.tea, 2))
-    made = handover(finance_client, shop, "5.00").json()
-    finance_client.post(
-        f"{ENTRIES}{made['id']}/reverse/", {"reason": "x"}, HTTP_IDEMPOTENCY_KEY=key()
-    )
-    fin = CashEntry.objects.filter(kind="HANDOVER").first().actor
-    root = make_user(Roles.ADMIN, username="root2")
-    with transaction.atomic():
-        record_delete.plan_user(fin, root).run()
-    assert CashEntry.objects.filter(actor__isnull=True).count() == 2
-    assert_books()
-    with transaction.atomic():
-        plan = record_delete.plan_seller(shop.seller)
-        assert plan.deletes["cash_entries"] == 3
-        plan.run()
-    assert not Seller.objects.exists() and not CashEntry.objects.exists()
 
 
 # --- At the same moment -------------------------------------------------------------------
@@ -689,30 +549,22 @@ def _together(*jobs):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_concurrent_sales_and_handovers_add_up(shop, make_user):
-    from apps.accounts.rbac import sync_rbac
-
-    sync_rbac()
-    fin = make_user(username="conc")
+def test_concurrent_sales_of_the_last_goods(shop):
     drafts = []
-    for _n in range(6):
+    for _n in range(3):
         p = services.create_purchase(actor=shop.seller_user, service_position=shop.position)
-        services.add_item(purchase=p, good=shop.tea, quantity=1)
+        services.add_item(purchase=p, good=shop.cake, quantity=1)
         drafts.append(p)
-    jobs = [
-        lambda p=p: services.confirm_cash_sale(
-            actor=shop.seller_user, purchase=p, idempotency_key=str(uuid.uuid4())
-        )
-        for p in drafts
-    ] + [
-        lambda: cash.hand_over(
-            actor=fin, seller=shop.seller, amount="1", note="n", idempotency_key=str(uuid.uuid4())
-        )
-        for _n in range(3)
-    ]
-    results = _together(*jobs)
-    assert not [r for r in results if isinstance(r, Exception)], results
-    assert cash.owed(shop.seller.pk) == Decimal("12.00") and stock(shop.tea) == 4
+    results = _together(
+        *[
+            lambda p=p: services.confirm_cash_sale(
+                actor=shop.seller_user, purchase=p, idempotency_key=str(uuid.uuid4())
+            )
+            for p in drafts
+        ]
+    )
+    assert len([r for r in results if isinstance(r, Exception)]) == 1
+    assert stock(shop.cake) == 0
     assert_books()
 
 
@@ -727,5 +579,5 @@ def test_two_deletes_at_once_delete_once(shop, make_user):
         lambda: cash.delete_sale(actor=two, purchase=p, reason="x"),
     )
     assert len([r for r in results if isinstance(r, Exception)]) == 1
-    assert stock(shop.tea) == 10 and cash.owed(shop.seller.pk) == 0
+    assert stock(shop.tea) == 10
     assert_books()

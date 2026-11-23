@@ -355,7 +355,6 @@ Business-rule codes so far: `LAST_ADMIN`, `ROLE_ALREADY_ASSIGNED`, `ROLE_NOT_ASS
 `INVALID_ACCOUNT_TRANSITION`, `PURCHASE_NOT_DRAFT`, `PURCHASE_EMPTY`, `GOOD_NOT_AVAILABLE`,
 `SELLER_NOT_ACTIVE`, `CARD_NOT_USABLE`, `DEVELOPER_NOT_ACTIVE`, `SELF_PURCHASE_FORBIDDEN`,
 `CASH_NOT_ACCEPTED`, `CASH_SALE_FIXED`, `CASH_DELETED_BY_FINANCE`, `OWN_STORE`, `OWN_SALE`,
-`NOT_REVERSIBLE`,
 `PIN_NOT_SET`, `CARD_NOT_PRESENTED`, `MANUAL_CARD_ENTRY_DISABLED`, `INVALID_PIN` (`details: {attempts_remaining}`), `PIN_LOCKED` (HTTP 423,
 `details: {locked_until}`),
 `RENTAL_NOT_AVAILABLE`, `INVALID_SLOT` (with `details` explaining the rule), `SLOT_UNAVAILABLE`,
@@ -716,28 +715,22 @@ together, or nothing changes. On any error the purchase stays a DRAFT and can be
 - Sellers can't charge their own card (`SELF_PURCHASE_FORBIDDEN`).
 - `SELLER_NOT_ACTIVE`: the seller or service position was suspended or deactivated.
 
-### Cash sales and the stores' cash
+### Cash sales and store payments
 
 Stores with `accepts_cash` (off by default; only `cash.enable`, admins, switches it) sell goods
-to people without a card. Courts are never paid in cash.
+to people without a card. Courts are never paid in cash. The seller keeps the cash; finance pays
+the store its card sales.
 
 - `POST /purchases/{id}/confirm-cash/` `{buyer_name?}` + `Idempotency-Key`: pays a till draft.
   `payment` is `CASH`; no developer, card or wallet entry. It is never changed
   (`CASH_SALE_FIXED`) nor deleted directly (`CASH_DELETED_BY_FINANCE`). A store's own login
   sells at its own store; staff need `purchase.cash`.
+- `POST /purchases/{id}/delete-cash/` `{reason}` (`cash.delete`): finance deletes a cash sale. Not
+  at a store one works for (`OWN_STORE`), nor a sale one took the cash for (`OWN_SALE`).
 - `GET /cash/stores/?date_from&date_to`, `/cash/stores/{id}/` (with `daily`), `/cash/stores/export/`:
-  per store `sales` (ones deleted later too), `returned` (on the day it was returned),
-  `expected` = sales - returned, `handed_over`, `opening`, `closing`, `owed` (now).
-- `GET /cash/entries/`: the append-only ledger. `POST /cash/entries/handover/`
-  `{seller, amount, note}` (`cash.handover`; more than owed needs a note) and
-  `POST /cash/entries/{id}/reverse/` `{reason}`, both with `Idempotency-Key`.
-- `POST /purchases/{id}/delete-cash/` `{reason}` (`cash.delete`): finance deletes a cash sale.
+  per store `card_total` (till sales and bookings: what to pay it), `cash_total` and `total`.
 - `GET /cash/stores/{id}/price-changes/?date_from&date_to`: prices changed and goods added
   (`old_price` null), by whom (`by`, `by_store`), from the audit log.
-
-The store's people set prices, add goods and manage stock as at any store. Nobody uses the `cash.*`
-controls on a store they work for (`OWN_STORE`), or deletes a sale they took the cash for
-(`OWN_SALE`).
 
 ### Simulating card taps while developing (staging only)
 

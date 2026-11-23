@@ -13,8 +13,6 @@ with each record:
   bookings there (for a good: the purchases that include it). The developers' money
   transactions for those purchases stay, so balances don't change. Till readers of a
   deleted seller stay, unassigned.
-  A cash sale's entry in the store's cash ledger stays too, so what the store owes doesn't
-  change; a deleted seller's cash ledger goes with it.
 - user: the login and its roles. What they did stays (audit log, transactions, ...) under
   their username; their developer or seller profile stays, unlinked. Not yourself, not the
   last active admin.
@@ -38,7 +36,6 @@ from apps.attendance.services import recompute_day
 from apps.audit.models import AuditLog
 from apps.audit.services import record_audit
 from apps.bookings.models import Booking
-from apps.cash.models import CashEntry
 from apps.developers.models import Developer
 from apps.finance.models import AccountTransaction, DeveloperAccount
 from apps.goods.models import Good, GoodImage, InventoryMovement
@@ -241,13 +238,9 @@ def plan_seller(seller: Seller) -> Plan:
 
     def rest():
         readers.update(seller=None)
-        with _writable(CashEntry):
-            # Reversals point at the entries they cancel: they go first.
-            CashEntry.objects.filter(seller=seller, reverses__isnull=False).delete()
-            CashEntry.objects.filter(seller=seller).delete()
         Seller.objects.filter(pk=seller.pk).delete()
 
-    plan = _store_plan(
+    return _store_plan(
         seller.name,
         positions,
         goods,
@@ -258,8 +251,6 @@ def plan_seller(seller: Seller) -> Plan:
             "readers": readers.count(),
         },
     )
-    plan.deletes["cash_entries"] = CashEntry.objects.filter(seller=seller).count()
-    return plan
 
 
 def plan_position(position: ServicePosition) -> Plan:
@@ -295,7 +286,6 @@ def plan_user(user: User, actor) -> Plan:
         AuditLog.objects.filter(actor=user).count()
         + AccountTransaction.objects.filter(actor=user).count()
         + InventoryMovement.objects.filter(actor=user).count()
-        + CashEntry.objects.filter(actor=user).count()
     )
 
     def run():
@@ -308,12 +298,11 @@ def plan_user(user: User, actor) -> Plan:
         RFIDCardAssignment.objects.filter(unassigned_by=user).update(unassigned_by=None)
         AttendanceRecord.objects.filter(created_by=user).update(created_by=None)
         AttendanceRecord.objects.filter(voided_by=user).update(voided_by=None)
-        with _writable(AuditLog, AccountTransaction, InventoryMovement, CashEntry):
+        with _writable(AuditLog, AccountTransaction, InventoryMovement):
             # The audit log keeps the name in actor_username.
             AuditLog.objects.filter(actor=user).update(actor=None)
             AccountTransaction.objects.filter(actor=user).update(actor=None)
             InventoryMovement.objects.filter(actor=user).update(actor=None)
-            CashEntry.objects.filter(actor=user).update(actor=None)
         User.objects.filter(pk=user.pk).delete()
 
     return Plan(

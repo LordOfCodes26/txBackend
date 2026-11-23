@@ -33,8 +33,3 @@ class OwnSale(DomainError):
     status_code = status.HTTP_403_FORBIDDEN
     code = "OWN_SALE"
     default_detail = _("You took the cash for this sale, so someone else must delete it.")
-
-
-class NotReversible(CashConflict):
-    code = "NOT_REVERSIBLE"
-    default_detail = _("Only a handover can be cancelled, and only once.")

@@ -449,8 +449,8 @@ class PurchaseViewSet(
     @extend_schema(request=CashDeleteSerializer, responses=PurchaseSerializer)
     @action(detail=True, methods=["post"], url_path="delete-cash")
     def delete_cash(self, request, pk=None):
-        """Finance deletes a cash sale, with a reason: the goods go back to stock and the store
-        owes less; the seller returns the cash. 403 OWN_STORE / OWN_SALE for a store one works
+        """Finance deletes a cash sale, with a reason: the goods go back to stock and the
+        seller returns the cash. 403 OWN_STORE / OWN_SALE for a store one works
         for or a sale one took the cash for."""
         from apps.cash import services as cash
 

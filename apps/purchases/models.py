@@ -41,8 +41,8 @@ class Purchase(TimeStampedModel):
     back to the wallet and the goods back to stock); see services.change_paid_purchase /
     refund_purchase.
 
-    A CASH sale (at a store that accepts cash) has no developer, card or wallet entry: its
-    money is in the store's cash ledger (apps.cash). It is never changed, and only finance
+    A CASH sale (at a store that accepts cash) has no developer, card or wallet entry: the
+    seller keeps the money. It is never changed, and only finance
     deletes it.
     """
 

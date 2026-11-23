@@ -79,7 +79,7 @@ restore runbooks: `docs/BACKUP_AND_RESTORE.md`.
   closes the month with an allowance deposit and a stock delivery so current
   balances and stock don't change, and checks that everything reconciles.
 - **Cash sales:** `manage.py seed_cash [--days 14] [--per-day 2] [--store "Demo Cafe"]` adds two
-  weeks of cash sales, handovers and price changes at the demo stores and switches cash on there;
+  weeks of cash sales and price changes at the demo stores and switches cash on there;
   `--undo` removes them (test servers only).
 - **Wallets in minus:** `manage.py seed_minus_wallets [--count 5] [--limit 20.00]` takes a
   few developers' wallets below zero (one adjustment each, spread over the buildings),
