@@ -250,3 +250,21 @@ def test_shipped_roles_file_is_valid():
         assert set(role["permissions"]) <= set(PERMISSIONS), role["code"]
     for code in ("GOODS_SELLER", "PLAYGROUND_SELLER"):
         assert next(r for r in roles if r["code"] == code)["permissions"] == []
+
+
+def test_a_fresh_install_lets_finance_open_its_pages():
+    import json
+    from pathlib import Path
+
+    from django.conf import settings
+
+    roles = json.loads((Path(settings.BASE_DIR) / "deploy" / "roles.json").read_text())["roles"]
+    finance = set(next(r for r in roles if r["code"] == "FINANCE_MANAGER")["permissions"])
+    assert {
+        "finance.stats.view",
+        "finance.deposits.view",
+        "purchase.report.view",
+        "cash.view",
+        "cash.delete",
+    } <= finance
+    assert "cash.enable" not in finance  # admins switch cash on
