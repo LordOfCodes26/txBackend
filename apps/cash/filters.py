@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import CashEntry, CashRequest, StockCount
+from .models import CashEntry, StockCount
 
 
 class CashEntryFilter(django_filters.FilterSet):
@@ -10,12 +10,6 @@ class CashEntryFilter(django_filters.FilterSet):
     class Meta:
         model = CashEntry
         fields = ["seller", "kind"]
-
-
-class CashRequestFilter(django_filters.FilterSet):
-    class Meta:
-        model = CashRequest
-        fields = ["seller", "kind", "status", "purchase", "good"]
 
 
 class StockCountFilter(django_filters.FilterSet):

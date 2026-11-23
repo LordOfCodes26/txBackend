@@ -74,9 +74,9 @@ AREAS: dict[str, dict[str, str]] = {
         "purchase.report.view": "See the sales report: goods sold and money in a range, with Excel",
     },
     "Cash control": {
-        "cash.view": "See the cash each store owes, its handovers, requests and stock counts",
+        "cash.view": "See the cash each store owes, its handovers, price changes and stock counts",
         "cash.handover": "Record cash handed over by a store, and cancel a wrong handover",
-        "cash.approve": "Approve deleting cash sales and the price changes of stores with cash",
+        "cash.delete": "Delete cash sales, with a reason",
         "cash.count": "Count a store's stock, and settle what is missing",
         "cash.enable": "Switch cash sales on and off for a store",
     },

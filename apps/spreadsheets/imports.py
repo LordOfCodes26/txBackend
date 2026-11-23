@@ -561,7 +561,7 @@ class GoodsImporter(Importer):
                 data["initial_quantity"] = quantity
             serializer = GoodSerializer(data=data, context=self._context(ctx))
             serializer.is_valid(raise_exception=True)
-            cash.create_store_good(actor=ctx.actor, **serializer.validated_data)
+            goods.create_good(actor=ctx.actor, **serializer.validated_data)
             return "created"
 
         if not ctx.actor.has_rbac_perm("good.update") and self._context(ctx)["own_seller"] is None:
@@ -572,7 +572,8 @@ class GoodsImporter(Importer):
         serializer.is_valid(raise_exception=True)
         changed = {k: v for k, v in serializer.validated_data.items() if getattr(good, k) != v}
         if changed:
-            good = cash.update_store_good(actor=ctx.actor, good=good, **changed)
+            cash.ensure_may_update(ctx.actor, good, changed)
+            good = goods.update_good(actor=ctx.actor, good=good, **changed)
         moved = False
         if quantity is not None:
             if not good.track_stock:

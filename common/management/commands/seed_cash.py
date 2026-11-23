@@ -15,10 +15,7 @@ from apps.cash import services as cash
 from apps.cash.models import (
     CashEntry,
     CashKind,
-    CashRequest,
     CountOutcome,
-    RequestKind,
-    RequestStatus,
     StockCount,
     StockCountLine,
 )
@@ -32,7 +29,8 @@ from common.record_delete import _writable
 
 KEY = "seed-cash-"  # purchases and cash entries: their idempotency keys start with it
 DELIVERY = "seed-cash-delivery"  # its stock movements' reference
-MARK = "(demo)"  # requests and stock counts: their reason or note ends with it
+MARK = "(demo)"  # stock counts and new goods: their note or name ends with it
+LOGGED = "seed-cash"  # its audit entries' request id
 ZERO = Decimal("0.00")
 BUYERS = ["", "", "", "Visitor Kim", "Ri (driver)", "Guest, floor 2", "Pak (cleaning)", "Delivery"]
 
@@ -40,20 +38,21 @@ BUYERS = ["", "", "", "Visitor Kim", "Ri (driver)", "Guest, floor 2", "Pak (clea
 class Command(BaseCommand):
     help = (
         "Test data: cash sales of the last days at the demo stores, with handovers to finance, "
-        "deleted sales, requests waiting for approval and stock counts, for Cash control. "
+        "deleted sales, price changes and stock counts, for Cash control. "
         "Switches cash on for those stores. Stock and prices stay as they are now. Stores that "
         "already have cash entries are left alone; --undo removes what this seeded. Test "
         "servers only (DEBUG or TEST_CONSOLE_ENABLED)."
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("--days", type=int, default=14, help="Days of sales, up to now.")
+        parser.add_argument("--days", type=int, default=30, help="Days of sales, up to now.")
         parser.add_argument(
             "--store", action="append", help="A store's name (again for more). Default: Demo ..."
         )
+        parser.add_argument("--per-day", type=int, default=20, help="Sales a day and store, about.")
         parser.add_argument("--undo", action="store_true", help="Remove what this seeded.")
 
-    def handle(self, *args, days=14, store=None, undo=False, **options):
+    def handle(self, *args, days=30, store=None, per_day=20, undo=False, **options):
         if not (settings.DEBUG or settings.TEST_CONSOLE_ENABLED):
             raise CommandError(
                 "seed_cash only runs on a test server (DEBUG or TEST_CONSOLE_ENABLED)."
@@ -62,7 +61,7 @@ class Command(BaseCommand):
             if undo:
                 self._undo()
             else:
-                self._seed(days, store)
+                self._seed(days, store, per_day)
             # Inside the transaction: if the books don't add up, nothing is kept.
             problems = cash.ledger_mismatches() + list(goods.stock_mismatches())
             if problems:
@@ -71,9 +70,11 @@ class Command(BaseCommand):
 
     # -- seeding ---------------------------------------------------------------------------
 
-    def _seed(self, days, names):
+    def _seed(self, days, names, per_day):
         if not 7 <= days <= 90:
             raise CommandError("--days must be 7 to 90.")
+        if not 1 <= per_day <= 200:
+            raise CommandError("--per-day must be 1 to 200.")
         admin = self._staff(Roles.ADMIN)
         self.finance = self._staff(Roles.FINANCE_MANAGER) or admin
         if self.finance is None:
@@ -96,7 +97,7 @@ class Command(BaseCommand):
             if not catalog:
                 self.stdout.write(f"  {seller.name}: no goods, left alone.")
                 continue
-            self._store(seller, catalog, days, seller.user or admin)
+            self._store(seller, catalog, days, per_day, seller.user or admin)
             done += 1
         if not done:
             raise CommandError("No store left to seed.")
@@ -107,7 +108,7 @@ class Command(BaseCommand):
             User.objects.filter(is_active=True, user_roles__role__code=role).order_by("pk").first()
         )
 
-    def _store(self, seller, catalog, days, clerk):
+    def _store(self, seller, catalog, days, per_day, clerk):
         rng = random.Random(seller.pk * 1000 + days)
         now = timezone.now()
         today = timezone.localdate()
@@ -124,7 +125,8 @@ class Command(BaseCommand):
         sales = []
         for n in range(days):
             day = first + timedelta(days=n)
-            for _i in range(rng.randint(0, 1) if dear else rng.randint(2, 6)):
+            about = max(per_day // 5, 1) if dear else per_day
+            for _i in range(rng.randint(about * 6 // 10, about * 14 // 10)):
                 moment = _at(day, time(rng.randint(8, 19), rng.randint(0, 59), rng.randint(0, 59)))
                 if moment > now - timedelta(minutes=5):
                     continue
@@ -140,17 +142,14 @@ class Command(BaseCommand):
         if not sales:
             raise CommandError(f"{seller.name}: no sales fell in these days; use more --days.")
 
-        # What happens to some of the sales: deleted (a day later), refused, still waiting.
+        # Some sales are deleted by finance a day later.
         old = [s for s in sales if s["moment"] < now - timedelta(days=2)]
         rng.shuffle(old)
         spare = {g.pk: g.quantity for g in catalog if g.track_stock}
-        fates = [
-            ("APPROVED", "Buyer brought it back"),
-            ("APPROVED", "Rang it up twice"),
-            ("REJECTED", "Wrong goods"),
-        ]
+        reasons = ["Buyer brought it back", "Rang it up twice", "Wrong goods"]
+        wanted = max(2, len(sales) // 80)
         for sale in old:
-            if not fates:
+            if not wanted:
                 break
             # A deleted sale was out of stock for a day: only where there is enough now.
             taken = {g.pk: q for g, q in sale["lines"].items() if g.track_stock}
@@ -158,8 +157,8 @@ class Command(BaseCommand):
                 continue
             for pk, quantity in taken.items():
                 spare[pk] -= quantity
-            sale["fate"] = fates.pop(0)
-        sales[-1].setdefault("fate", ("PENDING", "Wrong quantity"))
+            sale["deleted"] = reasons[wanted % len(reasons)]
+            wanted -= 1
 
         # Three stock counts: explained, charged to the store, and one still to explain.
         tracked = [g for g in catalog if g.track_stock]
@@ -185,7 +184,7 @@ class Command(BaseCommand):
             )
 
         self._write(seller, clerk, first, sales, counts, rng)
-        self._requests(seller, clerk, catalog, rng, now)
+        self._prices(clerk, catalog, rng, now)
         self.stdout.write(
             f"  {seller.name}: {len(sales)} cash sales, owes {cash.owed(seller.pk)}"
             f"{', cash switched on' if switched else ''}."
@@ -198,7 +197,7 @@ class Command(BaseCommand):
         # A delivery covering what goes out for good, so today's stock stays as it is.
         need: dict[Good, Decimal] = {}
         for sale in sales:
-            back = sale.get("fate", ("",))[0] == "APPROVED"  # sold, and back a day later
+            back = "deleted" in sale  # sold, and back a day later
             for good, quantity in sale["lines"].items():
                 if good.track_stock:
                     need[good] = need.get(good, ZERO) + (ZERO if back else quantity)
@@ -213,9 +212,7 @@ class Command(BaseCommand):
 
         events = [(s["moment"], "sale", s) for s in sales]
         events += [
-            (s["moment"] + timedelta(hours=20), "return", s)
-            for s in sales
-            if s.get("fate", ("",))[0] == "APPROVED"
+            (s["moment"] + timedelta(hours=20), "return", s) for s in sales if "deleted" in s
         ]
         events += [(c["moment"], "count", c) for c in counts]
         # Finance comes in the evening, not on Sundays and not today.
@@ -260,7 +257,6 @@ class Command(BaseCommand):
                     updated_at=moment,
                 )
                 self._entry(seller, CashKind.SALE, total, moment, clerk, reference=reference)
-                self._wish(seller, clerk, what, moment)
             elif kind == "return":
                 purchase, total = what["purchase"], what["total"]
                 reference = f"purchase:{purchase.pk}"
@@ -273,14 +269,14 @@ class Command(BaseCommand):
                     -total,
                     moment,
                     self.finance,
-                    note=what["fate"][1],
+                    note=what["deleted"],
                     reference=reference,
                 )
                 Purchase.objects.filter(pk=purchase.pk).update(
                     status=PurchaseStatus.REFUNDED,
                     refunded_by=self.finance,
                     refunded_at=moment,
-                    refund_reason=what["fate"][1],
+                    refund_reason=what["deleted"],
                     updated_at=moment,
                 )
             elif kind == "handover" and self.owed > 0:
@@ -345,24 +341,6 @@ class Command(BaseCommand):
             created_at=moment,
         )
 
-    def _wish(self, seller, clerk, sale, moment):
-        if "fate" not in sale:
-            return
-        status, reason = sale["fate"]
-        wish = CashRequest.objects.create(
-            kind=RequestKind.DELETE_SALE,
-            seller=seller,
-            purchase=sale["purchase"],
-            reason=f"{reason} {MARK}",
-            requested_by=clerk,
-            status=status,
-            decided_by=None if status == "PENDING" else self.finance,
-            decided_at=None if status == "PENDING" else moment + timedelta(hours=20),
-            decision_note="The goods did not come back" if status == "REJECTED" else "",
-        )
-        asked = moment + timedelta(minutes=4)
-        CashRequest.objects.filter(pk=wish.pk).update(created_at=asked, updated_at=asked)
-
     def _count(self, seller, plan, stock, moment):
         count = StockCount.objects.create(
             seller=seller, counted_by=self.finance, note=f"Surprise count {MARK}"
@@ -408,53 +386,53 @@ class Command(BaseCommand):
         count.save()
         StockCount.objects.filter(pk=count.pk).update(created_at=moment, updated_at=moment)
 
-    def _requests(self, seller, clerk, catalog, rng, now):
-        """A price refused, a price waiting, and a new good waiting."""
-        free = [g for g in catalog if not g.cash_requests.filter(status="PENDING").exists()]
-        picked = rng.sample(free, k=min(len(free), 2))
-        plans = [(RequestStatus.PENDING, Decimal("0.80"), timedelta(hours=3), "Slow seller")]
-        plans.append((RequestStatus.REJECTED, Decimal("0.50"), timedelta(days=3), "Too many left"))
-        for good, (status, factor, ago, reason) in zip(picked, plans, strict=False):
-            wish = CashRequest.objects.create(
-                kind=RequestKind.PRICE,
-                seller=seller,
-                good=good,
-                old_price=good.price,
-                new_price=money(good.price * factor),
-                reason=f"{reason} {MARK}",
-                requested_by=clerk,
-                status=status,
-                decided_by=self.finance if status == RequestStatus.REJECTED else None,
-                decided_at=now - ago + timedelta(hours=2)
-                if status == RequestStatus.REJECTED
-                else None,
-                decision_note="Too low" if status == RequestStatus.REJECTED else "",
+    def _prices(self, clerk, catalog, rng, now):
+        """Audit entries as the goods page makes them: a price lowered and raised again (the
+        prices stay as they are), one that went up to what it is now, and a new good."""
+
+        def log(good, action, old, new, ago):
+            AuditLog.objects.create(
+                actor=clerk,
+                actor_username=getattr(clerk, "username", ""),
+                action=action,
+                entity_type=Good._meta.label_lower,
+                entity_id=str(good.pk),
+                old_values=old,
+                new_values=new,
+                request_id=LOGGED,
+                created_at=now - ago,
             )
-            CashRequest.objects.filter(pk=wish.pk).update(
-                created_at=now - ago, updated_at=now - ago
+
+        picked = rng.sample(catalog, k=min(len(catalog), 2))
+        good = picked[0]
+        now_price, low = str(good.price), str(money(good.price * Decimal("0.60")))
+        start = timedelta(days=3, hours=2)
+        log(good, "good.updated", {"price": now_price}, {"price": low}, start)
+        back = start - timedelta(minutes=35)
+        log(good, "good.updated", {"price": low}, {"price": now_price}, back)
+        if len(picked) > 1:
+            good = picked[1]
+            before = str(money(good.price * Decimal("0.90")))
+            log(
+                good,
+                "good.updated",
+                {"price": before},
+                {"price": str(good.price)},
+                timedelta(days=6, hours=5),
             )
         new = Good.objects.create(
             service_position=catalog[0].service_position,
             name=f"Visitor special {MARK}",
             price="5.00",
             track_stock=False,
-            is_active=False,
         )
-        CashRequest.objects.create(
-            kind=RequestKind.NEW_GOOD,
-            seller=seller,
-            good=new,
-            new_price=new.price,
-            reason=f"For visitors {MARK}",
-            requested_by=clerk,
-        )
+        log(new, "good.created", None, {"price": "5.00", "name": new.name}, timedelta(hours=20))
 
     # -- undoing ---------------------------------------------------------------------------
 
     def _undo(self):
         bought = Purchase.objects.filter(confirm_idempotency_key__startswith=KEY)
         counted = StockCount.objects.filter(note__endswith=MARK)
-        wishes = CashRequest.objects.filter(reason__endswith=MARK)
         purchases = list(bought.values_list("pk", flat=True))
         counts = list(counted.values_list("pk", flat=True))
         seeded = CashEntry.objects.filter(idempotency_key__startswith=KEY)
@@ -464,8 +442,8 @@ class Command(BaseCommand):
         if not stores:
             raise CommandError("Nothing seeded to undo.")
         references = [f"purchase:{pk}" for pk in purchases] + [f"stock_count:{pk}" for pk in counts]
-        # Also what people did with the seeded rows since (a request approved, a count charged,
-        # a seeded handover cancelled): it goes with them.
+        # Also what people did with the seeded rows since (a sale deleted, a count charged, a
+        # seeded handover cancelled): it goes with them.
         base = set(
             CashEntry.objects.filter(
                 Q(idempotency_key__startswith=KEY) | Q(reference__in=references)
@@ -486,15 +464,12 @@ class Command(BaseCommand):
             if good.quantity - total < 0:
                 raise CommandError(f"{good.name}: not enough stock left to undo.")
             Good.all_objects.filter(pk=good_id).update(quantity=good.quantity - total)
-        # A seeded price wish approved since: the old price again.
-        for wish in wishes.filter(kind=RequestKind.PRICE, status=RequestStatus.APPROVED):
-            if wish.good.price == wish.new_price:
-                goods.update_good(actor=None, good=wish.good, price=wish.old_price)
-        new = list(wishes.filter(kind=RequestKind.NEW_GOOD).values_list("good", flat=True))
-        with _writable(CashEntry, InventoryMovement):
+        with _writable(CashEntry, InventoryMovement, AuditLog):
+            logged = AuditLog.objects.filter(request_id=LOGGED)
+            added = list(logged.filter(action="good.created").values_list("entity_id", flat=True))
+            logged.delete()
             moves.delete()
             counted.delete()
-            wishes.delete()
             gone = list(entries.values_list("pk", flat=True))
             CashEntry.objects.filter(pk__in=gone, reverses__isnull=False).delete()
             CashEntry.objects.filter(pk__in=gone).delete()
@@ -506,7 +481,7 @@ class Command(BaseCommand):
                     owed += entry.amount
                     CashEntry.objects.filter(pk=entry.pk).update(owed_after=owed)
         kept = 0
-        for good in Good.all_objects.filter(pk__in=new):
+        for good in Good.all_objects.filter(pk__in=[int(pk) for pk in added]):
             if good.purchase_items.exists() or good.movements.exists():
                 kept += 1
             else:

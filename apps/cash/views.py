@@ -9,25 +9,22 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.purchases.models import Purchase
+from apps.sellers.models import Seller
 from apps.spreadsheets.xlsx import XLSX
 from apps.stats.views import PeriodSerializer
 from common.idempotency import HEADER, require_idempotency_key
 
 from . import reports, services
-from .access import sellable_purchases, sellers_for, visible_requests, visible_sellers
-from .filters import CashEntryFilter, CashRequestFilter, StockCountFilter
-from .models import CashEntry, CashRequest, StockCount
+from .access import sellers_for, visible_sellers
+from .filters import CashEntryFilter, StockCountFilter
+from .models import CashEntry, StockCount
 from .serializers import (
     CashEntrySerializer,
     CashOverviewSerializer,
-    CashRequestSerializer,
     CashStoreDetailSerializer,
-    DecisionSerializer,
-    DeletionRequestSerializer,
     HandoverSerializer,
+    PriceChangeSerializer,
     ReasonSerializer,
-    RejectionSerializer,
     ResolveSerializer,
     SheetGoodSerializer,
     SheetQuerySerializer,
@@ -74,7 +71,12 @@ class CashStoreViewSet(viewsets.GenericViewSet):
     charged, and what it still owes. A store's own login sees its own store."""
 
     permission_classes = [CashPermission]
-    required_permissions = {"list": None, "retrieve": None, "export": None}
+    required_permissions = {
+        "list": None,
+        "retrieve": None,
+        "price_changes": None,
+        "export": None,
+    }
     queryset = CashEntry.objects.none()
     pagination_class = None
 
@@ -106,11 +108,23 @@ class CashStoreViewSet(viewsets.GenericViewSet):
         }
         return Response(CashStoreDetailSerializer(body).data)
 
+    @extend_schema(
+        parameters=[PeriodSerializer, OpenApiParameter("id", int, OpenApiParameter.PATH)],
+        responses=PriceChangeSerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="price-changes")
+    def price_changes(self, request, pk=None):
+        """The store's prices changed and goods added in the period, newest first."""
+        seller = get_object_or_404(visible_sellers(request.user), pk=pk)
+        first, last = self._period()
+        rows = reports.price_changes(Seller.objects.filter(pk=seller.pk), first, last)
+        return Response(PriceChangeSerializer(rows, many=True).data)
+
     @extend_schema(parameters=[PeriodSerializer], responses={(200, XLSX): OpenApiTypes.BINARY})
     @action(detail=False, methods=["get"])
     def export(self, request):
-        """The period as .xlsx: the stores, their days, every entry, the requests and the
-        stock counts."""
+        """The period as .xlsx: the stores, their days, every entry, the price changes and
+        the stock counts."""
         from apps.spreadsheets.exports import cash_workbook
 
         _ensure_sees_cash(request.user)
@@ -180,70 +194,6 @@ class CashEntryViewSet(viewsets.ReadOnlyModelViewSet):
         return self._response(
             *services.reverse_entry(actor=request.user, entry=entry, idempotency_key=key, **data)
         )
-
-
-class CashRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    """What stores that take cash ask finance for: deleting a cash sale (POST here), and
-    prices (made when their people change a good). `approve/` and `reject/` need
-    `cash.approve`, by someone else than who asked, sold, or works for the store."""
-
-    queryset = CashRequest.objects.select_related(
-        "seller", "purchase__confirmed_by", "good", "requested_by", "decided_by"
-    )
-    serializer_class = CashRequestSerializer
-    permission_classes = [CashPermission]
-    required_permissions = {
-        "list": None,
-        "retrieve": None,
-        "create": None,
-        "approve": "cash.approve",
-        "reject": "cash.approve",
-        "withdraw": None,
-    }
-    filterset_class = CashRequestFilter
-    search_fields = ["good__name", "seller__name", "reason", "purchase__buyer_name"]
-    ordering_fields = ["created_at", "decided_at"]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        if self.action in ("approve", "reject"):
-            return qs.filter(seller__in=sellers_for(self.request.user, "cash.approve"))
-        return visible_requests(self.request.user, qs)
-
-    def _respond(self, request_, code=status.HTTP_200_OK):
-        fresh = CashRequestViewSet.queryset.get(pk=request_.pk)
-        return Response(CashRequestSerializer(fresh).data, status=code)
-
-    @extend_schema(request=DeletionRequestSerializer, responses={201: CashRequestSerializer})
-    def create(self, request):
-        """Ask to delete a cash sale, with a reason. For someone who may approve it, it is
-        done at once (`status` APPROVED)."""
-        data = _checked(
-            DeletionRequestSerializer,
-            request,
-            purchases=sellable_purchases(request.user, Purchase.objects.all()),
-        )
-        made = services.request_deletion(actor=request.user, **data)
-        return self._respond(made, status.HTTP_201_CREATED)
-
-    @extend_schema(request=DecisionSerializer, responses=CashRequestSerializer)
-    @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
-        wish = self.get_object()
-        data = _checked(DecisionSerializer, request)
-        return self._respond(services.approve(actor=request.user, request=wish, **data))
-
-    @extend_schema(request=RejectionSerializer, responses=CashRequestSerializer)
-    @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
-        wish = self.get_object()
-        data = _checked(RejectionSerializer, request)
-        return self._respond(services.reject(actor=request.user, request=wish, **data))
-
-    @extend_schema(request=None, responses=CashRequestSerializer)
-    @action(detail=True, methods=["post"])
-    def withdraw(self, request, pk=None):
-        return self._respond(services.withdraw(actor=request.user, request=self.get_object()))
 
 
 class StockCountViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):

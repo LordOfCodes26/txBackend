@@ -2,7 +2,6 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.sellers.models import Seller, ServicePosition
@@ -131,12 +130,6 @@ class GoodCategorySerializer(serializers.ModelSerializer):
         return value
 
 
-class PendingRequestSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    kind = serializers.CharField()
-    new_price = serializers.CharField()
-
-
 class GoodSerializer(serializers.ModelSerializer):
     service_position = serializers.PrimaryKeyRelatedField(
         queryset=ServicePosition.objects.all(),
@@ -168,10 +161,6 @@ class GoodSerializer(serializers.ModelSerializer):
     preferential = serializers.SerializerMethodField(
         help_text="Free preferential items can pay for it."
     )
-    pending_request = serializers.SerializerMethodField(
-        help_text="Stores that take cash: the price waiting for finance's approval "
-        "({id, kind: PRICE | NEW_GOOD, new_price}), or null."
-    )
     initial_quantity = QuantityField(
         min_value=0,
         required=False,
@@ -201,7 +190,6 @@ class GoodSerializer(serializers.ModelSerializer):
             "quantity",
             "initial_quantity",
             "preferential",
-            "pending_request",
             "rental",
             "court_prices",
             "images",
@@ -212,16 +200,6 @@ class GoodSerializer(serializers.ModelSerializer):
 
     def get_currency(self, obj) -> str:
         return settings.CURRENCY
-
-    @extend_schema_field(PendingRequestSerializer(allow_null=True))
-    def get_pending_request(self, obj) -> dict | None:
-        waiting = getattr(obj, "waiting_requests", None)
-        if waiting is None:  # not from the goods list (a nested good, an import)
-            waiting = obj.cash_requests.filter(status="PENDING", kind__in=("PRICE", "NEW_GOOD"))[:1]
-        return next(
-            ({"id": r.pk, "kind": r.kind, "new_price": f"{r.new_price:.2f}"} for r in waiting),
-            None,
-        )
 
     def get_preferential(self, obj) -> bool:
         return getattr(obj, "preferential", None) is not None

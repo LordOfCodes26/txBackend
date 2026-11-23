@@ -300,7 +300,7 @@ cd ~/backend-dev
 | `seed_more` | 200 more developers, PINs, Demo Bakery, today's scans |
 | `seed_attendance_month` | a month of door history up to yesterday |
 | `seed_purchases_month` | last month's purchases (`--month 2026-09` for another month) |
-| `seed_cash` | two weeks of cash sales and Cash control data at the demo stores (`--undo` removes it) |
+| `seed_cash` | a month of cash sales and Cash control data at the demo stores (`--undo` removes it) |
 | `seed_minus_wallets` | a few wallets below zero, for the minus figures (`--undo` reverses it) |
 
 Each part is made once, so running a command again adds only what is missing. The demo login

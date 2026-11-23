@@ -33,6 +33,7 @@ from .filters import PurchaseFilter
 from .models import Payment, PreferentialSettings, Purchase, PurchaseKind, PurchaseStatus
 from .serializers import (
     CashConfirmSerializer,
+    CashDeleteSerializer,
     ConfirmSerializer,
     ItemAddSerializer,
     ItemUpdateSerializer,
@@ -120,6 +121,7 @@ class PurchaseViewSet(
         "stop_waiting": ["purchase.create"],
         "confirm": ["purchase.confirm"],
         "confirm_cash": ["purchase.cash"],
+        "delete_cash": ["cash.delete"],
         "cancel": ["purchase.cancel"],
         "partial_update": ["purchase.change"],
         "destroy": ["purchase.delete"],
@@ -423,8 +425,8 @@ class PurchaseViewSet(
     def confirm_cash(self, request, pk=None):
         """The seller took cash for a till sale, at a store that accepts cash: no card, PIN or
         wallet. 201 when paid now; 200 when this Idempotency-Key already paid it. 409
-        CASH_NOT_ACCEPTED. A cash sale can't be changed; deleting it needs finance's approval
-        (`POST /cash/requests/`)."""
+        CASH_NOT_ACCEPTED. A cash sale can't be changed, and only finance deletes it
+        (`delete-cash/`)."""
         key = require_idempotency_key(request)
         purchase = self.get_object()
         serializer = CashConfirmSerializer(data=request.data)
@@ -442,6 +444,20 @@ class PurchaseViewSet(
     def cancel(self, request, pk=None):
         """Abandon a draft. Paid purchases are deleted with DELETE (refunded)."""
         purchase = services.cancel_purchase(actor=request.user, purchase=self.get_object())
+        return self._respond(purchase)
+
+    @extend_schema(request=CashDeleteSerializer, responses=PurchaseSerializer)
+    @action(detail=True, methods=["post"], url_path="delete-cash")
+    def delete_cash(self, request, pk=None):
+        """Finance deletes a cash sale, with a reason: the goods go back to stock and the store
+        owes less; the seller returns the cash. 403 OWN_STORE / OWN_SALE for a store one works
+        for or a sale one took the cash for."""
+        from apps.cash import services as cash
+
+        purchase = self.get_object()
+        serializer = CashDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        cash.delete_sale(actor=request.user, purchase=purchase, **serializer.validated_data)
         return self._respond(purchase)
 
     @extend_schema(request=PaidChangeSerializer, responses=PurchaseSerializer)

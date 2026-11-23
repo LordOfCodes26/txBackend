@@ -11,29 +11,23 @@ from apps.finance.exceptions import IdempotencyKeyReused
 from apps.finance.services import money
 from apps.goods import services as goods
 from apps.goods.models import Good, GoodKind, MovementKind
-from apps.purchases.models import Payment, Purchase, PurchaseStatus
+from apps.purchases.models import Payment, Purchase
 from apps.sellers.access import acting_seller
 from apps.sellers.models import Seller
 
 from .exceptions import (
-    AlreadyRequested,
-    AwaitingApproval,
     CashSaleFixed,
     CashStoreLocked,
     CountResolved,
     NotReversible,
-    OwnRequest,
+    OwnSale,
     OwnStore,
-    RequestClosed,
     StockMoved,
 )
 from .models import (
     CashEntry,
     CashKind,
-    CashRequest,
     CountOutcome,
-    RequestKind,
-    RequestStatus,
     StockCount,
     StockCountLine,
 )
@@ -60,7 +54,7 @@ def works_for(user, seller_id: int) -> bool:
 
 def is_locked(actor, seller: Seller, permission: str) -> bool:
     """While a store takes cash, the people who work for it can't change what its takings
-    are checked against (prices, stock counts); staff with `permission` can."""
+    are checked against (stock counts); staff with `permission` can."""
     if not seller.accepts_cash:
         return False
     return works_for(actor, seller.pk) or not actor.has_rbac_perm(permission)
@@ -230,158 +224,29 @@ def reverse_entry(
     return back, True
 
 
-# --- Requests waiting for approval --------------------------------------------------------
+# --- Deleting a sale, and the store's goods ---------------------------------------------------
 
 
-def _lock_pending(request: CashRequest) -> CashRequest:
-    request = CashRequest.objects.select_for_update().get(pk=request.pk)
-    if request.status != RequestStatus.PENDING:
-        raise RequestClosed()
-    return request
+def delete_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
+    """Finance deletes a cash sale, saying why: not for a store they work for, nor a sale they
+    took the cash for."""
+    from apps.purchases import services as purchases
 
-
-def _close(request: CashRequest, status: str, *, actor=None, note: str = "") -> CashRequest:
-    request.status = status
-    request.decided_by = actor if getattr(actor, "pk", None) else None
-    request.decided_at = timezone.now()
-    request.decision_note = note.strip()
-    request.save()
-    return request
-
-
-@transaction.atomic
-def request_deletion(*, actor, purchase: Purchase, reason: str) -> CashRequest:
-    """Ask finance to delete a cash sale. Someone who may approve it (and neither took the
-    cash nor works for the store) deletes it at once; the request stays as the record."""
-    purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
     if purchase.payment != Payment.CASH:
         raise CashSaleFixed(_("This is not a cash sale."))
-    if purchase.status != PurchaseStatus.CONFIRMED:
-        raise RequestClosed(_("Only a paid cash sale can be deleted."))
-    if CashRequest.objects.filter(purchase=purchase, status=RequestStatus.PENDING).exists():
-        raise AlreadyRequested()
-    request = CashRequest.objects.create(
-        kind=RequestKind.DELETE_SALE,
-        seller_id=purchase.seller_id,
-        purchase=purchase,
-        reason=reason.strip(),
-        requested_by=actor,
-    )
-    record_audit(
-        "cash.delete_requested",
-        actor=actor,
-        entity=purchase,
-        new_values={"total": purchase.total, "reason": request.reason, "request": request.pk},
-    )
+    ensure_not_own_store(actor, purchase.seller_id)
+    if purchase.confirmed_by_id == actor.pk:
+        raise OwnSale()
+    return purchases.delete_cash_sale(actor=actor, purchase=purchase, reason=reason.strip())
+
+
+def ensure_may_update(actor, good: Good, changes: dict) -> None:
+    """At a store that takes cash its people may not take a good out of the stock counting."""
     if (
-        actor.has_rbac_perm("cash.approve")
-        and not works_for(actor, purchase.seller_id)
-        and purchase.confirmed_by_id != actor.pk
+        good.kind != GoodKind.RENTAL
+        and changes.get("track_stock", good.track_stock) != good.track_stock
     ):
-        _carry_out(request, actor)
-        _close(request, RequestStatus.APPROVED, actor=actor)
-    return request
-
-
-def _first_price(good: Good) -> bool:
-    """A new good of a cash store that finance never approved."""
-    made = CashRequest.objects.filter(good=good, kind=RequestKind.NEW_GOOD)
-    return made.exists() and not made.filter(status=RequestStatus.APPROVED).exists()
-
-
-@transaction.atomic
-def request_price(*, actor, good: Good, price, reason: str = "") -> CashRequest | None:
-    """The store wants another price: it waits for approval (a newer wish replaces it; the
-    price as it is now is no wish). A good never approved yet is not on sale: its price
-    changes at once, and the new price is what waits."""
-    good = Good.objects.select_for_update().get(pk=good.pk)
-    price = money(price)
-    pending = CashRequest.objects.select_for_update().filter(
-        good=good, status=RequestStatus.PENDING
-    )
-    if pending.filter(new_price=price).exists():
-        return pending.get()
-    new = _first_price(good)
-    if price == good.price and not new:
-        return None
-    for request in pending:
-        _close(request, RequestStatus.WITHDRAWN, actor=actor)
-    old = None if new else good.price
-    if new and price != good.price:
-        goods.update_good(actor=actor, good=good, price=price)
-    request = CashRequest.objects.create(
-        kind=RequestKind.NEW_GOOD if new else RequestKind.PRICE,
-        seller_id=good.service_position.seller_id,
-        good=good,
-        old_price=old,
-        new_price=price,
-        reason=reason.strip(),
-        requested_by=actor,
-    )
-    record_audit(
-        "cash.price_requested",
-        actor=actor,
-        entity=good,
-        old_values={"price": old},
-        new_values={"price": price, "request": request.pk},
-    )
-    return request
-
-
-@transaction.atomic
-def request_new_good(*, actor, good: Good) -> CashRequest:
-    """A new good of a cash store: off sale until finance approves its price."""
-    request = CashRequest.objects.create(
-        kind=RequestKind.NEW_GOOD,
-        seller_id=good.service_position.seller_id,
-        good=good,
-        new_price=good.price,
-        requested_by=actor,
-    )
-    record_audit(
-        "cash.price_requested",
-        actor=actor,
-        entity=good,
-        new_values={"price": good.price, "request": request.pk},
-    )
-    return request
-
-
-def create_store_good(*, actor, **data) -> Good:
-    """A good made by the people of a store: at a store that takes cash it waits for
-    approval (courts are paid by card and PIN only, so they don't)."""
-    seller = data["service_position"].seller if data.get("service_position") else None
-    if (
-        seller is None
-        or data.get("kind") == GoodKind.RENTAL
-        or not is_locked(actor, seller, "good.create")
-    ):
-        return goods.create_good(actor=actor, **data)
-    data["is_active"] = False
-    with transaction.atomic():
-        good = goods.create_good(actor=actor, **data)
-        request_new_good(actor=actor, good=good)
-    return good
-
-
-def update_store_good(*, actor, good: Good, **changes) -> Good:
-    """A good changed by the people of a store: at a store that takes cash a new price waits
-    for approval, and the stock can't be taken out of the counting."""
-    seller = good.service_position.seller
-    if good.kind == GoodKind.RENTAL or not is_locked(actor, seller, "good.update"):
-        return goods.update_good(actor=actor, good=good, **changes)
-    if changes.get("track_stock", good.track_stock) != good.track_stock:
-        raise CashStoreLocked()
-    price = changes.pop("price", None)
-    if changes.get("is_active") and not good.is_active and _first_price(good):
-        raise AwaitingApproval()
-    with transaction.atomic():
-        if changes:
-            good = goods.update_good(actor=actor, good=good, **changes)
-        if price is not None:
-            request_price(actor=actor, good=good, price=price)
-    good.refresh_from_db()
-    return good
+        ensure_unlocked(actor, good.service_position.seller, "good.update")
 
 
 def ensure_may_remove(actor, good: Good) -> None:
@@ -395,81 +260,6 @@ def ensure_may_change_stock(actor, good: Good, kind: str) -> None:
     counts."""
     if kind != MovementKind.RESTOCK:
         ensure_unlocked(actor, good.service_position.seller, "good.stock")
-
-
-def _carry_out(request: CashRequest, actor) -> None:
-    from apps.purchases import services as purchases
-
-    if request.kind == RequestKind.DELETE_SALE:
-        purchases.delete_cash_sale(actor=actor, purchase=request.purchase, reason=request.reason)
-    else:
-        good = Good.objects.select_for_update().filter(pk=request.good_id).first()
-        if good is None:
-            raise RequestClosed(_("This good was removed."))
-        changes = {"price": request.new_price}
-        if request.kind == RequestKind.NEW_GOOD:
-            changes["is_active"] = True
-        goods.update_good(actor=actor, good=good, **changes)
-
-
-def _ensure_may_decide(actor, request: CashRequest) -> None:
-    ensure_not_own_store(actor, request.seller_id)
-    if request.requested_by_id == actor.pk:
-        raise OwnRequest()
-    if request.purchase_id and request.purchase.confirmed_by_id == actor.pk:
-        raise OwnRequest()
-
-
-@transaction.atomic
-def approve(*, actor, request: CashRequest, note: str = "") -> CashRequest:
-    # The sale (or good) is locked before the request, as when the request is made.
-    if request.purchase_id:
-        Purchase.objects.select_for_update().get(pk=request.purchase_id)
-    elif request.good_id:
-        Good.all_objects.select_for_update().get(pk=request.good_id)
-    request = _lock_pending(request)
-    _ensure_may_decide(actor, request)
-    _carry_out(request, actor)
-    _close(request, RequestStatus.APPROVED, actor=actor, note=note)
-    record_audit(
-        "cash.request_approved",
-        actor=actor,
-        entity=request,
-        new_values=_summary(request),
-    )
-    return request
-
-
-@transaction.atomic
-def reject(*, actor, request: CashRequest, note: str) -> CashRequest:
-    request = _lock_pending(request)
-    _ensure_may_decide(actor, request)
-    _close(request, RequestStatus.REJECTED, actor=actor, note=note)
-    record_audit("cash.request_rejected", actor=actor, entity=request, new_values=_summary(request))
-    return request
-
-
-@transaction.atomic
-def withdraw(*, actor, request: CashRequest) -> CashRequest:
-    """The person who asked no longer wants it. (A new good then stays off sale.)"""
-    request = _lock_pending(request)
-    if request.requested_by_id != actor.pk:
-        raise OwnRequest(_("Only the person who asked can withdraw a request."))
-    _close(request, RequestStatus.WITHDRAWN, actor=actor)
-    record_audit(
-        "cash.request_withdrawn", actor=actor, entity=request, new_values=_summary(request)
-    )
-    return request
-
-
-def _summary(request: CashRequest) -> dict:
-    return {
-        "kind": request.kind,
-        "purchase": request.purchase_id,
-        "good": request.good_id,
-        "price": request.new_price,
-        "note": request.decision_note,
-    }
 
 
 # --- Stock counts -------------------------------------------------------------------------

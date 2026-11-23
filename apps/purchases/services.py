@@ -696,7 +696,7 @@ def _lock_goods(ids) -> dict[int, Good]:
 
 @transaction.atomic
 def delete_cash_sale(*, actor, purchase: Purchase, reason: str) -> Purchase:
-    """Delete a cash sale, once finance approved it (apps.cash.services): the goods go back
+    """Delete a cash sale, for finance only (apps.cash.services.delete_sale): the goods go back
     to stock and the total off what the store owes; the seller returns the cash by hand.
 
     Locks in the checkout's order: purchase → goods by id → the store.
@@ -762,9 +762,9 @@ def refund_purchase(*, actor, purchase: Purchase) -> Purchase:
     """
     purchase = _lock_paid(purchase)
     if purchase.payment == Payment.CASH:
-        from apps.cash.exceptions import CashDeleteNeedsApproval
+        from apps.cash.exceptions import CashDeletedByFinance
 
-        raise CashDeleteNeedsApproval()
+        raise CashDeletedByFinance()
     account = DeveloperAccount.objects.select_for_update().get(developer_id=purchase.developer_id)
     items = list(purchase.items.order_by("good_id"))
 

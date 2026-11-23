@@ -16,7 +16,7 @@ from apps.accounts.models import Role, UserRole
 from apps.accounts.rbac import ROLES, Roles
 from apps.audit.models import AuditLog
 from apps.cash import services as cash
-from apps.cash.models import CashEntry, CashRequest, StockCount
+from apps.cash.models import CashEntry, StockCount
 from apps.finance import services as finance
 from apps.finance.models import AccountTransaction
 from apps.goods import services as goods
@@ -38,7 +38,6 @@ PURCHASES = test_purchases.PURCHASES
 GOODS = "/api/v1/goods/"
 STORES = "/api/v1/cash/stores/"
 ENTRIES = "/api/v1/cash/entries/"
-REQUESTS = "/api/v1/cash/requests/"
 IMPORT_GOODS = "/api/v1/imports/goods/"
 COUNTS = "/api/v1/cash/stock-counts/"
 
@@ -90,8 +89,8 @@ def handover(client, shop, amount, note="", idem=None):
     )
 
 
-def ask_delete(client, pid, reason="Wrong goods"):
-    return client.post(REQUESTS, {"purchase": pid, "reason": reason})
+def delete_sale(client, pid, reason="Wrong goods"):
+    return client.post(f"{PURCHASES}{pid}/delete-cash/", {"reason": reason})
 
 
 def code(response):
@@ -200,13 +199,9 @@ def test_counter_managers_take_cash_at_their_counter(shop, make_user):
     pid = client.post(PURCHASES, {"service_position": counter.pk}).json()["id"]
     client.post(f"{PURCHASES}{pid}/items/", {"good": juice.pk, "quantity": 1})
     assert pay_cash(client, pid).status_code == 201
-    assert ask_delete(client, pid).status_code == 201
-    mine = client.get(REQUESTS).json()["results"]
-    assert [r["purchase"] for r in mine] == [pid]
+    assert delete_sale(client, pid).status_code == 403
     # The store's whole cash is not theirs to see.
     assert client.get(STORES).status_code == 403
-    theirs = sell(client_of(shop.seller_user), shop, (shop.tea, 1))
-    assert ask_delete(client, theirs).status_code == 400
 
 
 @pytest.mark.django_db
@@ -326,10 +321,10 @@ def test_a_wrong_handover_is_cancelled_once(till, shop, finance_client):
 
 
 @pytest.mark.django_db
-def test_a_cash_sale_is_neither_changed_nor_deleted_alone(till, shop, admin_client):
+def test_a_cash_sale_is_neither_changed_nor_deleted_as_a_wallet_sale(till, shop, admin_client):
     pid = sell(till, shop, (shop.tea, 2))
     for client in (till, admin_client):
-        assert code(client.delete(f"{PURCHASES}{pid}/")) == (409, "CASH_DELETE_NEEDS_APPROVAL")
+        assert code(client.delete(f"{PURCHASES}{pid}/")) == (409, "CASH_DELETED_BY_FINANCE")
         change = {"items": [{"good": shop.tea.pk, "quantity": 1}]}
         response = client.patch(f"{PURCHASES}{pid}/", change, format="json")
         assert code(response) == (409, "CASH_SALE_FIXED")
@@ -337,93 +332,66 @@ def test_a_cash_sale_is_neither_changed_nor_deleted_alone(till, shop, admin_clie
 
 
 @pytest.mark.django_db
-def test_deleting_waits_for_finance(till, shop, finance_client):
+def test_finance_deletes_a_cash_sale(till, shop, finance_client):
     pid = sell(till, shop, (shop.tea, 2))
-    assert till.post(REQUESTS, {"purchase": pid, "reason": " "}).status_code == 400
-    made = ask_delete(till, pid)
-    assert made.status_code == 201 and made.json()["status"] == "PENDING"
-    assert code(ask_delete(till, pid)) == (409, "ALREADY_REQUESTED")
-    assert Purchase.objects.get(pk=pid).status == "CONFIRMED"
-    shown = till.get(f"{PURCHASES}{pid}/").json()["delete_request"]
-    assert (shown["status"], shown["reason"]) == ("PENDING", "Wrong goods")
-
-    url = f"{REQUESTS}{made.json()['id']}/"
-    assert till.post(f"{url}approve/").status_code == 403
-    assert till.post(f"{url}reject/", {"note": "x"}).status_code == 403
-    row = finance_client.get(REQUESTS, {"status": "PENDING"}).json()["results"][0]
-    assert (row["total"], row["sold_by"], row["requested_by_username"]) == ("5.00", "cafe", "cafe")
-    assert finance_client.post(f"{url}approve/", {"note": "ok"}).json()["status"] == "APPROVED"
-
+    assert delete_sale(till, pid).status_code == 403
+    assert delete_sale(finance_client, pid, " ").status_code == 400  # say why
+    body = delete_sale(finance_client, pid).json()
+    assert (body["status"], body["refund_reason"]) == ("REFUNDED", "Wrong goods")
     purchase = Purchase.objects.get(pk=pid)
-    assert purchase.status == "REFUNDED" and purchase.refund_reason == "Wrong goods"
     assert purchase.refunded_by.username == "fin"
     assert stock(shop.tea) == 10 and cash.owed(shop.seller.pk) == 0
-    assert code(finance_client.post(f"{url}approve/")) == (409, "REQUEST_CLOSED")
-    assert code(ask_delete(till, pid))[1] == "REQUEST_CLOSED"
+    assert code(delete_sale(finance_client, pid)) == (409, "PURCHASE_NOT_PAID")
+    assert AuditLog.objects.filter(action="purchase.refunded").count() == 1
     assert_books()
 
 
 @pytest.mark.django_db
-def test_a_rejected_request_leaves_the_sale(till, shop, finance_client):
-    pid = sell(till, shop, (shop.tea, 2))
-    url = f"{REQUESTS}{ask_delete(till, pid).json()['id']}/reject/"
-    assert finance_client.post(url, {}).status_code == 400  # why not?
-    assert finance_client.post(url, {"note": "Show the goods"}).json()["status"] == "REJECTED"
-    shown = till.get(f"{PURCHASES}{pid}/").json()["delete_request"]
-    assert (shown["status"], shown["decision_note"]) == ("REJECTED", "Show the goods")
-    assert cash.owed(shop.seller.pk) == Decimal("5.00")
-    assert ask_delete(till, pid).status_code == 201  # may ask again
-
-
-@pytest.mark.django_db
-def test_finance_deletes_at_once_but_not_its_own_sale(till, shop, finance_client, admin_client):
+def test_only_finance_and_admins_delete_cash_sales(till, shop, make_user, admin_client):
     pid = sell(till, shop, (shop.tea, 1))
-    made = ask_delete(finance_client, pid).json()
-    assert (made["status"], made["decided_by_username"]) == ("APPROVED", "fin")
-    assert Purchase.objects.get(pk=pid).status == "REFUNDED"
-    # The admin took the cash: someone else approves.
-    own = sell(admin_client, shop, (shop.tea, 1))
-    made = ask_delete(admin_client, own).json()
-    assert made["status"] == "PENDING"
-    url = f"{REQUESTS}{made['id']}/approve/"
-    assert code(admin_client.post(url)) == (403, "OWN_REQUEST")
-    assert finance_client.post(url).status_code == 200
-    assert_books()
+    for role in (Roles.BOSS, Roles.MANAGER, Roles.BUILDING_OWNER, Roles.BUILDING_MANAGER):
+        assert delete_sale(client_of(make_user(role)), pid).status_code in (403, 404)
+    assert Purchase.objects.get(pk=pid).status == "CONFIRMED"
+    assert delete_sale(admin_client, pid).status_code == 200
 
 
 @pytest.mark.django_db
-def test_who_took_the_cash_cannot_approve_anothers_request(till, shop, admin_client):
+def test_not_ones_own_sale_or_store(till, shop, finance_client, admin_client):
     own = sell(admin_client, shop, (shop.tea, 1))
-    made = ask_delete(till, own).json()
-    assert code(admin_client.post(f"{REQUESTS}{made['id']}/approve/")) == (403, "OWN_REQUEST")
-
-
-@pytest.mark.django_db
-def test_a_store_login_with_finance_rights_cannot_approve(till, shop):
-    pid = sell(till, shop, (shop.tea, 1))
+    assert code(delete_sale(admin_client, own)) == (403, "OWN_SALE")
+    assert delete_sale(finance_client, own).status_code == 200
+    pid = sell(admin_client, shop, (shop.tea, 1))
     UserRole.objects.create(
         user=shop.seller_user, role=Role.objects.get(code=Roles.FINANCE_MANAGER)
     )
     fresh = client_of(type(shop.seller_user).objects.get(pk=shop.seller_user.pk))
-    made = ask_delete(fresh, pid).json()
-    assert made["status"] == "PENDING"
-    assert code(fresh.post(f"{REQUESTS}{made['id']}/approve/")) == (403, "OWN_STORE")
+    assert code(delete_sale(fresh, pid)) == (403, "OWN_STORE")
 
 
 @pytest.mark.django_db
-def test_wallet_sales_are_not_deleted_through_requests(till, shop):
-    pid = new_purchase(till, shop, (shop.tea, 1))
-    test_purchases.confirm(till, pid)
-    assert code(ask_delete(till, pid)) == (409, "CASH_SALE_FIXED")
-    assert till.delete(f"{PURCHASES}{pid}/").status_code == 200  # as before
+def test_wallet_sales_and_drafts_are_not_deleted_this_way(till, shop, finance_client):
+    draft = new_purchase(till, shop, (shop.tea, 1))
+    assert code(delete_sale(finance_client, draft)) == (409, "CASH_SALE_FIXED")
+    test_purchases.confirm(till, draft)
+    assert code(delete_sale(finance_client, draft)) == (409, "CASH_SALE_FIXED")
+    assert till.delete(f"{PURCHASES}{draft}/").status_code == 200  # as before
 
 
 @pytest.mark.django_db
-def test_withdrawing(till, shop, finance_client):
-    pid = sell(till, shop, (shop.tea, 1))
-    url = f"{REQUESTS}{ask_delete(till, pid).json()['id']}/withdraw/"
-    assert code(finance_client.post(url)) == (403, "OWN_REQUEST")
-    assert till.post(url).json()["status"] == "WITHDRAWN"
+def test_the_permission_is_renamed_for_every_role_that_had_it():
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from apps.accounts.models import Permission
+
+    Permission.objects.filter(codename="cash.delete").delete()
+    old = Permission.objects.create(codename="cash.approve")
+    role = Role.objects.create(code="CUSTOM", name="Custom")
+    role.permissions.add(old)
+    module = importlib.import_module("apps.accounts.migrations.0013_cash_delete")
+    module.rename("cash.approve", "cash.delete")(django_apps, None)
+    assert list(role.permissions.values_list("codename", flat=True)) == ["cash.delete"]
 
 
 # --- Prices and goods ---------------------------------------------------------------------
@@ -433,60 +401,61 @@ def price(good):
     return Good.all_objects.get(pk=good.pk).price
 
 
-@pytest.mark.django_db
-def test_a_price_waits_for_approval(till, shop, finance_client):
-    response = till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "0.50", "name": "Green tea"})
-    assert response.status_code == 200, response.json()
-    body = response.json()
-    assert (body["price"], body["name"]) == ("2.50", "Green tea")
-    assert body["pending_request"]["new_price"] == "0.50"
-    # A newer wish replaces it; the price as it is, is none.
-    till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "3.00"})
-    till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "2.50", "description": "x"})
-    waiting = finance_client.get(REQUESTS, {"status": "PENDING"}).json()["results"]
-    assert [(r["old_price"], r["new_price"]) for r in waiting] == [("2.50", "3.00")]
-    pid = sell(till, shop, (shop.tea, 1))
-    assert Purchase.objects.get(pk=pid).total == Decimal("2.50")
-    assert till.post(f"{REQUESTS}{waiting[0]['id']}/approve/").status_code == 403
-    assert finance_client.post(f"{REQUESTS}{waiting[0]['id']}/approve/").status_code == 200
-    assert price(shop.tea) == Decimal("3.00")
-    assert till.get(f"{GOODS}{shop.tea.pk}/").json()["pending_request"] is None
+def changes(client, shop, **query):
+    return client.get(f"{STORES}{shop.seller.pk}/price-changes/", query).json()
 
 
 @pytest.mark.django_db
-def test_staff_and_stores_without_cash_set_prices_directly(till, world, admin_client):
-    assert till.patch(f"{GOODS}{world.tea.pk}/", {"price": "3"}).json()["price"] == "3.00"
-    world.seller.accepts_cash = True
-    world.seller.save()
-    assert admin_client.patch(f"{GOODS}{world.tea.pk}/", {"price": "4"}).json()["price"] == "4.00"
-    assert not CashRequest.objects.exists()
+def test_finance_sees_every_price_change(till, shop, finance_client, admin_client):
+    assert till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "0.50"}).json()["price"] == "0.50"
+    till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "0.50", "description": "x"})  # no change
+    till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "2.50"})
+    admin_client.patch(f"{GOODS}{shop.cake.pk}/", {"price": "5"})
+    rows = changes(finance_client, shop)
+    assert [(r["good_name"], r["old_price"], r["new_price"], r["by"]) for r in rows] == [
+        ("Cake", "4.00", "5.00", "root"),
+        ("Tea", "0.50", "2.50", "cafe"),
+        ("Tea", "2.50", "0.50", "cafe"),
+    ]
+    assert [r["by_store"] for r in rows] == [False, True, True]
+    store = finance_client.get(STORES).json()["stores"][0]
+    assert store["price_changes"] == 3
+    assert [r["id"] for r in changes(till, shop)] == [r["id"] for r in rows]  # their own
+    assert changes(finance_client, shop, date_from="2020-01-01", date_to="2020-01-02") == []
 
 
 @pytest.mark.django_db
-def test_a_new_good_waits_off_sale(till, shop, finance_client):
-    data = {"service_position": shop.position.pk, "name": "Cheap", "price": "0.10"}
-    made = till.post(GOODS, data | {"initial_quantity": 5, "is_active": True}).json()
-    assert made["is_active"] is False and made["pending_request"]["kind"] == "NEW_GOOD"
-    url = f"{GOODS}{made['id']}/"
-    assert code(till.patch(url, {"is_active": True})) == (409, "AWAITING_APPROVAL")
-    pid = new_purchase(till, shop)
-    add = till.post(f"{PURCHASES}{pid}/items/", {"good": made["id"], "quantity": 1})
-    assert code(add)[1] == "GOOD_NOT_AVAILABLE"
-    request = CashRequest.objects.get()
-    reject = finance_client.post(f"{REQUESTS}{request.pk}/reject/", {"note": "Too cheap"})
-    assert reject.status_code == 200
-    assert code(till.patch(url, {"is_active": True})) == (409, "AWAITING_APPROVAL")
-    # A better price is a new request; approving puts it on sale.
-    assert till.patch(url, {"price": "1.00"}).json()["price"] == "1.00"
-    request = CashRequest.objects.get(status="PENDING")
-    assert (request.kind, request.new_price) == ("NEW_GOOD", Decimal("1.00"))
-    assert finance_client.post(f"{REQUESTS}{request.pk}/approve/").status_code == 200
-    good = till.get(url).json()
-    assert (good["is_active"], good["price"]) == (True, "1.00")
-    # Approved once: the store switches it off and on itself, prices wait again.
-    till.patch(url, {"is_active": False})
-    assert till.patch(url, {"is_active": True}).status_code == 200
-    assert till.patch(url, {"price": "0.10"}).json()["price"] == "1.00"
+def test_a_new_good_is_on_sale_at_once_and_listed(till, shop, finance_client):
+    made = till.post(
+        GOODS, {"service_position": shop.position.pk, "name": "Candy", "price": "0.10"}
+    ).json()
+    assert made["is_active"] is True
+    sell(
+        till,
+        shop,
+        (
+            Good.objects.create(
+                service_position=shop.position, name="Gum", price="1", track_stock=False
+            ),
+            1,
+        ),
+    )
+    (row,) = changes(finance_client, shop)
+    assert (row["good_name"], row["old_price"], row["new_price"]) == ("Candy", None, "0.10")
+    assert till.delete(f"{GOODS}{made['id']}/").status_code == 204
+    assert len(changes(finance_client, shop)) == 1  # a removed good stays listed
+
+
+@pytest.mark.django_db
+def test_price_changes_are_per_store(till, shop, make_user, finance_client):
+    till.patch(f"{GOODS}{shop.tea.pk}/", {"price": "3"})
+    other = make_user(Roles.GOODS_SELLER, username="other")
+    Seller.objects.create(name="Other", user=other, accepts_cash=True)
+    url = f"{STORES}{shop.seller.pk}/price-changes/"
+    assert client_of(other).get(url).status_code == 404
+    assert client_of(make_user(Roles.MANAGER)).get(url).status_code == 404
+    counts = {s["name"]: s["price_changes"] for s in finance_client.get(STORES).json()["stores"]}
+    assert counts == {"Cafe": 1, "Other": 0}
 
 
 @pytest.mark.django_db
@@ -508,7 +477,7 @@ def test_stock_is_added_but_not_written_off_by_the_store(till, shop, admin_clien
 
 
 @pytest.mark.django_db
-def test_the_excel_import_is_no_way_around(shop, make_user):
+def test_the_excel_import_is_no_way_around_the_count(shop, make_user, finance_client):
     """A store's own login importing goods: the same rules as on the pages."""
     role = Role.objects.create(code="IMPORT", name="Import")
     from apps.accounts.models import Permission
@@ -517,10 +486,10 @@ def test_the_excel_import_is_no_way_around(shop, make_user):
     UserRole.objects.create(user=shop.seller_user, role=role)
     client = client_of(type(shop.seller_user).objects.get(pk=shop.seller_user.pk))
 
-    def load(*row):
+    def load(header, *row):
         book = Workbook()
         sheet = book.active
-        sheet.append(["good", "price", "quantity"])
+        sheet.append(header)
         sheet.append(list(row))
         file = io.BytesIO()
         book.save(file)
@@ -528,17 +497,17 @@ def test_the_excel_import_is_no_way_around(shop, make_user):
         file.name = "goods.xlsx"
         return client.post(IMPORT_GOODS, {"file": file, "dry_run": "false"}, format="multipart")
 
-    assert load("Tea", "0.10", "").status_code == 200
-    assert price(shop.tea) == Decimal("2.50")
-    assert CashRequest.objects.get().new_price == Decimal("0.10")
-    load("Tea", "", 1)
-    assert stock(shop.tea) == 10
-    load("Candy", "0.10", "")
-    assert Good.objects.get(name="Candy").is_active is False
+    assert load(["good", "price"], "Tea", "0.10").status_code == 200
+    assert price(shop.tea) == Decimal("0.10")
+    assert [r["good_name"] for r in changes(finance_client, shop)] == ["Tea"]
+    load(["good", "quantity"], "Tea", 1)
+    load(["good", "track_stock"], "Tea", "no")
+    tea = Good.objects.get(pk=shop.tea.pk)
+    assert tea.quantity == 10 and tea.track_stock
 
 
 @pytest.mark.django_db
-def test_courts_are_not_locked(shop):
+def test_courts_are_not_listed(shop, finance_client):
     court = Good.objects.create(
         service_position=shop.position,
         name="Court",
@@ -546,8 +515,8 @@ def test_courts_are_not_locked(shop):
         kind=GoodKind.RENTAL,
         track_stock=False,
     )
-    changed = cash.update_store_good(actor=shop.seller_user, good=court, price=Decimal("6"))
-    assert changed.price == Decimal("6.00") and not CashRequest.objects.exists()
+    goods.update_good(actor=shop.seller_user, good=court, price=Decimal("6"))
+    assert changes(finance_client, shop) == []
 
 
 # --- Stock counts -------------------------------------------------------------------------
@@ -644,7 +613,7 @@ def test_returned_cash_counts_on_the_day_it_is_returned(till, shop, finance_clie
         cursor.execute("UPDATE cash_cashentry SET created_at = %s", [yesterday])
         cursor.execute("ALTER TABLE cash_cashentry ENABLE TRIGGER cash_cashentry_append_only")
     sell(till, shop, (shop.tea, 3))
-    ask_delete(finance_client, pid)
+    delete_sale(finance_client, pid)
     handover(finance_client, shop, "1.00")
     body = finance_client.get(f"{STORES}{shop.seller.pk}/").json()
     assert [
@@ -674,7 +643,6 @@ def test_stores_see_their_own_cash_only(till, shop, make_user, finance_client):
     assert [s["name"] for s in theirs.get(STORES).json()["stores"]] == ["Other"]
     assert theirs.get(f"{STORES}{shop.seller.pk}/").status_code == 404
     assert theirs.get(ENTRIES).json()["count"] == 0
-    assert theirs.get(REQUESTS).json()["count"] == 0
     names = {s["name"] for s in finance_client.get(STORES).json()["stores"]}
     assert names == {"Cafe", "Other"}
     boss = client_of(make_user(Roles.BOSS))
@@ -716,7 +684,7 @@ def test_only_admins_switch_cash_on(shop, admin_client, make_user):
 
 def test_roles():
     fin = ROLES[Roles.FINANCE_MANAGER].permissions
-    assert {"cash.view", "cash.handover", "cash.approve", "cash.count"} <= fin
+    assert {"cash.view", "cash.handover", "cash.delete", "cash.count"} <= fin
     assert "cash.enable" not in fin and "purchase.cash" not in fin
     assert "cash.view" in ROLES[Roles.BOSS].permissions
     assert "cash.view" not in ROLES[Roles.BUILDING_OWNER].permissions
@@ -788,7 +756,6 @@ def test_deleting_a_good_for_good_keeps_what_is_owed(till, shop, finance_client)
     from common import record_delete
 
     pid = sell(till, shop, (shop.tea, 2))
-    ask_delete(till, pid)
     count_lines(finance_client, shop, (shop.tea, 8, 8))
     with transaction.atomic():
         record_delete.plan_good(shop.tea).run()
@@ -800,8 +767,7 @@ def test_deleting_a_good_for_good_keeps_what_is_owed(till, shop, finance_client)
 def test_deleting_a_store_or_user_for_good(till, shop, finance_client, make_user):
     from common import record_delete
 
-    pid = sell(till, shop, (shop.tea, 2))
-    ask_delete(till, pid)
+    sell(till, shop, (shop.tea, 2))
     made = handover(finance_client, shop, "5.00").json()
     finance_client.post(
         f"{ENTRIES}{made['id']}/reverse/", {"reason": "x"}, HTTP_IDEMPOTENCY_KEY=key()
@@ -873,15 +839,14 @@ def test_concurrent_sales_and_handovers_add_up(shop, make_user):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_two_approvals_delete_once(shop, make_user):
+def test_two_deletes_at_once_delete_once(shop, make_user):
     p = services.create_purchase(actor=shop.seller_user, service_position=shop.position)
     services.add_item(purchase=p, good=shop.tea, quantity=2)
-    services.confirm_cash_sale(actor=shop.seller_user, purchase=p, idempotency_key=key())
-    wish = cash.request_deletion(actor=shop.seller_user, purchase=p, reason="x")
+    p, _new = services.confirm_cash_sale(actor=shop.seller_user, purchase=p, idempotency_key=key())
     one, two = make_user(username="f1"), make_user(username="f2")
     results = _together(
-        lambda: cash.approve(actor=one, request=wish),
-        lambda: cash.approve(actor=two, request=wish),
+        lambda: cash.delete_sale(actor=one, purchase=p, reason="x"),
+        lambda: cash.delete_sale(actor=two, purchase=p, reason="x"),
     )
     assert len([r for r in results if isinstance(r, Exception)]) == 1
     assert stock(shop.tea) == 10 and cash.owed(shop.seller.pk) == 0

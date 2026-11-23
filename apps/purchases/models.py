@@ -42,8 +42,8 @@ class Purchase(TimeStampedModel):
     refund_purchase.
 
     A CASH sale (at a store that accepts cash) has no developer, card or wallet entry: its
-    money is in the store's cash ledger (apps.cash). It is never changed, and deleted only
-    with finance's approval.
+    money is in the store's cash ledger (apps.cash). It is never changed, and only finance
+    deletes it.
     """
 
     seller = models.ForeignKey(Seller, on_delete=models.PROTECT, related_name="purchases")

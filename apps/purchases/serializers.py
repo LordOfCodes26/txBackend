@@ -19,7 +19,6 @@ from apps.sellers.serializers import SellerSummarySerializer
 
 from . import preferential
 from .models import (
-    Payment,
     PreferentialGood,
     PreferentialSettings,
     Purchase,
@@ -146,16 +145,6 @@ class PresentedCardSerializer(serializers.Serializer):
         return (purchase.presented_at + window).isoformat()
 
 
-class DeleteRequestSerializer(serializers.Serializer):
-    """The last request to delete a paid cash sale (apps.cash)."""
-
-    id = serializers.IntegerField()
-    status = serializers.CharField()
-    reason = serializers.CharField()
-    decision_note = serializers.CharField()
-    requested_by = serializers.IntegerField(allow_null=True)
-
-
 class PurchaseSerializer(serializers.ModelSerializer):
     seller = SellerSummarySerializer(read_only=True)
     service_position_name = serializers.CharField(source="service_position.name", read_only=True)
@@ -172,9 +161,6 @@ class PurchaseSerializer(serializers.ModelSerializer):
     presented_card = serializers.SerializerMethodField()
     waiting_for_card = serializers.SerializerMethodField(
         help_text="The seller pressed Scan card to buy: the next tap on the reader goes here."
-    )
-    delete_request = serializers.SerializerMethodField(
-        help_text="Paid cash sales: the last request to delete it, or null."
     )
     total = serializers.SerializerMethodField()
     currency = serializers.SerializerMethodField()
@@ -215,24 +201,8 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "refunded_by",
             "refunded_at",
             "refund_reason",
-            "delete_request",
         ]
         read_only_fields = fields
-
-    @extend_schema_field(DeleteRequestSerializer(allow_null=True))
-    def get_delete_request(self, purchase) -> dict | None:
-        if purchase.payment != Payment.CASH or purchase.status != PurchaseStatus.CONFIRMED:
-            return None
-        last = purchase.cash_requests.order_by("-id").first()
-        if last is None:
-            return None
-        return {
-            "id": last.pk,
-            "status": last.status,
-            "reason": last.reason,
-            "decision_note": last.decision_note,
-            "requested_by": last.requested_by_id,
-        }
 
     def get_booking(self, purchase) -> int | None:
         if purchase.kind != "BOOKING" or purchase.status != "CONFIRMED":
@@ -415,6 +385,10 @@ class CashConfirmSerializer(serializers.Serializer):
     buyer_name = serializers.CharField(
         max_length=100, required=False, allow_blank=True, default="", help_text="Optional."
     )
+
+
+class CashDeleteSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=255)
 
 
 class ConfirmSerializer(serializers.Serializer):

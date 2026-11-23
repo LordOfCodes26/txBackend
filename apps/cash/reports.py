@@ -1,4 +1,5 @@
-"""The Cash control figures, all from the stores' cash ledger, by company-local day."""
+"""The Cash control figures, by company-local day: the money from the stores' cash ledger,
+the price changes from the audit log (which records every one, whoever made it)."""
 
 from datetime import date
 from decimal import Decimal
@@ -6,10 +7,13 @@ from decimal import Decimal
 from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import TruncDate
 
+from apps.audit.models import AuditLog
+from apps.goods.models import Good, GoodKind
 from apps.sellers.models import Seller
 from apps.stats.services import _days, _local_bounds
 
-from .models import CashEntry, CashKind, CashRequest, CountOutcome, StockCount
+from .models import CashEntry, CashKind, CountOutcome, StockCount
+from .services import works_for
 
 ZERO = Decimal("0.00")
 KINDS = {
@@ -44,7 +48,7 @@ def _by_seller(qs, **annotations) -> dict[int, dict]:
 
 def stores(sellers, first: date, last: date) -> list[dict]:
     """Per store that takes cash, or ever did: the period's figures, what it owed before and
-    after it, what it owes now, and what waits for finance. The most owed first."""
+    after it, what it owes now, its price changes and missing goods. The most owed first."""
     start, end = _local_bounds(first, last)
     entries = CashEntry.objects.filter(seller__in=sellers)
     before = _by_seller(entries.filter(created_at__lt=start), total=Sum("amount"))
@@ -62,9 +66,9 @@ def stores(sellers, first: date, last: date) -> list[dict]:
             filter=Q(kind=CashKind.HANDOVER, reverses__isnull=True, reversal__isnull=True),
         ),
     )
-    pending = _by_seller(
-        CashRequest.objects.filter(seller__in=sellers, status="PENDING"), n=Count("pk")
-    )
+    changes: dict[int, int] = {}
+    for change in price_changes(sellers, first, last):
+        changes[change["seller"]] = changes.get(change["seller"], 0) + 1
     counts = _by_seller(
         StockCount.objects.filter(seller__in=sellers),
         last=Max("created_at"),
@@ -72,7 +76,7 @@ def stores(sellers, first: date, last: date) -> list[dict]:
         missing=Sum("missing_value", filter=Q(outcome=CountOutcome.OPEN)),
     )
     rows = []
-    shown = Q(accepts_cash=True) | Q(pk__in=list(now)) | Q(pk__in=list(pending))
+    shown = Q(accepts_cash=True) | Q(pk__in=list(now))
     for seller in Seller.objects.filter(pk__in=sellers.values("pk")).filter(shown):
         period = during.get(seller.pk, {})
         figures = _figures(period)
@@ -91,7 +95,7 @@ def stores(sellers, first: date, last: date) -> list[dict]:
                 "closing": closing,
                 "owed": now.get(seller.pk, {}).get("total") or ZERO,
                 "last_handover_at": now.get(seller.pk, {}).get("last_handover_at"),
-                "pending_requests": pending.get(seller.pk, {}).get("n", 0),
+                "price_changes": changes.get(seller.pk, 0),
                 "open_counts": counted.get("open", 0),
                 "open_missing": counted.get("missing") or ZERO,
                 "last_count_at": counted.get("last"),
@@ -124,3 +128,48 @@ def daily(seller: Seller, first: date, last: date) -> list[dict]:
         out.append({"date": day.isoformat(), **figures, "owed": running})
     out.reverse()
     return out
+
+
+def price_changes(sellers, first: date, last: date) -> list[dict]:
+    """The prices changed and goods added at `sellers` in the period, newest first. Courts
+    are left out (never paid in cash). Goods deleted for good are gone from the list."""
+    start, end = _local_bounds(first, last)
+    catalog = {
+        str(g.pk): g
+        for g in Good.all_objects.filter(service_position__seller__in=sellers)
+        .exclude(kind=GoodKind.RENTAL)
+        .select_related("service_position__seller")
+    }
+    logs = AuditLog.objects.filter(
+        Q(action="good.created") | Q(action="good.updated", new_values__has_key="price"),
+        entity_type=Good._meta.label_lower,
+        entity_id__in=list(catalog),
+        created_at__gte=start,
+        created_at__lt=end,
+    )
+    works: dict[tuple, bool] = {}
+    rows = []
+    for entry in logs.select_related("actor").order_by("-created_at", "-id"):
+        good = catalog[entry.entity_id]
+        seller = good.service_position.seller
+        key = (entry.actor_id, seller.pk)
+        if key not in works:
+            works[key] = entry.actor is not None and works_for(entry.actor, seller.pk)
+        rows.append(
+            {
+                "id": entry.pk,
+                "good": good.pk,
+                "good_name": good.name,
+                "seller": seller.pk,
+                "seller_name": seller.name,
+                "track_stock": good.track_stock,
+                "old_price": Decimal(str(entry.old_values["price"]))
+                if entry.action == "good.updated"
+                else None,
+                "new_price": Decimal(str(entry.new_values["price"])),
+                "by": entry.actor_username,
+                "by_store": works[key],
+                "created_at": entry.created_at,
+            }
+        )
+    return rows

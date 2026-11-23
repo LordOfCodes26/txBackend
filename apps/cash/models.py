@@ -2,9 +2,9 @@
 
 Stores that accept cash (`Seller.accepts_cash`) sell to people without a card. The cash is
 the store's to hand over: `CashEntry` is its ledger (like a wallet's), and the sum of a
-store's entries is what it owes now. Only finance records handovers; deleting a cash sale
-and changing a price wait for approval (`CashRequest`); someone else counts the stock
-(`StockCount`), and missing goods are explained or charged to the store.
+store's entries is what it owes now. Only finance records handovers and deletes cash sales;
+someone else counts the stock (`StockCount`), and missing goods are explained or charged to
+the store. Price changes and new goods are listed from the audit log (`reports`).
 """
 
 from django.conf import settings
@@ -15,7 +15,6 @@ from django.utils import timezone
 
 from apps.finance.models import MONEY
 from apps.goods.models import QUANTITY, Good
-from apps.purchases.models import Purchase
 from apps.sellers.models import Seller
 from common.models import AppendOnlyModel, TimeStampedModel
 
@@ -78,76 +77,6 @@ class CashEntry(AppendOnlyModel):
 
     def __str__(self):
         return f"{self.kind} {self.amount} → {self.owed_after}"
-
-
-class RequestKind(models.TextChoices):
-    DELETE_SALE = "DELETE_SALE", "Delete a cash sale"
-    PRICE = "PRICE", "Change a good's price"
-    NEW_GOOD = "NEW_GOOD", "Put a new good on sale"
-
-
-class RequestStatus(models.TextChoices):
-    PENDING = "PENDING", "Waiting for approval"
-    APPROVED = "APPROVED", "Approved"
-    REJECTED = "REJECTED", "Rejected"
-    WITHDRAWN = "WITHDRAWN", "Withdrawn"
-
-
-class CashRequest(TimeStampedModel):
-    """Something a store that takes cash may not do alone: finance approves or rejects it."""
-
-    kind = models.CharField(max_length=12, choices=RequestKind.choices)
-    status = models.CharField(
-        max_length=10, choices=RequestStatus.choices, default=RequestStatus.PENDING
-    )
-    seller = models.ForeignKey(Seller, on_delete=models.CASCADE, related_name="cash_requests")
-    # DELETE_SALE: the sale. PRICE and NEW_GOOD: the good and its prices.
-    purchase = models.ForeignKey(
-        Purchase, on_delete=models.CASCADE, null=True, blank=True, related_name="cash_requests"
-    )
-    good = models.ForeignKey(
-        Good, on_delete=models.CASCADE, null=True, blank=True, related_name="cash_requests"
-    )
-    old_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    new_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
-    reason = models.CharField(max_length=255, blank=True)
-    requested_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
-    )
-    decided_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
-    )
-    decided_at = models.DateTimeField(null=True, blank=True)
-    decision_note = models.CharField(max_length=255, blank=True)
-
-    class Meta:
-        ordering = ["-id"]
-        constraints = [
-            models.CheckConstraint(
-                condition=Q(kind="DELETE_SALE", purchase__isnull=False, good__isnull=True)
-                | Q(
-                    kind__in=("PRICE", "NEW_GOOD"),
-                    purchase__isnull=True,
-                    good__isnull=False,
-                    new_price__isnull=False,
-                ),
-                name="cash_request_target_matches_kind",
-            ),
-            models.UniqueConstraint(
-                fields=["purchase"],
-                condition=Q(status="PENDING", purchase__isnull=False),
-                name="cash_request_one_pending_per_sale",
-            ),
-            models.UniqueConstraint(
-                fields=["good"],
-                condition=Q(status="PENDING", good__isnull=False),
-                name="cash_request_one_pending_per_good",
-            ),
-        ]
-        indexes = [models.Index(fields=["status", "seller"])]
-
-    def __str__(self):
-        return f"{self.kind} {self.pk} ({self.status})"
 
 
 class CountOutcome(models.TextChoices):

@@ -6,10 +6,9 @@ from rest_framework import serializers
 from apps.finance.models import MONEY
 from apps.goods.models import Good
 from apps.goods.serializers import QuantityField
-from apps.purchases.models import Purchase
 from apps.sellers.models import Seller
 
-from .models import CashEntry, CashRequest, CountOutcome, StockCount, StockCountLine
+from .models import CashEntry, CountOutcome, StockCount, StockCountLine
 
 
 def _reason(**kwargs):
@@ -31,7 +30,7 @@ class CashStoreSerializer(serializers.Serializer):
     closing = serializers.DecimalField(**MONEY, help_text="Owed at the end of the period.")
     owed = serializers.DecimalField(**MONEY, help_text="Owed now.")
     last_handover_at = serializers.DateTimeField(allow_null=True)
-    pending_requests = serializers.IntegerField()
+    price_changes = serializers.IntegerField(help_text="Prices changed and goods added.")
     open_counts = serializers.IntegerField(help_text="Stock counts still to be explained.")
     open_missing = serializers.DecimalField(**MONEY, help_text="The missing goods' value.")
     last_count_at = serializers.DateTimeField(allow_null=True)
@@ -55,6 +54,22 @@ class CashOverviewSerializer(serializers.Serializer):
 class CashStoreDetailSerializer(CashStoreSerializer):
     currency = serializers.CharField()
     daily = CashDaySerializer(many=True)
+
+
+class PriceChangeSerializer(serializers.Serializer):
+    """A good's price changed, or a good added (`old_price` null)."""
+
+    id = serializers.IntegerField()
+    good = serializers.IntegerField()
+    good_name = serializers.CharField()
+    seller = serializers.IntegerField()
+    seller_name = serializers.CharField()
+    track_stock = serializers.BooleanField()
+    old_price = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    new_price = serializers.DecimalField(max_digits=12, decimal_places=2)
+    by = serializers.CharField()
+    by_store = serializers.BooleanField(help_text="By someone who works for the store.")
+    created_at = serializers.DateTimeField()
 
 
 class CashEntrySerializer(serializers.ModelSerializer):
@@ -111,77 +126,6 @@ class HandoverSerializer(serializers.Serializer):
 
 class ReasonSerializer(serializers.Serializer):
     reason = _reason()
-
-
-class DecisionSerializer(serializers.Serializer):
-    note = _reason(required=False, allow_blank=True, default="")
-
-
-class RejectionSerializer(serializers.Serializer):
-    note = _reason(help_text="Why not.")
-
-
-@extend_schema_field(OpenApiTypes.INT)
-class PurchaseField(serializers.PrimaryKeyRelatedField):
-    def get_queryset(self):
-        return self.context.get("purchases", Purchase.objects.none())
-
-
-class DeletionRequestSerializer(serializers.Serializer):
-    purchase = PurchaseField()
-    reason = _reason()
-
-
-class CashRequestSerializer(serializers.ModelSerializer):
-    seller_name = serializers.CharField(source="seller.name", read_only=True)
-    good_name = serializers.CharField(source="good.name", read_only=True, default=None)
-    store_number = serializers.IntegerField(
-        source="purchase.store_number", read_only=True, default=None
-    )
-    total = serializers.DecimalField(source="purchase.total", read_only=True, default=None, **MONEY)
-    buyer_name = serializers.CharField(source="purchase.buyer_name", read_only=True, default=None)
-    paid_at = serializers.DateTimeField(
-        source="purchase.confirmed_at", read_only=True, default=None
-    )
-    sold_by = serializers.CharField(
-        source="purchase.confirmed_by.username", read_only=True, default=None
-    )
-    track_stock = serializers.BooleanField(source="good.track_stock", read_only=True, default=None)
-    requested_by_username = serializers.CharField(
-        source="requested_by.username", read_only=True, default=None
-    )
-    decided_by_username = serializers.CharField(
-        source="decided_by.username", read_only=True, default=None
-    )
-
-    class Meta:
-        model = CashRequest
-        fields = [
-            "id",
-            "kind",
-            "status",
-            "seller",
-            "seller_name",
-            "purchase",
-            "store_number",
-            "total",
-            "buyer_name",
-            "paid_at",
-            "sold_by",
-            "good",
-            "good_name",
-            "track_stock",
-            "old_price",
-            "new_price",
-            "reason",
-            "requested_by",
-            "requested_by_username",
-            "decided_by_username",
-            "decided_at",
-            "decision_note",
-            "created_at",
-        ]
-        read_only_fields = fields
 
 
 class SheetQuerySerializer(serializers.Serializer):

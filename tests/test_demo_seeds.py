@@ -1,4 +1,5 @@
 import io
+from datetime import timedelta
 
 import pytest
 from django.core.management import CommandError, call_command
@@ -8,8 +9,10 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.rbac import Roles
+from apps.audit.models import AuditLog
+from apps.cash import reports
 from apps.cash import services as cash
-from apps.cash.models import CashEntry, CashRequest, StockCount
+from apps.cash.models import CashEntry, StockCount
 from apps.goods import services as goods
 from apps.goods.models import Good
 from apps.purchases.models import Purchase
@@ -66,7 +69,7 @@ def _prices():
 
 def test_seed_cash_and_undo(cash_shop):
     stock, prices = _stock(), _prices()
-    call_command("seed_cash", stdout=io.StringIO())
+    call_command("seed_cash", "--days", "10", "--per-day", "5", stdout=io.StringIO())
     cash_shop.refresh_from_db()
     assert cash_shop.accepts_cash and _stock() == stock  # books are checked by the command
     assert Purchase.objects.filter(payment="CASH", status="CONFIRMED").count() > 10
@@ -78,8 +81,10 @@ def test_seed_cash_and_undo(cash_shop):
         "MISSING",
     }
     assert CashEntry.objects.filter(reverses__isnull=False).count() == 1
-    waiting = CashRequest.objects.filter(status="PENDING").values_list("kind", flat=True)
-    assert sorted(waiting) == ["DELETE_SALE", "NEW_GOOD", "PRICE"]
+    today = timezone.localdate()
+    changes = reports.price_changes(Seller.objects.all(), today - timedelta(days=10), today)
+    seeded = AuditLog.objects.filter(request_id="seed-cash").values_list("pk", flat=True)
+    assert len(seeded) == 4 and set(seeded) <= {c["id"] for c in changes}
     assert set(StockCount.objects.values_list("outcome", flat=True)) == {
         "EXPLAINED",
         "CHARGED",
@@ -94,17 +99,18 @@ def test_seed_cash_and_undo(cash_shop):
     call_command("seed_cash", "--undo", stdout=io.StringIO())
     cash_shop.refresh_from_db()
     assert not cash_shop.accepts_cash and _stock() == stock and _prices() == prices
-    for model in (CashEntry, CashRequest, StockCount, Purchase):
+    for model in (CashEntry, StockCount, Purchase):
         assert not model.objects.exists()
-    call_command("seed_cash", stdout=io.StringIO())  # and again
+    assert not AuditLog.objects.filter(request_id="seed-cash").exists()
+    call_command("seed_cash", "--days", "7", "--per-day", "2", stdout=io.StringIO())  # and again
 
 
 def test_undoing_seeded_cash_after_people_used_it(cash_shop):
     stock, prices = _stock(), _prices()
-    call_command("seed_cash", stdout=io.StringIO())
+    call_command("seed_cash", "--days", "8", "--per-day", "3", stdout=io.StringIO())
     fin = User.objects.get(username="fin")
-    for wish in CashRequest.objects.filter(status="PENDING"):
-        cash.approve(actor=fin, request=wish)
+    sale = Purchase.objects.filter(status="CONFIRMED").first()
+    cash.delete_sale(actor=fin, purchase=sale, reason="x")
     count = StockCount.objects.get(outcome="OPEN")
     cash.resolve_count(actor=fin, count=count, outcome="CHARGED", note="x")
     handed = CashEntry.objects.filter(kind="HANDOVER", reversal=None, reverses=None).first()

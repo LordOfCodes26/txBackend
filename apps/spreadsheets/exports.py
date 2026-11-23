@@ -706,9 +706,9 @@ def preferential_workbook(rows: list[dict], first: date, last: date) -> bytes:
 
 def cash_workbook(sellers, first: date, last: date) -> bytes:
     """Cash control as a workbook: the stores, each store's days, every cash entry, the
-    requests and the stock counts of the period."""
+    price changes and the stock counts of the period."""
     from apps.cash import reports
-    from apps.cash.models import CashEntry, CashRequest, StockCountLine
+    from apps.cash.models import CashEntry, StockCountLine
     from apps.sellers.models import Seller
 
     start, end = _local_bounds(first, last)
@@ -739,11 +739,7 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
         .select_related("seller", "actor")
         .order_by("id")
     )
-    requests = (
-        CashRequest.objects.filter(seller__in=sellers, **during)
-        .select_related("seller", "purchase", "good", "requested_by", "decided_by")
-        .order_by("id")
-    )
+    changes = reports.price_changes(sellers, first, last)
     lines = (
         StockCountLine.objects.filter(
             count__seller__in=sellers, count__created_at__gte=start, count__created_at__lt=end
@@ -761,7 +757,7 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                     *figure_columns,
                     money("closing", _("Owed at the end")),
                     money("owed", _("Owed now")),
-                    Column("pending", _("Waiting for approval"), width=12, kind="int"),
+                    Column("changes", _("Price changes"), width=12, kind="int"),
                     money("missing", _("Missing goods to explain")),
                 ],
                 [
@@ -771,7 +767,7 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                         *(r[k] for k in figures),
                         r["closing"],
                         r["owed"],
-                        r["pending_requests"],
+                        r["price_changes"],
                         r["open_missing"],
                     ]
                     for r in rows
@@ -814,37 +810,25 @@ def cash_workbook(sellers, first: date, last: date) -> bytes:
                 ],
             ),
             Sheet(
-                _("Requests"),
+                _("Price changes"),
                 [
                     when,
                     store,
-                    Column("kind", _("Kind"), width=18),
-                    Column("status", _("Status"), width=12),
-                    Column("what", _("What"), width=24),
+                    Column("good", _("Good"), width=24),
                     money("old", _("Old price")),
                     money("new", _("New price")),
-                    money("total", _("Total")),
-                    Column("reason", _("Reason"), width=30),
-                    Column("asked", _("Asked by"), width=16),
-                    Column("decided", _("Decided by"), width=16),
-                    note,
+                    by,
                 ],
                 [
                     [
-                        _local(r.created_at),
-                        r.seller.name,
-                        str(CASH_REQUEST.get(r.kind, r.kind)),
-                        str(CASH_REQUEST_STATUS.get(r.status, r.status)),
-                        r.good.name if r.good else f"#{r.purchase.store_number}",
-                        r.old_price,
-                        r.new_price,
-                        r.purchase.total if r.purchase else None,
-                        r.reason,
-                        r.requested_by.username if r.requested_by else None,
-                        r.decided_by.username if r.decided_by else None,
-                        r.decision_note,
+                        _local(c["created_at"]),
+                        c["seller_name"],
+                        c["good_name"],
+                        c["old_price"],
+                        c["new_price"],
+                        c["by"],
                     ]
-                    for r in requests
+                    for c in changes
                 ],
             ),
             Sheet(
@@ -888,17 +872,6 @@ CASH_KIND = {
     "RETURN": _("Cash returned"),
     "HANDOVER": _("Handed over"),
     "MISSING": _("Missing goods charged"),
-}
-CASH_REQUEST = {
-    "DELETE_SALE": _("Delete a cash sale"),
-    "PRICE": _("New price"),
-    "NEW_GOOD": _("New good"),
-}
-CASH_REQUEST_STATUS = {
-    "PENDING": _("Waiting for approval"),
-    "APPROVED": _("Approved"),
-    "REJECTED": _("Rejected"),
-    "WITHDRAWN": _("Withdrawn"),
 }
 CASH_OUTCOME = {
     "MATCHED": _("Nothing missing"),

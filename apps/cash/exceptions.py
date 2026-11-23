@@ -18,9 +18,9 @@ class CashSaleFixed(CashConflict):
     default_detail = _("A cash sale can't be changed. Ask finance to delete it and sell again.")
 
 
-class CashDeleteNeedsApproval(CashConflict):
-    code = "CASH_DELETE_NEEDS_APPROVAL"
-    default_detail = _("Finance must approve deleting a cash sale. Send a request with a reason.")
+class CashDeletedByFinance(CashConflict):
+    code = "CASH_DELETED_BY_FINANCE"
+    default_detail = _("Only finance can delete a cash sale. Tell them why.")
 
 
 class CashStoreLocked(DomainError):
@@ -35,20 +35,10 @@ class OwnStore(DomainError):
     default_detail = _("You work for this store, so someone else must do this.")
 
 
-class OwnRequest(DomainError):
+class OwnSale(DomainError):
     status_code = status.HTTP_403_FORBIDDEN
-    code = "OWN_REQUEST"
-    default_detail = _("You can't approve your own request or your own sale.")
-
-
-class RequestClosed(CashConflict):
-    code = "REQUEST_CLOSED"
-    default_detail = _("This request was already decided.")
-
-
-class AlreadyRequested(CashConflict):
-    code = "ALREADY_REQUESTED"
-    default_detail = _("This is already waiting for approval.")
+    code = "OWN_SALE"
+    default_detail = _("You took the cash for this sale, so someone else must delete it.")
 
 
 class NotReversible(CashConflict):
@@ -64,8 +54,3 @@ class StockMoved(CashConflict):
 class CountResolved(CashConflict):
     code = "COUNT_RESOLVED"
     default_detail = _("This stock count has nothing left to explain.")
-
-
-class AwaitingApproval(CashConflict):
-    code = "AWAITING_APPROVAL"
-    default_detail = _("Finance must approve this good's price before it goes on sale.")
