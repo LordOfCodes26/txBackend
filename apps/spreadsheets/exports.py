@@ -268,6 +268,9 @@ def finance_stats_workbook(
         first, last, chosen_buildings(user, "finance.stats.view", building), deposit_type
     )
     money = stats["money"]
+    total_sales = Decimal(money["store_sales"]["sales_total"]) + Decimal(
+        money["store_sales"]["bookings_total"]
+    )
     label, value = Column("label", _("Figure"), width=28), Column("value", _("Value"), width=18)
     summary = [
         [str(_("From")), first.isoformat()],
@@ -280,13 +283,22 @@ def finance_stats_workbook(
         ],
         [str(_("Spending")), Decimal(money["spending"]["total"])],
         [str(_("Payment count")), money["spending"]["count"]],
+        [str(_("Total sales")), total_sales],
+        [str(_("Card sales (to pay)")), total_sales - Decimal(money["store_sales"]["cash_total"])],
         [str(_("Cash sales")), Decimal(money["store_sales"]["cash_total"])],
         [str(_("Cash sales count")), money["store_sales"]["cash_count"]],
         [str(_("In minus now")), Decimal(money["minus"]["total"])],
         [str(_("Wallets in minus")), money["minus"]["count"]],
     ]
     daily = [
-        [date.fromisoformat(d["date"]), d.get("deposits"), d.get("spending")]
+        [
+            date.fromisoformat(d["date"]),
+            d.get("deposits"),
+            d.get("spending"),
+            d["card_sales"],
+            d["cash_sales"],
+            Decimal(d["card_sales"]) + Decimal(d["cash_sales"]),
+        ]
         for d in money.get("daily", [])
     ]
     sellers = [
@@ -358,6 +370,9 @@ def finance_stats_workbook(
                     Column("date", _("Date"), width=12, kind="date"),
                     cash("deposits", _("Deposits")),
                     cash("spending", _("Spending")),
+                    cash("card_sales", _("Card sales")),
+                    cash("cash_sales", _("Cash sales")),
+                    cash("total_sales", _("Total sales")),
                 ],
                 daily,
             ),

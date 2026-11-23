@@ -1942,3 +1942,9 @@ msgstr "카드판매 (지급할 금액)"
 
 msgid "Card sales count"
 msgstr "카드판매 건수"
+
+msgid "Total sales"
+msgstr "판매 합계"
+
+msgid "Card sales"
+msgstr "카드판매"

@@ -491,6 +491,13 @@ def test_figures_split_cash_and_wallet(till, shop, make_user, finance_client, ad
     stats = finance_client.get("/api/v1/stats/finance/").json()
     assert stats["money"]["store_sales"]["cash_total"] == "5.00"
     assert stats["money"]["spending"]["total"] == "4.00"  # wallets only
+    days = stats["money"]["daily"]
+    assert (days[-1]["card_sales"], days[-1]["cash_sales"]) == ("4.00", "5.00")
+    assert (days[0]["card_sales"], days[0]["cash_sales"]) == ("0.00", "0.00")
+    book = load_workbook(io.BytesIO(finance_client.get("/api/v1/exports/finance-stats/").content))
+    figures = {r[0]: r[1] for r in book["Summary"].values}
+    assert (figures["Total sales"], figures["Card sales (to pay)"]) == (9, 4)
+    assert list(book["Daily"].values)[-1][3:] == (4, 5, 9)
     row = next(s for s in stats["sellers"] if s["name"] == "Cafe")
     assert (row["sales_total"], row["cash_total"]) == ("9.00", "5.00")
     assert [(p["cash"], p["total"]) for p in row["by_building"]] == [

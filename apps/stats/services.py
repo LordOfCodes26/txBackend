@@ -164,11 +164,24 @@ def money(
             spending=Sum("amount", filter=SPENDING),
         )
     }
+    sold = {
+        row["day"]: row
+        for row in sales.annotate(day=TruncDate("confirmed_at", tzinfo=start.tzinfo))
+        .order_by()
+        .values("day")
+        .annotate(
+            card=Sum("total", filter=Q(payment=Payment.WALLET)),
+            cash=Sum("total", filter=Q(payment=Payment.CASH)),
+        )
+    }
     daily = [
         {
             "date": day.isoformat(),
             "deposits": _money(per_day.get(day, {}).get("deposits")),
             "spending": _money(-(per_day.get(day, {}).get("spending") or ZERO)),
+            # What the stores sold (till sales and court bookings), by how it was paid.
+            "card_sales": _money(sold.get(day, {}).get("card")),
+            "cash_sales": _money(sold.get(day, {}).get("cash")),
         }
         for day in _days(first, last)
     ]

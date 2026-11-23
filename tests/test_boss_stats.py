@@ -143,7 +143,13 @@ def test_money(boss_client, make_user):
     assert body["spending"] == {"total": "30.00", "count": 1}
     today = [d for d in body["daily"] if d["date"] == timezone.localdate().isoformat()]
     assert today == [
-        {"date": timezone.localdate().isoformat(), "deposits": "100.00", "spending": "30.00"}
+        {
+            "date": timezone.localdate().isoformat(),
+            "deposits": "100.00",
+            "spending": "30.00",
+            "card_sales": "0.00",  # a wallet movement, but no store's sale
+            "cash_sales": "0.00",
+        }
     ]
     assert "sellers" not in body
 
