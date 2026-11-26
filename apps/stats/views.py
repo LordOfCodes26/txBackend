@@ -5,13 +5,14 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.rfid.scope import building_scope
 from common.permissions import HasPermissions
 
-from .services import company_stats, finance_stats
+from .services import company_stats, finance_stats, seller_comparison
 
 MAX_DAYS = 366
 
@@ -103,4 +104,32 @@ class FinanceStatsView(APIView):
         buildings = chosen_buildings(request.user, "finance.stats.view", data.get("building"))
         return Response(
             finance_stats(data["date_from"], data["date_to"], buildings, data.get("deposit_type"))
+        )
+
+
+class SellerFinanceStatsView(APIView):
+    """One seller's row of the finance dashboard (`finance.stats.view`): sales, bookings
+    and what was sold into minus (wallets taken below zero), also per sale position, for a
+    period of company-local days. Building owners: sales to their buildings' developers."""
+
+    permission_classes = [HasPermissions]
+    required_permissions = {"get": ["finance.stats.view"]}
+
+    @extend_schema(parameters=[PeriodSerializer], responses=OpenApiTypes.OBJECT)
+    def get(self, request, pk: int):
+        period = PeriodSerializer(data=request.query_params)
+        period.is_valid(raise_exception=True)
+        data = period.validated_data
+        buildings = building_scope(request.user, "finance.stats.view")
+        rows = seller_comparison(data["date_from"], data["date_to"], buildings, seller=pk)
+        if not rows:
+            raise NotFound()
+        return Response(
+            {
+                "period": {
+                    "date_from": data["date_from"].isoformat(),
+                    "date_to": data["date_to"].isoformat(),
+                },
+                **rows[0],
+            }
         )

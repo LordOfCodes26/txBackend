@@ -295,9 +295,10 @@ def test_a_fix_counts_on_the_wrong_deposits_date(auth_client, make_user, site): 
     ]
 
 
-def test_sold_into_minus_per_seller_and_position(auth_client, make_user, site):  # noqa: F811
-    """Only the part of a sale that took the wallet below zero counts, at the position
-    that sold it. Ada has 45.00 left after the fixture's sales."""
+def _sell_into_minus(site):  # noqa: F811
+    """Ada has 45.00 left after the fixture's sales; with a 100.00 minus limit she buys
+    60.00 at Cafe B2 (45 → -15: 15.00 into minus), 20.00 at Cafe B1 (→ -35: 20.00) and
+    4.00 at Shop B1 (→ -39: 4.00)."""
     from django.db import transaction
     from django.utils import timezone
 
@@ -330,7 +331,12 @@ def test_sold_into_minus_per_seller_and_position(auth_client, make_user, site): 
                 account_transaction=txn,
                 confirmed_at=timezone.now(),
             )
-    # 45 → -15 (15.00 into minus at Cafe B2), → -35 (20.00 at Cafe B1), → -39 (4.00 at Shop B1)
+
+
+def test_sold_into_minus_per_seller_and_position(auth_client, make_user, site):  # noqa: F811
+    """Only the part of a sale that took the wallet below zero counts, at the position
+    that sold it."""
+    _sell_into_minus(site)
     sellers = by_name(auth_client(make_user(Roles.FINANCE_MANAGER)).get(FINANCE_STATS).json())
     cafe, shop = sellers["Cafe"], sellers["Shop"]
     assert (cafe["minus_total"], cafe["minus_count"]) == ("35.00", 2)
@@ -340,3 +346,21 @@ def test_sold_into_minus_per_seller_and_position(auth_client, make_user, site): 
     assert (positions["Cafe B2"]["minus_total"], positions["Cafe B2"]["minus_count"]) == ("15.00", 1)
     # The earlier sales, made with money in the wallet, are not counted.
     assert (positions["Cafe B1"]["total"], positions["Cafe B1"]["count"]) == ("30.00", 2)
+
+
+def test_one_seller_stats(auth_client, make_user, site):  # noqa: F811
+    """The seller page's figures: the same row as on the dashboard, for one seller."""
+    _sell_into_minus(site)
+    client = auth_client(make_user(Roles.FINANCE_MANAGER))
+    body = client.get(f"{FINANCE_STATS}sellers/{site.cafe.pk}/").json()
+    assert body["name"] == "Cafe" and body["period"]["date_to"]
+    assert (body["minus_total"], body["minus_count"]) == ("35.00", 2)
+    assert [p["name"] for p in body["by_position"]] == ["Cafe B1", "Cafe B2"]
+    # A seller that sold nothing in the period still has its (empty) row.
+    from apps.sellers.models import Seller
+
+    idle = Seller.objects.create(name="Idle")
+    empty = client.get(f"{FINANCE_STATS}sellers/{idle.pk}/").json()
+    assert (empty["minus_total"], empty["by_position"]) == ("0.00", [])
+    assert client.get(f"{FINANCE_STATS}sellers/999999/").status_code == 404
+    assert auth_client(make_user(Roles.MANAGER)).get(f"{FINANCE_STATS}sellers/{site.cafe.pk}/").status_code == 403

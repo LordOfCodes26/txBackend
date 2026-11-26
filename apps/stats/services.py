@@ -282,19 +282,24 @@ def _bought_in(buildings) -> Q:
     )
 
 
-def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
+def seller_comparison(first: date, last: date, buildings=None, seller=None) -> list[dict]:
     """Per seller (store), for the finance dashboard: store sales and bookings in the
     period, and how much of them was sold into minus (wallets taken below zero), also per
     sale position. Limited to `buildings` by the BUYER: what developers of those buildings bought,
-    at any store (the stores they bought from)."""
+    at any store (the stores they bought from). `seller`: that one seller only (its row
+    even when nothing was sold)."""
     start, end = _local_bounds(first, last)
     sellers = Seller.objects.all()
     sales = Purchase.objects.filter(
         status=PurchaseStatus.CONFIRMED, confirmed_at__gte=start, confirmed_at__lt=end
     )
+    if seller is not None:
+        sellers = sellers.filter(pk=seller)
+        sales = sales.filter(seller=seller)
     if buildings is not None:
         sales = sales.filter(_bought_in(buildings))
-        sellers = sellers.filter(pk__in=sales.values("seller"))
+        if seller is None:
+            sellers = sellers.filter(pk__in=sales.values("seller"))
 
     sold = {
         row["seller"]: row
