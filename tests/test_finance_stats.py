@@ -293,3 +293,50 @@ def test_a_fix_counts_on_the_wrong_deposits_date(auth_client, make_user, site): 
         "10.00",
         "100.00",
     ]
+
+
+def test_sold_into_minus_per_seller_and_position(auth_client, make_user, site):  # noqa: F811
+    """Only the part of a sale that took the wallet below zero counts, at the position
+    that sold it. Ada has 45.00 left after the fixture's sales."""
+    from django.db import transaction
+    from django.utils import timezone
+
+    from apps.finance import services as finance
+    from apps.finance.models import DeveloperAccount, TransactionKind, WalletSettings
+    from apps.purchases.models import Purchase, PurchaseKind
+
+    settings = WalletSettings.current()
+    settings.minus_limit = Decimal("100.00")
+    settings.save()
+    account = DeveloperAccount.objects.get(developer=site.ada)
+    for position, total in [(site.cafe2, "60.00"), (site.cafe1, "20.00"), (site.shop1, "4.00")]:
+        with transaction.atomic():
+            txn = finance.post_transaction(
+                account=account,
+                kind=TransactionKind.PURCHASE,
+                amount=-Decimal(total),
+                actor=None,
+                description="t",
+                reference="t",
+                allow_minus=True,
+            )
+            Purchase.objects.create(
+                seller=position.seller,
+                service_position=position,
+                kind=PurchaseKind.SALE,
+                status="CONFIRMED",
+                developer=site.ada,
+                total=Decimal(total),
+                account_transaction=txn,
+                confirmed_at=timezone.now(),
+            )
+    # 45 → -15 (15.00 into minus at Cafe B2), → -35 (20.00 at Cafe B1), → -39 (4.00 at Shop B1)
+    sellers = by_name(auth_client(make_user(Roles.FINANCE_MANAGER)).get(FINANCE_STATS).json())
+    cafe, shop = sellers["Cafe"], sellers["Shop"]
+    assert (cafe["minus_total"], cafe["minus_count"]) == ("35.00", 2)
+    assert (shop["minus_total"], shop["minus_count"]) == ("4.00", 1)
+    positions = {p["name"]: p for p in cafe["by_position"]}
+    assert (positions["Cafe B1"]["minus_total"], positions["Cafe B1"]["minus_count"]) == ("20.00", 1)
+    assert (positions["Cafe B2"]["minus_total"], positions["Cafe B2"]["minus_count"]) == ("15.00", 1)
+    # The earlier sales, made with money in the wallet, are not counted.
+    assert (positions["Cafe B1"]["total"], positions["Cafe B1"]["count"]) == ("30.00", 2)

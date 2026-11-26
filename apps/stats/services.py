@@ -11,8 +11,8 @@ buildings; seller-wide money only for stores whose positions are all in them).
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from django.db.models import Avg, Count, Q, Sum
-from django.db.models.functions import Coalesce, TruncDate
+from django.db.models import Avg, Count, DecimalField, F, Q, Sum, Value
+from django.db.models.functions import Coalesce, Greatest, TruncDate
 from django.utils import timezone
 
 from apps.attendance.models import DailyAttendance
@@ -26,6 +26,16 @@ from apps.sellers.models import Seller
 ZERO = Decimal("0.00")
 # Money spent: purchases less what was refunded (paid purchases changed or deleted).
 SPENDING = Q(kind__in=(TransactionKind.PURCHASE, TransactionKind.REFUND))
+# The part of a card sale or booking that took the buyer's wallet below zero, as paid:
+# how far below zero after it, less how far below zero it already was before it.
+_DEC = DecimalField(max_digits=14, decimal_places=2)
+INTO_MINUS = Greatest(
+    Value(ZERO, output_field=_DEC), -F("account_transaction__balance_after"), output_field=_DEC
+) - Greatest(
+    Value(ZERO, output_field=_DEC),
+    F("account_transaction__amount") - F("account_transaction__balance_after"),
+    output_field=_DEC,
+)
 
 
 def _days(first: date, last: date) -> list[date]:
@@ -274,7 +284,8 @@ def _bought_in(buildings) -> Q:
 
 def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
     """Per seller (store), for the finance dashboard: store sales and bookings in the
-    period. Limited to `buildings` by the BUYER: what developers of those buildings bought,
+    period, and how much of them was sold into minus (wallets taken below zero), also per
+    sale position. Limited to `buildings` by the BUYER: what developers of those buildings bought,
     at any store (the stores they bought from)."""
     start, end = _local_bounds(first, last)
     sellers = Seller.objects.all()
@@ -298,6 +309,34 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             cash_count=Count("pk", filter=Q(payment=Payment.CASH)),
         )
     }
+    # Per sale position: what it sold and what of it went into minus.
+    minus_sales = Q(account_transaction__isnull=False, account_transaction__balance_after__lt=0)
+    positions = {}
+    for row in (
+        sales.order_by()
+        .values("seller", "service_position", "service_position__name")
+        .annotate(
+            all_total=Sum("total"),
+            all_count=Count("pk"),
+            cash_sum=Sum("total", filter=Q(payment=Payment.CASH)),
+            cash_n=Count("pk", filter=Q(payment=Payment.CASH)),
+            minus_sum=Sum(INTO_MINUS, filter=minus_sales),
+            minus_n=Count("pk", filter=minus_sales),
+        )
+        .order_by("service_position__name")
+    ):
+        positions.setdefault(row["seller"], []).append(
+            {
+                "id": row["service_position"],
+                "name": row["service_position__name"],
+                "total": _money(row["all_total"]),
+                "count": row["all_count"],
+                "cash_total": _money(row["cash_sum"]),
+                "cash_count": row["cash_n"],
+                "minus_total": _money(row["minus_sum"]),
+                "minus_count": row["minus_n"],
+            }
+        )
     # Each seller's sales and bookings split by the buyer's home building (`building` null:
     # buyers without one); cash sales, whose buyer is not known, are a part of their own.
     split = {}
@@ -330,6 +369,11 @@ def seller_comparison(first: date, last: date, buildings=None) -> list[dict]:
             "bookings_count": s.get("bookings_count", 0),
             "cash_total": _money(s.get("cash_total")),
             "cash_count": s.get("cash_count", 0),
+            "minus_total": _money(
+                sum((Decimal(p["minus_total"]) for p in positions.get(seller.pk, [])), ZERO)
+            ),
+            "minus_count": sum(p["minus_count"] for p in positions.get(seller.pk, [])),
+            "by_position": positions.get(seller.pk, []),
             "by_building": [
                 {
                     "building": part["developer__building"],

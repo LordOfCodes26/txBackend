@@ -310,6 +310,8 @@ def finance_stats_workbook(
             s["bookings_total"],
             s["bookings_count"],
             Decimal(s["sales_total"]) + Decimal(s["bookings_total"]),
+            s["minus_total"],
+            s["minus_count"],
         ]
         for s in stats["sellers"]
     ]
@@ -386,6 +388,8 @@ def finance_stats_workbook(
                     cash("bookings", _("Court bookings")),
                     count("bookings_count", _("Booking count")),
                     cash("total", _("Total")),
+                    cash("minus", _("Sold into minus")),
+                    count("minus_count", _("Sales into minus")),
                 ],
                 sellers,
             ),

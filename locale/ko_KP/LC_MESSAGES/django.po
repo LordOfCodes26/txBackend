@@ -1948,3 +1948,9 @@ msgstr "판매 합계"
 
 msgid "Card sales"
 msgstr "카드판매"
+
+msgid "Sold into minus"
+msgstr "마이너스 판매"
+
+msgid "Sales into minus"
+msgstr "마이너스 판매 건수"
